@@ -2,11 +2,14 @@ title: 剑与魔法
 description: Kzeroko‘s modpack site
 theme: just-the-docs
 color_scheme: dark
+search_enabled: false
+search.button: false
 
 url: https://kzeroko.github.io
 
 aux_links:
   "爱发电": "https://afdian.net/a/kzeroko"
   "QQ群聊": "https://qm.qq.com/q/WYJzKMvpyq"
+  "bilibili": "https://space.bilibili.com/20218494"
 
 aux_links_new_tab: true
