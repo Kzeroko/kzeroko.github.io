@@ -1,6 +1,9 @@
 ---
 title: 主页
 layout: home
+nav_order: 1
+description: "剑与魔法主页"
+permalink: /
 ---
 
 <div align="center"> <img src="img/misc/kzeroko.png" alt="kzeroko" /> </div>
