@@ -5,7 +5,7 @@ layout: home
 
 <div align="center"> <img src="img/misc/kzeroko.png" alt="kzeroko" /> </div>
 
-Kzeroko
+Kzeroko的MC工坊
 {: .fs-7 .text-center }
 
 <hr />
