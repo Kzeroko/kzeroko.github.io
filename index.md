@@ -3,9 +3,9 @@ title: 主页
 layout: home
 ---
 
-<div align="center"><img src="img/misc/kzeroko_1.png" alt="Kzeroko_1" height="256" />
+<div align="center"><img src="img/misc/kzeroko_1.png" alt="Kzeroko_1" height="256" /> </div>
 
-Kzeroko{: .fs-7 } </div>
+Kzeroko{: .fs-7 .text-center }
 
 <hr />
 
