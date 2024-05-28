@@ -1,13 +1,12 @@
 title: Kzeroko
 description: Kzeroko site
 theme: just-the-docs
+color_scheme: dark
 
 url: https://kzeroko.github.io
 
 aux_links:
   "爱发电": "https://afdian.net/a/kzeroko"
-  "爱发电2": "https://afdian.net/a/kzeroko"
+  "QQ群聊": "http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=-pxIr_nLpnbGES3w32EntK9mJZC3Fd9N&authKey=cUuriddc5jKYynFQVjWdMxM%2BzZVCZ4bHkz1xoariZurkzMiVQYSpLSvuqlpaEMwl&noverify=0&group_code=740744150"
 
 aux_links_new_tab: false
-
-color_scheme: dark
