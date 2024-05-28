@@ -3,9 +3,13 @@ title: 主页
 layout: home
 ---
 
-# 新网站，内容还在搭建中……
+<div align="center"><img src="img/misc/kzeroko_1.png" alt="Kzeroko_1" height="256" />
 
-## 下面是新的下载地址
+Kzeroko{: .fs-7 } </div>
+
+<hr />
+
+↓ 整合包资源下载 ↓
 
 [夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e){: .btn .btn-blue }
 
