@@ -9,4 +9,4 @@ layout: home
 
 [夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e){: .btn .btn-blue } 
 
-#### <div align="left"> 提取码：tjiA </div>
+#### 提取码：tjiA
