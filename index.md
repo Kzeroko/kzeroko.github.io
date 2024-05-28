@@ -7,7 +7,6 @@ layout: home
 
 ## 下面是新的下载地址
 
-[夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e)
-{: .btn .btn-blue }
+[夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e){: .btn .btn-blue }
 
 #### 提取码：tjiA
