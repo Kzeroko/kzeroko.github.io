@@ -9,7 +9,7 @@ layout: home
 
 [夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e)
 {: .btn .btn-blue }
-{: .mx-auto }
+{: .flex-justify-center }
 
 #### 提取码：tjiA
-{: .mx-auto }
+{: .flex-justify-center }
