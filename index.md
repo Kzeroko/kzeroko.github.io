@@ -16,7 +16,7 @@ Kzeroko的MC工坊
 ↓ 整合包资源下载 ↓
 
 <span class="fs-4">
-[夸克网盘下载](https://pan.quark.cn/s/9f855b359a1e){: .btn .btn-blue }
+[百度网盘下载](https://pan.baidu.com/s/15E2j3L8acq-5yzSITOvxng){: .btn .btn-blue }
 </span>
 
-提取码：`tjiA`
+提取码：`oper`
