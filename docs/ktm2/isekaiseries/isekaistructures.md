@@ -6,6 +6,6 @@ nav_order: 5
 permalink: /ktm2/ktm2modpack/isekaistructures
 ---
 
-# Isekai Structures (异界结构)
+# 🏘️Isekai Structures (异界结构)
 
 努力码字中…

@@ -6,6 +6,6 @@ nav_order: 2
 permalink: /ktm2/ktm2modpack/isekaiexpansion
 ---
 
-# Isekai Expansion (异界扩展)
+# ⚔️Isekai Expansion (异界扩展)
 
 努力码字中…

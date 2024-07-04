@@ -6,6 +6,6 @@ nav_order: 4
 permalink: /ktm2/ktm2modpack/isekaicuisine
 ---
 
-# Isekai Cuisine (异界佳肴/料理)
+# 🍽️Isekai Cuisine (异界佳肴/料理)
 
 努力码字中…

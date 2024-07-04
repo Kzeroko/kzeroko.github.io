@@ -6,6 +6,6 @@ has_children: true
 permalink: /ktm2/ktm2modpack
 ---
 
-# KenToMahou2 剑与魔法2整合包
+# KenToMahou2 🗡️剑与魔法2🌌整合包
 
 努力码字中…

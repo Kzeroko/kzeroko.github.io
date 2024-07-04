@@ -6,6 +6,6 @@ nav_order: 3
 permalink: /ktm2/ktm2modpack/isekaitweaks
 ---
 
-# Isekai Tweaks (异界修改)
+# 🛠️Isekai Tweaks (异界修改)
 
 努力码字中…
