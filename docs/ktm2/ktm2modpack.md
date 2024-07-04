@@ -1,9 +1,11 @@
 ---
 layout: default
-title: KTM2 modpack
+title: KTM2整合包
 nav_order: 2
 has_children: true
 permalink: /ktm2/ktm2modpack
 ---
 
-# KTM2 modpack
+# KenToMahou2 剑与魔法2整合包
+
+努力码字中…
