@@ -1,11 +1,11 @@
 ---
 layout: default
-title: 正在与后续制作的内容
+title: 未来计划
 parent: KTM2整合包
 nav_order: 7
 permalink: /ktm2/ktm2modpack/wip
 ---
 
-# KTM2中正在与后续制作的内容
+# KTM2的未来计划
 
-此页面就是WIP，WORK IN PROGRESS… 由于KTM2还在制作中，这里没什么内容可写~
+KTM2依然还在制作中。
