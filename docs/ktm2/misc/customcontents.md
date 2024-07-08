@@ -18,6 +18,8 @@ permalink: /ktm2/ktm2modpack/customcontents
 
 ## 新增大量战利品
 
+## 新增大量矿石与合金
+
 ## 宝石熔接
 
 ## 装备技能槽与觉醒
@@ -26,7 +28,15 @@ permalink: /ktm2/ktm2modpack/customcontents
 
 ## 装备锻造
 
+## 神秘炼金台
+
+## 命运值
+
+## 恩宠值
+
 ## 魔法
+
+## 魔法适应性
 
 ## 魔晶石
 
@@ -43,6 +53,10 @@ permalink: /ktm2/ktm2modpack/customcontents
 ## 更好的战斗
 
 ## 新增大量效果
+
+## 新增大量食物与饮品
+
+## 调味料功能
 
 ## 出生点
 
