@@ -16,9 +16,15 @@ permalink: /ktm2/ktm2modpack/customcontents
 
 ## 冒险者公会与冒险者等阶
 
+## 新增大量战利品
+
 ## 宝石熔接
 
 ## 装备技能槽与觉醒
+
+## 物品套装
+
+## 装备锻造
 
 ## 魔法
 
@@ -26,11 +32,17 @@ permalink: /ktm2/ktm2modpack/customcontents
 
 ## 地下城
 
+## 种族、职业与技能
+
 ## 全局建筑结构
 
 ## 回复上的修改
 
 ## 舒适度
+
+## 更好的战斗
+
+## 新增大量效果
 
 ## 出生点
 
