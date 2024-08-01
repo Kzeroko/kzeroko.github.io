@@ -52,6 +52,8 @@ permalink: /ktm2/ktm2modpack/customcontents
 
 ## 更好的战斗
 
+## 攻击限制
+
 ## 新增大量效果
 
 ## 新增大量食物与饮品
