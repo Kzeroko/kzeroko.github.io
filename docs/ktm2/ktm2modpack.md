@@ -10,9 +10,7 @@ permalink: /ktm2/ktm2modpack
 
 KTM2整合包，即剑与魔法2整合包，全称KTM剑与魔法2—厄达斯传奇(KenToMahou 2—The Chronicles Of Urdas)，是我（[@Kzeroko](https://space.bilibili.com/20218494)）正在单人开发中的Minecraft RPG整合包。
 
-{: .note-title }
-> 版本信息
->
-> 1.19.2 Fabric端
+1.19.2 Fabric端
+{: .label .label-green }
 
 KTM2包含了将近500个模组，同时拥有一系列称之为异界系列的自定义模块。
