@@ -22,11 +22,11 @@ permalink: /dcm/dcmmodpack/dcmguns
 
 手枪目前设定为近距离防身用武器，当前共6把手枪类型武器，伤害提升范围为5格。正常交战距离(标注伤害最远距离)为15米与20米
 
-<div align="center"> <img src="img/pistol_intro1.png" alt="pistol_intro1" /> </div>
+![](../../../img/dcm/pistol_intro1.png)
 
 <div align="center"> 图例模拟距离为5米（近距离） </div>
 
-<div align="center"> <img src="img/pistol_intro2.png" alt="pistol_intro2" /> </div>
+![](../../../img/dcm/pistol_intro2.png)
 
 <div align="center"> 图例模拟距离为15米（中近距离） </div>
 
@@ -38,7 +38,7 @@ permalink: /dcm/dcmmodpack/dcmguns
 弹药类型：.50AE
 {: .label .label-yellow }
 
-<div align="center"> <img src="img/deagle_stats.png" alt="deagle_stats" /> </div>
+![](../../../img/dcm/deagle_stats.png)
 
 | 距离（格） |  伤害  |
 |:-----:|:----:|
