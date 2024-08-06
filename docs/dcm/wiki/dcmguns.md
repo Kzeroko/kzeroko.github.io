@@ -38,6 +38,12 @@ permalink: /dcm/dcmmodpack/dcmguns
 弹药类型：.50AE
 {: .label .label-yellow }
 
+护甲穿透：35%
+{: .label .label-red }
+
+爆头伤害：170%
+{: .label .label-red }
+
 ![](../../../img/dcm/deagle_stats.png)
 
 | 距离（格） |  伤害  |
