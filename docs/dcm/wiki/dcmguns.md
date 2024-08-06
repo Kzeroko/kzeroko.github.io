@@ -30,7 +30,7 @@ permalink: /dcm/dcmmodpack/dcmguns
 
 <div align="center"> 图例模拟距离为15米（中近距离） </div>
 
-## T0级手枪（排名不分先后）
+## 🏆T0级手枪（排名不分先后）
 
 ### 沙漠之鹰
 {: .d-inline-block }
@@ -79,7 +79,7 @@ permalink: /dcm/dcmmodpack/dcmguns
 
 相较于沙漠之鹰，伤害增加了`2`点，但是更大的距离衰减与其较小的弹容使得`柯尔特-蟒蛇`只适合用于紧急防身
 
-## T1级手枪（排名不分先后）
+## 🥇T1级手枪（排名不分先后）
 
 ### 黄金沙漠之鹰
 {: .d-inline-block }
@@ -152,7 +152,7 @@ permalink: /dcm/dcmmodpack/dcmguns
 
 精准度与射速略优于`格洛克17`，但无法装配任何配件
 
-## T2级手枪（排名不分先后）
+## 🥈T2级手枪（排名不分先后）
 
 ### CZ-75
 {: .d-inline-block }
@@ -177,3 +177,4 @@ permalink: /dcm/dcmmodpack/dcmguns
 |  ∞    |  3  |
 
 *可全自动射击的9mm手枪
+
