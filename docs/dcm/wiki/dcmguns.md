@@ -24,8 +24,29 @@ permalink: /dcm/dcmmodpack/dcmguns
 
 <div align="center"> <img src="img/pistol_intro1.png" alt="pistol_intro1" /> </div>
 
-<div align="center"> 图例模拟距离为5米 </div>
+<div align="center"> 图例模拟距离为5米（近距离） </div>
 
 <div align="center"> <img src="img/pistol_intro2.png" alt="pistol_intro2" /> </div>
 
-<div align="center"> 图例模拟距离为15米 </div>
+<div align="center"> 图例模拟距离为15米（中近距离） </div>
+
+## T0级手枪分类
+
+### 沙漠之鹰
+{: .d-inline-block }
+
+弹药类型：.50AE
+{: .label .label-yellow }
+
+<div align="center"> <img src="img/deagle_stats.png" alt="deagle_stats" /> </div>
+
+| 距离（格） |  伤害  |
+|:-----:|:----:|
+|   5   |  22  |
+|  20   |  20  |
+|  30   |  16  |
+|  40   |  13  |
+|  50   | 10.5 |
+|  ∞    |  10  |
+
+加伤范围内`+2`伤害，标准伤害范围`20`米
