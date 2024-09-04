@@ -5,13 +5,14 @@ nav_order: 3
 has_children: true
 permalink: /dcm/dcmmodpack
 ---
-
 # DCM DeceasedCraft Modified 哀末工艺魔改版整合包
 
+早在2023年7月开始发现的宝藏整合包DeceasedCraft（by TqLxQuanZ），我选择了较为古早的版本进行后续内容制作，将其改名为DCM DeceasedCraft Modified。由于在多开的情况，现在已经化身年更整合包，在2024年7月改用了TACZ作为主体武器模组。 
 {: .highlight }
-早在2023年7月开始发现的宝藏整合包DeceasedCraft（by TqLxQuanZ），我选择了较为古早的版本进行后续内容制作，将其改名为DCM DeceasedCraft Modified。由于在多开的情况，现在已经化身年更整合包，在2024年7月改用了TACZ作为主体武器模组。
 
 这个整合包的后续主体开发方向为新建筑群落、新枪械与新近战武器，目前已有DCM:Expansion（DCM扩展）为整合包扩展与修改内容。整合包可以在主页的网盘链接内找到~
+
+*当前DCM已经决定迁移至1.20.1且不再使用原版DC的资源。由于KTM2为首要开发目标，DCM的未来更新计划将会无限制延期……
 
 1.18.2 Forge端
 {: .label .label-green }
