@@ -2,7 +2,7 @@
 layout: default
 title: KTM2整合包
 nav_order: 2
-has_toc: false
+has_toc: true
 has_children: true
 permalink: /ktm2/ktm2modpack
 ---
