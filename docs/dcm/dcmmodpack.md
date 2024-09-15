@@ -2,6 +2,7 @@
 layout: default
 title: DCM整合包
 nav_order: 3
+has_toc: false
 has_children: true
 permalink: /dcm/dcmmodpack
 ---
