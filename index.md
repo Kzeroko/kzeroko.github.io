@@ -13,10 +13,4 @@ Kzeroko的MC工坊
 
 <hr />
 
-↓ 整合包资源下载 ↓
-
-<span class="fs-4">
-[百度网盘下载](https://pan.baidu.com/s/15E2j3L8acq-5yzSITOvxng){: .btn .btn-blue }
-</span>
-
-提取码：`oper`
+<div align="center"> 整合包资源下载 → <span class="fs-4">[百度网盘下载](https://pan.baidu.com/s/15E2j3L8acq-5yzSITOvxng){: .btn .btn-blue }</span> 提取码：`oper` </div>
