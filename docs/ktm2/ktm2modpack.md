@@ -4,7 +4,7 @@ title: KTM2整合包
 nav_order: 2
 has_toc: true
 has_children: true
-permalink: /ktm2/ktm2modpack
+permalink: /ktm2
 ---
 
 # KenToMahou2 🗡️剑与魔法2🌌整合包

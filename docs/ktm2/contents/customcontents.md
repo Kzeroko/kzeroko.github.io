@@ -2,8 +2,8 @@
 layout: default
 title: 自定义内容
 parent: KTM2整合包
-nav_order: 6
-permalink: /ktm2/ktm2modpack/customcontents
+nav_order: 2
+permalink: /ktm2/custom-contents
 ---
 
 # ❓KTM2中的自定义内容
