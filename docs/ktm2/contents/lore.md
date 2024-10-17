@@ -3,6 +3,7 @@ layout: default
 title: 背景故事
 parent: KTM2整合包
 nav_order: 3
+has_toc: false
 permalink: /ktm2/lore
 ---
 

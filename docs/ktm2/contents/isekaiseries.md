@@ -3,6 +3,7 @@ layout: default
 title: 异界系列模块
 parent: KTM2整合包
 nav_order: 1
+has_toc: false
 permalink: /ktm2/isekai-series
 ---
 

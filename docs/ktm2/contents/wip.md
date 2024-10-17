@@ -3,6 +3,7 @@ layout: default
 title: 未来计划
 parent: KTM2整合包
 nav_order: 4
+has_toc: false
 permalink: /ktm2/wip
 ---
 

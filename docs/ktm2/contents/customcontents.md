@@ -3,6 +3,7 @@ layout: default
 title: 自定义内容
 parent: KTM2整合包
 nav_order: 2
+has_toc: false
 permalink: /ktm2/custom-contents
 ---
 
