@@ -14,9 +14,11 @@ Kzeroko的MC工坊
 <hr />
 
 <div align="center"> 整合包资源下载 </div>
-<span class="fs-4">
-[百度网盘下载](https://pan.baidu.com/s/15E2j3L8acq-5yzSITOvxng){: .btn .btn-blue .center_button }
-</span>
+<div align="center">
+  <a href="https://pan.baidu.com/s/15E2j3L8acq-5yzSITOvxng" target="_blank">
+    <button type="button" name="download_button" class="btn">百度网盘下载</button>
+  </a>
+</div>
 <div align="center"> 提取码：oper </div>
 
 <br />
