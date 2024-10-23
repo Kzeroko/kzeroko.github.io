@@ -10,13 +10,9 @@ GEM
       eventmachine (>= 0.12.9)
       http_parser.rb (~> 0)
     eventmachine (1.2.7)
-    ffi (1.17.0-arm64-darwin)
-    ffi (1.17.0-x86_64-linux-gnu)
+    ffi (1.17.0-x64-mingw-ucrt)
     forwardable-extended (2.6.0)
-    google-protobuf (4.28.1-arm64-darwin)
-      bigdecimal
-      rake (>= 13)
-    google-protobuf (4.28.1-x86_64-linux)
+    google-protobuf (4.28.2-x64-mingw-ucrt)
       bigdecimal
       rake (>= 13)
     http_parser.rb (0.8.0)
@@ -67,25 +63,22 @@ GEM
     rb-fsevent (0.11.2)
     rb-inotify (0.11.1)
       ffi (~> 1.0)
-    rexml (3.3.7)
-    rouge (4.3.0)
+    rexml (3.3.8)
+    rouge (4.4.0)
     safe_yaml (1.0.5)
-    sass-embedded (1.78.0-arm64-darwin)
-      google-protobuf (~> 4.27)
-    sass-embedded (1.78.0-x86_64-linux-gnu)
-      google-protobuf (~> 4.27)
+    sass-embedded (1.80.3-x64-mingw-ucrt)
+      google-protobuf (~> 4.28)
     terminal-table (3.0.2)
       unicode-display_width (>= 1.1.1, < 3)
     unicode-display_width (2.6.0)
-    webrick (1.8.1)
+    webrick (1.8.2)
 
 PLATFORMS
-  arm64-darwin
-  x86_64-linux-gnu
+  x64-mingw-ucrt
 
 DEPENDENCIES
   jekyll (~> 4.3.4)
   just-the-docs (= 0.10.0)
 
 BUNDLED WITH
-   2.5.9
+   2.5.22
