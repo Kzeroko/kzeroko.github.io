@@ -23,7 +23,7 @@ permalink: /ktm2/lore
 
 [种族词条]({% link docs/ktm2/contents/lore.md %}#种族词条)
 
-[魔法/魔术词条]({% link docs/ktm2/contents/lore.md %}#魔法/魔术词条)
+[魔法/魔术词条]({% link docs/ktm2/contents/lore.md %}#魔法魔术词条)
 
 <hr />
 
