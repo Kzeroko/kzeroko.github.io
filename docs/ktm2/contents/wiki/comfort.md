@@ -116,6 +116,11 @@ permalink: /ktm2/wiki/comfort
 
 多样性系数只对正数舒适度变化生效，负数则直接全额生效
 
+![png](/img/ktm2/wiki/comfort/comfort_demo2.webp){: width="35%" }
+
+食物历史记录会在拿着食物显示在舒适条上方
+{: .text-delta .text-left }
+
 <hr />
 
 ## 📌睡眠与舒适度恢复
