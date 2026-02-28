@@ -5,7 +5,6 @@ import starlight from '@astrojs/starlight';
 // https://astro.build/config
 export default defineConfig({
 	site: 'https://kzeroko.github.io',
-	base: '/master',
 	integrations: [
 		starlight({
 			title: 'My Docs',
