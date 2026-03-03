@@ -1,0 +1,163 @@
+---
+title: Equipment Forging
+description: "Equipment Forging"
+---
+
+# Equipment Forging
+
+Equipment forging is an important way to obtain new equipment unique to KTM2. The entire forging process has no GUI interaction except for viewing the blueprint recipe, presenting a more immersive crafting method.
+
+The types of equipment obtained through forging are roughly weapons, armor, accessories, and main/off-hand bonus items.
+
+Future planned content: compatibility/dependency with the `alloy-forgery` mod, more quality forging hammers, and compatibility with the `blacksmith` profession.
+
+Blacksmith profession compatibility: Equipment forged by blacksmiths has additional item rarity, with a guaranteed rarity and an increased probability.
+
+---
+
+## Basic Operations
+
+Before forging, you need to understand some basic operations.
+
+This is also explained in the following [Basics] section.
+
+When holding materials:
+
+- Right-click on the top of the anvil to place a single material.
+- Right-click on other faces of the anvil to place all the materials you can hold.
+
+When holding a forging hammer:
+
+- Right-click on the top of the anvil to retrieve a single material from the last placed slot.
+- Right-click on other faces of the anvil to retrieve all materials from the last placed slot.
+
+When holding a valid blueprint:
+
+- Right-click on any face of the anvil to place the blueprint, which will not consume the item.
+
+When holding a dissolving potion:
+
+- Right-click on any face of the anvil to pour it to clear the forging state, which will not consume the contained materials, but will consume the potion itself.
+
+---
+
+## Basics
+
+Waiting for forging...
+
+The basic logic of the forging module is: any item, up to 10 steps (recommended, exceeding this may cause problems), a maximum of 9 item slots can be placed, any forging value (determines the number of hammer strikes), and any single item is output after forging is complete.
+
+The content used in the forging module: blueprint (any valid), anvil, forging hammer (any quality), recipe materials.
+
+---
+
+Viewing blueprint recipe
+
+Hold a valid blueprint, `SHIFT` + `Use Key` to view the detailed recipe data in the blueprint, `ESC` to exit the blueprint interface.
+
+---
+
+Placing a blueprint
+
+Before forging, you need to place a valid blueprint to lock the forging state. If it is invalid, it will remind the player that the current blueprint is blank.
+
+Operation method: *Main hand holding, off-hand invalid
+Hold a valid blueprint in the main hand and interact with an anvil that does not contain a blueprint to write the blueprint. The blueprint will not be consumed, only a copy is made on the anvil.
+
+---
+
+Placing recipe materials
+
+Operation method: *Main hand holding, off-hand invalid
+Interact with the top of the anvil to place a single item in your hand, and interact with other sides to place all items in your hand.
+Hold a forging hammer in the main hand and interact with the top to take out a single item from the last slot, and interact with other sides to take out all items.
+
+---
+
+Starting to forge
+
+When forging, the player needs to be on the same level as the anvil, the maximum forging distance is one and a half blocks, and the crosshair is aimed at the top of the anvil. If the crosshair is not aimed at the top, it will remind the player to aim the crosshair.
+
+---
+
+Clearing the forging state
+
+Hold a `dissolving potion` in the main hand and interact with the anvil to clear the current forging state. If you drink the potion, it is a suicide effect. There is a very small chance of dropping `Melted Flesh` if you die from the potion.
+
+*Clearing the state does not include the recipe materials that have not been consumed in the anvil.
+
+If the anvil is destroyed, the forging state can also be cleared. The speed of mining the anvil with any tool is the same, and the anvil block is relatively strong, so it is not recommended to clear the forging state by mining.
+
+---
+
+## Example Recipe
+
+The recipe needs to be in `data/mod_name/recipes/ise_forgery/recipe_id.json`.
+
+The recipe type ID is `isekaiexpansion:forgery`.
+
+`result` The final output item.
+
+`steps` The content of the forging steps, try to control it within 10 steps.
+
+`forgery_progress` The forging strength required for forging. If it is reached, it will enter the next step; each forging hammer will increase the forging strength each time according to its rarity, so consider the required amount accordingly.
+
+`ingredients` The item material content required for the current step, make sure it does not exceed 9 items.
+
+`count` The required amount of the item material in the current step, make sure the number is within a stack, i.e. smaller than or equal to 64.
+
+`item` The ID of the item material in the current step.
+
+`should_render_ingredients` Whether to render the placed item material model in the current step.
+
+`display_item` The ID of the item displayed in the current step, not an actual item that can be obtained, only for rendering purposes; this option is usually not needed in the first step of forging.
+
+```json
+{
+  "type": "isekaiexpansion:forgery",
+  "result": {
+    "item": "minecraft:diamond_sword"
+  },
+  "steps": [
+    {
+      "forgery_progress": 100,
+      "ingredients": [
+        {
+          "count": 2,
+          "item": "minecraft:iron_ingot"
+        },
+        {
+          "count": 1,
+          "item": "minecraft:stick"
+        }
+      ],
+      "should_render_ingredients": true
+    },
+    {
+      "display_item": "minecraft:iron_sword",
+      "forgery_progress": 140,
+      "ingredients": [
+        {
+          "count": 3,
+          "item": "minecraft:diamond"
+        },
+        {
+          "count": 1,
+          "item": "minecraft:iron_ingot"
+        },
+        {
+          "count": 2,
+          "item": "minecraft:slime_ball"
+        }
+      ],
+      "should_render_ingredients": true
+    }
+  ]
+}
+```
+
+---
+
+## Additional Compatibility
+
+Additional compatibility for some mods, currently only Jade and REI are compatible.

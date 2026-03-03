@@ -1,0 +1,29 @@
+---
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+import { Image } from 'astro:assets';
+
+import customIcon from '../assets/images/misc/afadian.webp'; 
+---
+
+<Default><slot /></Default>
+
+<a href="https://afdian.com/a/kzeroko" rel="me" class="sl-flex custom-social">
+    <span class="sr-only">My Custom Link Name</span>
+    <Image src={customIcon} alt="" width={24} height={24} />
+</a>
+
+<style>
+    a {
+        color: var(--sl-color-text-accent);
+        padding: 0.5em;
+        margin: -0.5em;
+    }
+    a:hover {
+        opacity: 0.66;
+    }
+    .custom-social img, .custom-social svg {
+        height: 1.5em;
+        width: 1.5em;
+        object-fit: contain;
+    }
+</style>

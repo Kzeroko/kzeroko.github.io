@@ -1,0 +1,42 @@
+---
+title: Equipment Skill Slots
+description: "Equipment Skill Slots"
+---
+import { Image } from 'astro:assets';
+import a_skill from '@assets/images/ktm2/wiki/skillslot/a_skill.png';
+import p_skill from '@assets/images/ktm2/wiki/skillslot/p_skill.png';
+import l_skill from '@assets/images/ktm2/wiki/skillslot/l_skill.png';
+
+# Equipment Skill Slots
+
+A piece of equipment (usually a weapon, armor is in development) has two or four fixed skill slots that cannot be expanded.
+
+---
+
+There are usually 3 types of skills:
+
+<Image src={a_skill} alt="a_skill" />
+
+Active Skill (A), a skill that is actively triggered by the player by pressing the right mouse button (or a set key). A piece of equipment can only have one active skill at the same time.
+
+<Image src={p_skill} alt="p_skill" />
+
+Passive Skill (P), a skill that takes effect automatically after the player meets certain conditions. The effect and trigger conditions are relatively wide. Usually a piece of equipment can have multiple passive skills.
+
+<Image src={l_skill} alt="l_skill" />
+
+Linked Skill (L), a linked effect after the player uses or equips other equipment, or can choose to link with surrounding creatures. Usually a piece of equipment can have multiple linked skills.
+
+---
+
+The following are common skill combinations for the four slots:
+
+Scheme 1: The most conventional APPP type skill scheme, 1x active skill, 3x passive skills. It is the first scheme to be born, and its practicability is the highest. It can actively trigger effects in battle and has passive bonuses.
+
+Scheme 2: The second is the APPL type skill scheme, 1x active skill, 2x passive skills, 1x linked skill. A comprehensive scheme that sacrifices a passive slot for a linked effect.
+
+Scheme 3: APLL type skill scheme, 1x active skill, 1x passive skill, 2x linked skills. Sacrifices two passive slots for more linked effects.
+
+Scheme 4: ALLL type skill scheme, 1x active skill, 3x linked skills. Sacrifices all passive slots for three linked effects. This scheme is usually used to specialize in linking with other equipment or surrounding creatures.
+
+Scheme 5: The last scheme, PPPP type skill scheme, 4x passive skills. Abandons active and linked skills to only obtain passive effects. This scheme is usually suitable for equipment that can take effect without being held in the main hand, or equipment that is highly dependent on passives in battle.

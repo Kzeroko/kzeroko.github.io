@@ -1,0 +1,163 @@
+---
+title: Comfort
+description: "What is Comfort?"
+---
+
+# What is "Comfort"?
+
+"Comfort" is a mechanic in KTM2. In KTM2, comfort is a visible value bound to the player.
+
+Comfort changes with factors such as environment, combat, diet, and sleep, and in turn affects movement speed, digging speed, and hunger consumption speed.
+
+---
+
+## 📌Comfort Stages
+
+Comfort is divided into three stages, each with different effects:
+
+| Stage | Value Range | Description |
+|---|---|---|
+| Pain | 0 ~ 40 | Tired and uncomfortable, in a low state |
+| Normal | 41 ~ 70 | Normal state, no obvious positive or negative effects |
+| Relax | 71 ~ 100 | Relaxed body and mind, more comfortable in action |
+
+---
+
+## 📌Natural Change of Comfort
+
+### Basic Natural Decay
+
+Under normal circumstances, as long as the comfort is greater than 0, the comfort will be settled once in a while.
+
+Without being completely offset by the environment, comfort naturally decreases by 1 point approximately every 60 seconds.
+
+### Cases where Comfort is "Paused"
+
+In the following states, the player's comfort is completely frozen and will not change naturally:
+
+- Creative Mode / Spectator Mode
+- Sleeping in bed
+- Having the comfort effect of Farmer's Delight
+
+### The effect of "Nourishment" on the decay rate
+
+If the player has the nourishment effect of Farmer's Delight, the comfort settlement cycle will become 1.5 times the original (becomes once every 90 seconds).
+
+### The effect of the environment on comfort
+
+Each time comfort is settled, in addition to the basic -1 point, an additional correction value will be obtained according to the surrounding environment. The final environmental correction value will be limited to between -5 and +1 (in the best case, comfort does not drop, and in the worst case, comfort drops by 6 points at a time).
+
+**When idle at home, comfort no longer drops**
+
+- Within 16 blocks of the "respawn point" or "world spawn point"
+- And the head is covered
+
+When the above conditions are met: environmental correction +1
+
+---
+
+**It's more uncomfortable to be in the rain without a helmet**
+
+- The world is raining
+- Open air
+- The player is not wearing a helmet
+
+When the above conditions are met: environmental correction an additional -1
+
+---
+
+**It's more tormenting to not wear a full set of armor in the cold snow**
+
+- The precipitation type of the biome is snow
+- The player is not wearing a full set of armor
+
+When the above conditions are met: environmental correction an additional -1
+
+---
+
+**The environment in the Nether will give more pressure**
+
+- The dimension is the Nether
+
+When the above conditions are met:
+
+- When wearing a full set of armor, the environmental correction is an additional -1
+- When the armor is incomplete, the environmental correction is an additional -3
+
+---
+
+## 📌The effect of food on comfort
+
+Eating is one of the main ways to increase comfort. Each time you eat, the change in comfort is calculated according to the following formula:
+
+> Final comfort change = basic comfort of food × quality bonus × diversity bonus
+
+Basic comfort of food: Each food has a default basic comfort configuration. Some bad foods have a negative basic comfort by default.
+
+Quality bonus: The food refinement bonus for the chef profession. The better the food, the higher the positive comfort bonus. Even for negative foods, good quality can reduce the discomfort penalty.
+
+Diversity bonus: The more you eat the same food, the worse the comfort recovery effect. Encouraging a diversified diet will result in a higher comfort gain.
+
+The diversity logic will record the last 6 kinds of food the player has eaten, and then determine the diversity coefficient according to the number of times this food has appeared in the last 6 times:
+
+| Number of appearances in the last 6 meals | Diversity factor |
+|---|---|
+| 0 times | 1.0 (100%) |
+| 1 time | 0.7 (70%) |
+| 2 times | 0.4 (40%) |
+| ≥3 times | 0.1 (10%) |
+
+The diversity factor only works for positive comfort changes, while negative changes are fully effective.
+
+---
+
+## 📌Sleep and Comfort Recovery
+
+When the player sleeps in bed and skips the night, a sleep recovery effect is settled.
+
+Recovers up to 30 points of comfort (recovers 70% of the missing value, but does not directly fill up comfort).
+
+---
+
+## 📌The effect of combat and injury on comfort
+
+Whenever a player takes damage, comfort is reduced based on the damage value.
+
+- The higher the damage, the more comfort is deducted.
+- The higher the proportion of damage to maximum health, the more comfort is deducted.
+- The deduction value has a diminishing protection, and there will be no sudden large deductions.
+- A maximum of 20 points of comfort can be deducted at a time, and a minimum of 1 point.
+
+---
+
+## 📌The effect of comfort on movement speed and digging speed
+
+### Movement Speed
+
+| Comfort Stage | Movement Speed Change |
+|---|---|
+| Pain | **-20%** base movement speed |
+| Normal | No change |
+| Relax | **+20%** base movement speed |
+
+### Digging Speed
+
+| Comfort Stage | Digging Speed Change |
+|---|---|
+| Pain | **-10%** digging speed |
+| Normal | No change |
+| Relax | **+10%** digging speed |
+
+---
+
+## 📌The relationship between comfort and hunger consumption
+
+Comfort also affects hunger consumption. It applies different basic consumption according to the player's state, and then multiplies it by a comfort multiplier.
+
+At the same time, it will do additional hunger decay according to three state types: standing still, moving but not sprinting, and sprinting.
+
+| Comfort Stage | Hunger Consumption Multiplier |
+|---|---|
+| Pain | × **1.5** |
+| Normal | × 1.0 |
+| Relax | × **0.5** |

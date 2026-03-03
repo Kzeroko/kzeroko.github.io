@@ -1,0 +1,46 @@
+---
+import Logo from '@astrojs/starlight/components/SiteTitle.astro';
+import Search from '@astrojs/starlight/components/Search.astro';
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+import LanguageSelect from '@astrojs/starlight/components/LanguageSelect.astro';
+---
+<header>
+    <div class="title-container">
+        <Logo />
+    </div>
+    <div class="header-content">
+        <Search />
+        <SocialIcons />
+        <ThemeSelect />
+        <LanguageSelect />
+    </div>
+</header>
+
+<style>
+    header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        border-bottom: 1px solid var(--sl-color-gray-5);
+    }
+    .title-container {
+        animation: slideIn 0.5s ease-in-out;
+    }
+    .header-content {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+    @keyframes slideIn {
+        from {
+            transform: translateX(-20px);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+</style>
