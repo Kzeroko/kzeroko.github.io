@@ -2,14 +2,20 @@
 import Default from '@astrojs/starlight/components/SocialIcons.astro';
 import { Image } from 'astro:assets';
 
-import customIcon from '../assets/images/misc/afadian.webp'; 
+import afadianIcon from '../assets/images/misc/afadian.webp'; 
+import kookIcon from '../assets/images/misc/kook.webp';
 ---
 
 <Default><slot /></Default>
 
 <a href="https://afdian.com/a/kzeroko" rel="me" class="sl-flex custom-social">
-    <span class="sr-only">My Custom Link Name</span>
-    <Image src={customIcon} alt="" width={24} height={24} />
+    <span class="sr-only">Afadian</span>
+    <Image src={afadianIcon} alt="" width={24} height={24} />
+</a>
+
+<a href="https://www.kookapp.cn/app/channels/2843529064587973" rel="me" class="sl-flex custom-social">
+    <span class="sr-only">Kook</span>
+    <Image src={kookIcon} alt="" width={24} height={24} />
 </a>
 
 <style>
