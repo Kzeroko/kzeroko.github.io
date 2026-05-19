@@ -58,6 +58,7 @@ export default defineConfig({
                                     },
 									items: [
 										{ slug: 'ktm2/contents/wiki/comfort' },
+										{ slug: 'ktm2/contents/wiki/effects_and_attributes' },
 										{ slug: 'ktm2/contents/wiki/element' },
 										{ slug: 'ktm2/contents/wiki/forgery' },
 										{ slug: 'ktm2/contents/wiki/leveling' },
