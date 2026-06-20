@@ -31,6 +31,11 @@ export default defineConfig({
 					icon: 'github', 
 					label: 'GitHub',
 					href: 'https://github.com/Kzeroko'
+				},
+				{
+					icon: 'discord',
+					label: 'Discord',
+					href: 'https://discord.gg/uwhpp65vwU'
 				}
 			],
 			sidebar: [
