@@ -1,0 +1,205 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import Button from '../../../components/base/Button.astro';
+import Icon from '../../../components/base/Icon.astro';
+import { localeCodes, localePath, useTranslations, type LocaleCode } from '../../../i18n';
+import { ISEKAI_MODULES, KTM2 } from '../../../data/site';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: 'KTM2', href: localePath(lang, 'ktm2') },
+  { label: t('ktm2.modules.title') },
+];
+---
+
+<PageLayout
+  lang={lang}
+  title={t('ktm2.modules.title')}
+  description={t('home.modules.lead')}
+  eyebrow="Isekai Series"
+  heading={t('home.modules.title')}
+  lead={t('home.modules.lead')}
+  crumbs={crumbs}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <p slot="masthead" class="modules__version">
+    <span class="text-mono">{KTM2.moduleVersion}</span>
+  </p>
+
+  <div class="shell shell--wide modules">
+    {
+      ISEKAI_MODULES.map((module, index) => (
+        <article class="module" id={module.id} data-accent={module.accent} data-reveal="rise">
+          <div class="module__aside">
+            <span class="module__icon" aria-hidden="true">
+              <Icon name={module.icon} />
+            </span>
+            <span class="module__index" aria-hidden="true">
+              {String(index + 1).padStart(2, '0')}
+            </span>
+          </div>
+
+          <div class="module__body">
+            <h2 class="module__name">{module.name}</h2>
+            <p class="module__tagline">{module.tagline[lang]}</p>
+            <p class="module__text">{module.body[lang]}</p>
+
+            <ul class="module__highlights" role="list">
+              {module.highlights.map((highlight) => (
+                <li>
+                  <Icon name="check" class="module__check" />
+                  {highlight[lang]}
+                </li>
+              ))}
+            </ul>
+
+            {module.repo && (
+              <Button href={module.repo} variant="ghost" size="sm" external class="module__repo">
+                GitHub
+              </Button>
+            )}
+          </div>
+        </article>
+      ))
+    }
+  </div>
+</PageLayout>
+
+<style>
+  .modules__version {
+    margin-block-start: var(--space-lg);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .modules {
+    display: grid;
+    gap: var(--space-xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+  }
+
+  .module {
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: var(--space-xl);
+    padding: var(--space-xl);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    scroll-margin-block-start: calc(var(--header-height) + var(--space-xl));
+    transition: border-color var(--dur-base) var(--ease-out);
+  }
+
+  .module:hover,
+  .module:target {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+
+  .module:target {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+
+  .module__aside {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .module__icon {
+    display: grid;
+    place-items: center;
+    inline-size: 3rem;
+    block-size: 3rem;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .module__icon :global(.icon) {
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+  }
+
+  .module__index {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .module__name {
+    font-family: var(--font-display);
+    font-size: var(--fs-xl);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .module__tagline {
+    margin-block-start: var(--space-2xs);
+    font-size: var(--fs-md);
+    color: var(--accent);
+    line-height: var(--lh-snug);
+  }
+
+  .module__text {
+    margin-block-start: var(--space-md);
+    max-inline-size: 70ch;
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  .module__highlights {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    margin-block-start: var(--space-lg);
+    padding: 0;
+    font-size: var(--fs-sm);
+    color: var(--c-text-soft);
+  }
+
+  .module__highlights li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+
+  .module__check {
+    inline-size: 0.9em;
+    block-size: 0.9em;
+    color: var(--accent);
+  }
+
+  .module__repo {
+    margin-block-start: var(--space-lg);
+  }
+
+  @media (max-width: 44rem) {
+    .module {
+      grid-template-columns: 1fr;
+      gap: var(--space-lg);
+      padding: var(--space-lg);
+    }
+
+    .module__aside {
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-md);
+    }
+  }
+</style>

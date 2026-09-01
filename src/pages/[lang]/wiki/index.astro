@@ -1,0 +1,98 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import LinkCard from '../../../components/cards/LinkCard.astro';
+import { formatDate, localeCodes, localePath, useTranslations, type LocaleCode, type UIKey } from '../../../i18n';
+import { getWikiGroups, wikiPath } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+const groups = await getWikiGroups(lang);
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: t('wiki.title') },
+];
+
+const ACCENTS: Record<string, string> = {
+  core: 'teal',
+  combat: 'rose',
+  crafting: 'amber',
+  world: 'green',
+};
+---
+
+<PageLayout
+  lang={lang}
+  title={t('wiki.title')}
+  description={t('wiki.lead')}
+  eyebrow={t('nav.ktm2')}
+  heading={t('wiki.title')}
+  lead={t('wiki.lead')}
+  crumbs={crumbs}
+  jsonLd={[breadcrumbJsonLd(crumbs.map((c) => ({ name: c.label, href: c.href ?? Astro.url.pathname })))]}
+>
+  <div class="shell shell--wide wiki">
+    {
+      groups.map((group) => (
+        <section class="wiki__group">
+          <header class="wiki__head" data-reveal="fade">
+            <h2 class="wiki__title">{t(`wiki.category.${group.category}` as UIKey)}</h2>
+            <span class="wiki__count">{group.entries.length}</span>
+          </header>
+
+          <div class="grid grid--3" data-reveal-stagger>
+            {group.entries.map((entry, index) => (
+              <div data-reveal="rise" style={`--reveal-index:${index}`}>
+                <LinkCard
+                  href={wikiPath(lang, entry)}
+                  title={entry.data.title}
+                  body={entry.data.tagline ?? entry.data.description}
+                  eyebrow={formatDate(entry.data.updated, lang)}
+                  accent={ACCENTS[group.category] ?? 'teal'}
+                  chips={entry.data.tags.slice(0, 3)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))
+    }
+  </div>
+</PageLayout>
+
+<style>
+  .wiki {
+    display: grid;
+    gap: var(--space-3xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+  }
+
+  .wiki__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin-block-end: var(--space-lg);
+    padding-block-end: var(--space-sm);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  .wiki__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .wiki__count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+</style>

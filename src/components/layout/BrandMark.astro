@@ -1,0 +1,49 @@
+---
+import { Image } from 'astro:assets';
+import mark from '../../assets/images/ktm2/ktm2_iconr.webp';
+
+/**
+ * Site sigil: the KTM2 pack icon. Rendered at 2× the CSS box so it stays sharp
+ * on dense displays, and sized through a custom property rather than the
+ * intrinsic attributes so one asset serves the header, footer and 404 page.
+ */
+interface Props {
+  size?: number;
+  class?: string;
+  /** Kept for call-site compatibility with the previous inline SVG. */
+  id?: string;
+  /** Forwarded to the root so a parent's scoped styles can reach it. */
+  [key: string]: unknown;
+}
+
+const { size = 30, class: className, id: _id, ...rest } = Astro.props;
+---
+
+<Image
+  {...rest}
+  class:list={['brand-mark', className]}
+  src={mark}
+  alt=""
+  width={size * 2}
+  height={size * 2}
+  loading="eager"
+  decoding="async"
+  aria-hidden="true"
+  style={`--mark-size:${size}px`}
+/>
+
+<style>
+  .brand-mark {
+    display: block;
+    flex: none;
+    inline-size: var(--mark-size, 30px);
+    block-size: var(--mark-size, 30px);
+    border-radius: 26%;
+    object-fit: cover;
+    transition: transform var(--dur-slow) var(--ease-spring);
+  }
+
+  :global(a:hover) > .brand-mark {
+    transform: rotate(-8deg) scale(1.06);
+  }
+</style>

@@ -1,0 +1,65 @@
+---
+import type { GetStaticPaths } from 'astro';
+import { render } from 'astro:content';
+
+import DocsLayout from '../../../layouts/DocsLayout.astro';
+import { mdxComponents } from '../../../components/mdx';
+import { localeCodes, localePath, readingTime, useTranslations, type LocaleCode } from '../../../i18n';
+import { entrySlug, getWikiGroups, getWikiPages, localisedPaths, wikiPath, type WikiEntry } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (async () => {
+  return localisedPaths('wiki', localeCodes);
+}) satisfies GetStaticPaths;
+
+interface Props {
+  entry: WikiEntry;
+}
+
+const { entry } = Astro.props as Props;
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const { Content, headings } = await render(entry);
+const [groups, pages] = await Promise.all([getWikiGroups(lang), getWikiPages(lang)]);
+
+// Reading order matches the sidebar, so prev/next feel like turning a page.
+const index = pages.findIndex((page) => entrySlug(page) === entrySlug(entry));
+const previous = index > 0 ? pages[index - 1] : undefined;
+const following = index >= 0 && index < pages.length - 1 ? pages[index + 1] : undefined;
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: t('wiki.title'), href: localePath(lang, 'wiki') },
+  { label: entry.data.title },
+];
+---
+
+<DocsLayout
+  lang={lang}
+  title={entry.data.title}
+  description={entry.data.description}
+  heading={entry.data.title}
+  lead={entry.data.description}
+  groups={groups}
+  headings={headings}
+  crumbs={crumbs}
+  updated={entry.data.updated}
+  readingMinutes={readingTime(entry.body ?? '', lang)}
+  tags={entry.data.tags}
+  modifiedTime={entry.data.updated}
+  noindex={entry.data.seo?.noindex}
+  prev={previous
+    ? { label: t('wiki.prev'), title: previous.data.title, href: wikiPath(lang, previous) }
+    : undefined}
+  next={following
+    ? { label: t('wiki.next'), title: following.data.title, href: wikiPath(lang, following) }
+    : undefined}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <Content components={mdxComponents} />
+</DocsLayout>

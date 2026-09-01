@@ -1,0 +1,31 @@
+---
+/**
+ * Marks a block for scroll-triggered entrance.
+ *
+ * The hidden state is applied by `reveal.ts` (via `data-reveal-ready`) rather
+ * than by CSS alone, so content stays visible when JavaScript never runs.
+ */
+interface Props {
+  as?: 'div' | 'section' | 'article' | 'li' | 'header' | 'figure' | 'aside';
+  variant?: 'fade' | 'rise' | 'zoom';
+  /** Stagger index when the parent carries `data-reveal-stagger`. */
+  index?: number;
+  /** Explicit delay in milliseconds; overrides the stagger index. */
+  delay?: number;
+  class?: string;
+  [key: string]: unknown;
+}
+
+const { as: Tag = 'div', variant = 'rise', index, delay, class: className, ...rest } = Astro.props as Props;
+
+const style = [
+  index !== undefined ? `--reveal-index:${index}` : null,
+  delay !== undefined ? `--reveal-delay:${delay}ms` : null,
+]
+  .filter(Boolean)
+  .join(';');
+---
+
+<Tag data-reveal={variant} class={className} style={style || undefined} {...rest}>
+  <slot />
+</Tag>

@@ -1,0 +1,231 @@
+---
+import { LEVEL_TRACKS, type LevelTrack } from '../../data/leveling';
+import { splitLocalePath, type LocaleCode } from '../../i18n';
+
+/**
+ * Experience curve viewer.
+ *
+ * A hundred-row table is data, not documentation. The compact view shows the
+ * shape of the curve plus its milestones; the exact per-level numbers stay one
+ * disclosure away for anyone who genuinely needs them.
+ */
+interface Props {
+  track: LevelTrack['id'];
+  /** Defaults to the language of the page being rendered. */
+  lang?: LocaleCode;
+}
+
+const { track: trackId, lang = splitLocalePath(Astro.url.pathname).lang } = Astro.props;
+const track = LEVEL_TRACKS.find((entry) => entry.id === trackId)!;
+
+const copy = {
+  en: { level: 'Level', next: 'To next', total: 'Total', full: 'Show every level', cap: 'Cap' },
+  'zh-cn': { level: '等级', next: '升级所需', total: '累计所需', full: '展开每一级', cap: '上限' },
+}[lang];
+
+const { rows, milestoneEvery } = track;
+const first = rows[0]!;
+const last = rows[rows.length - 1]!;
+
+const milestones = rows.filter(
+  (row) => row.level === first.level || row.level === last.level || row.level % milestoneEvery === 0
+);
+
+// Curve is plotted on cumulative totals, normalised into a 100×34 viewBox.
+const maxTotal = last.total || 1;
+const points = rows
+  .map((row, index) => {
+    const x = (index / (rows.length - 1)) * 100;
+    const y = 34 - (row.total / maxTotal) * 32;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  })
+  .join(' ');
+
+const number = new Intl.NumberFormat(lang === 'zh-cn' ? 'zh-CN' : 'en-US');
+const tierName = (level: number) => track.tiers?.[level]?.[lang];
+---
+
+<section class="curve">
+  <header class="curve__head">
+    <h3 class="curve__title">{track.label[lang]}</h3>
+    <p class="curve__note">{track.note[lang]}</p>
+  </header>
+
+  <svg class="curve__plot" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true">
+    <defs>
+      <linearGradient id={`fill-${track.id}`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--c-accent)" stop-opacity="0.28"></stop>
+        <stop offset="1" stop-color="var(--c-accent)" stop-opacity="0"></stop>
+      </linearGradient>
+    </defs>
+    <polygon points={`0,34 ${points} 100,34`} fill={`url(#fill-${track.id})`}></polygon>
+    <polyline
+      points={points}
+      fill="none"
+      stroke="var(--c-accent)"
+      stroke-width="0.7"
+      vector-effect="non-scaling-stroke"
+      stroke-linejoin="round"
+    ></polyline>
+  </svg>
+
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">{copy.level}</th>
+          <th scope="col">{copy.next}</th>
+          <th scope="col">{copy.total}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          milestones.map((row) => (
+            <tr>
+              <th scope="row">
+                {row.level}
+                {tierName(row.level) && <span class="curve__tier">{tierName(row.level)}</span>}
+              </th>
+              <td>{row.next === 0 ? copy.cap : number.format(row.next)}</td>
+              <td>{number.format(row.total)}</td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  {
+    milestones.length < rows.length && (
+      <details class="curve__full">
+        <summary>{copy.full}</summary>
+        <div class="table-scroll curve__fullTable scroll-thin">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{copy.level}</th>
+                <th scope="col">{copy.next}</th>
+                <th scope="col">{copy.total}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr>
+                  <th scope="row">{row.level}</th>
+                  <td>{row.next === 0 ? copy.cap : number.format(row.next)}</td>
+                  <td>{number.format(row.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    )
+  }
+</section>
+
+<style>
+  .curve {
+    margin-block: 2em;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    overflow: hidden;
+  }
+
+  .curve__head {
+    padding: var(--space-lg) var(--space-lg) var(--space-md);
+  }
+
+  .curve__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .curve__note {
+    margin-block-start: 0.4em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+
+  .curve__plot {
+    display: block;
+    inline-size: 100%;
+    block-size: 4.5rem;
+  }
+
+  .curve :global(.table-scroll) {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    border-block-start: 1px solid var(--c-line);
+    background: transparent;
+  }
+
+  .curve table {
+    inline-size: 100%;
+    font-size: var(--fs-sm);
+  }
+
+  .curve :is(th, td) {
+    padding: 0.5em 1em;
+    text-align: start;
+    border-block-end: 1px solid var(--c-line-faint);
+  }
+
+  .curve td {
+    font-variant-numeric: tabular-nums;
+    color: var(--c-text-muted);
+  }
+
+  .curve thead th {
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+    background: var(--c-surface-2);
+  }
+
+  .curve tbody th {
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    white-space: nowrap;
+  }
+
+  .curve__tier {
+    margin-inline-start: 0.55em;
+    padding: 0.1em 0.5em;
+    border-radius: var(--radius-full);
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-wide);
+  }
+
+  .curve__full summary {
+    padding: var(--space-sm) var(--space-lg);
+    border-block-start: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    color: var(--c-accent);
+    font-size: var(--fs-sm);
+    font-weight: var(--weight-semibold);
+    cursor: pointer;
+  }
+
+  .curve__fullTable {
+    max-block-size: 22rem;
+    overflow-y: auto;
+  }
+
+  .curve__fullTable thead th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 1;
+  }
+</style>

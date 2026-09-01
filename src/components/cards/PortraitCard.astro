@@ -1,0 +1,162 @@
+---
+import type { ImageMetadata } from 'astro';
+
+import SmartImage from '../base/SmartImage.astro';
+
+/**
+ * Character card for the codex index.
+ *
+ * The portrait bleeds off the bottom of the frame and lifts on hover, which
+ * reads as a cast line-up rather than a grid of avatars.
+ */
+interface Props {
+  href: string;
+  name: string;
+  epithet: string;
+  summary?: string;
+  portrait?: ImageMetadata;
+  accent?: string;
+  class?: string;
+}
+
+const { href, name, epithet, summary, portrait, accent = 'teal', class: className } = Astro.props;
+
+/*
+ * Full epithets carry two offices separated by "·" (English) or "/" (Chinese).
+ * A card only has room for the primary one; the entry page shows both.
+ */
+const primaryTitle = epithet.split(/\s*[·/]\s*/)[0]!.trim();
+---
+
+<article class:list={['portrait', className]} data-accent={accent}>
+  <a class="portrait__link" href={href}>
+    <div class="portrait__frame">
+      {
+        portrait ? (
+          <SmartImage
+            src={portrait}
+            alt=""
+            width={520}
+            sizes="(max-width: 40rem) 45vw, 18rem"
+            class="portrait__img"
+          />
+        ) : (
+          <span class="portrait__placeholder" aria-hidden="true">
+            {name.slice(0, 1)}
+          </span>
+        )
+      }
+    </div>
+
+    <div class="portrait__meta">
+      <p class="portrait__epithet">{primaryTitle}</p>
+      <h3 class="portrait__name">{name}</h3>
+      {summary && <p class="portrait__summary">{summary}</p>}
+    </div>
+  </a>
+</article>
+
+<style>
+  .portrait {
+    position: relative;
+  }
+
+  .portrait__link {
+    display: flex;
+    flex-direction: column;
+    block-size: 100%;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    transition:
+      transform var(--dur-slow) var(--ease-out),
+      border-color var(--dur-base) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+
+  .portrait__link:hover,
+  .portrait__link:focus-visible {
+    transform: translateY(-4px);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    box-shadow: var(--shadow-md);
+  }
+
+  .portrait__frame {
+    position: relative;
+    aspect-ratio: 3 / 4;
+    display: grid;
+    place-items: end center;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 80% at 50% 0%, var(--accent-soft), transparent 70%),
+      var(--c-surface-2);
+  }
+
+  .portrait__img {
+    inline-size: 108%;
+    block-size: auto;
+    max-inline-size: none;
+    transform: translateY(4%) scale(1);
+    transition: transform var(--dur-slower) var(--ease-out);
+  }
+
+  .portrait__link:hover .portrait__img {
+    transform: translateY(1%) scale(1.04);
+  }
+
+  /* Scrim so the render's lower edge never cuts abruptly. */
+  .portrait__frame::after {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: 0;
+    block-size: 45%;
+    background: linear-gradient(transparent, var(--c-surface));
+    pointer-events: none;
+  }
+
+  .portrait__placeholder {
+    display: grid;
+    place-items: center;
+    inline-size: 100%;
+    block-size: 100%;
+    font-family: var(--font-display);
+    font-size: var(--fs-4xl);
+    font-weight: var(--weight-bold);
+    color: color-mix(in oklab, var(--accent) 40%, transparent);
+  }
+
+  .portrait__meta {
+    position: relative;
+    z-index: 1;
+    padding: 0 var(--space-lg) var(--space-lg);
+    margin-block-start: -1.5rem;
+  }
+
+  .portrait__epithet {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .portrait__name {
+    margin-block-start: 0.2rem;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+    color: var(--c-text);
+    line-height: var(--lh-snug);
+  }
+
+  .portrait__summary {
+    margin-block-start: var(--space-xs);
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+    text-wrap: pretty;
+  }
+</style>

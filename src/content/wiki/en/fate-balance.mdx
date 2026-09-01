@@ -1,0 +1,124 @@
+---
+title: "Fate Balance"
+description: "The blessings-and-burdens budget you spend at character creation, and what each built-in pair actually changes."
+category: core
+order: 20
+updated: 2026-09-01
+tagline: "Every advantage is paid for by something."
+tags: ['character creation', 'traits']
+---
+
+Fate Balance is the trait system you spend before you have played a single minute. It is a **points budget**: blessings cost points, burdens refund them, and a profile that does not balance cannot be submitted.
+
+There is no free advantage in Urdas. The decision is *which* price you are willing to pay.
+
+## How the editor works
+
+<Steps>
+
+1. Choices are grouped into **categories**, each with its own sort order.
+2. Every choice has a **polarity** (blessing or burden), a **cost**, and a **severity** (minor, standard, and so on).
+3. Choices can **conflict** with each other, sit in **exclusive groups**, or require **prerequisites**.
+4. The editor deliberately lets you hold a temporary conflict or overspend while you rearrange. Only a *valid* profile can be submitted.
+
+5. On submit the whole profile is evaluated again, and one that fails that check is not stored.
+
+</Steps>
+
+<Callout type="note" title="Presets are a starting point, not a shortcut">
+Applying a preset only replaces the draft in front of you. It skips neither the confirmation nor the validation.
+</Callout>
+
+## Built-in pairs
+
+Most Fate Balance choices install ordinary attribute modifiers. A handful are read by the owning system instead, so they never appear on your attribute sheet and only show up on that system's next update.
+
+### Appetite
+
+| Choice | Max hunger | Effect |
+| --- | --- | --- |
+| `hearty_appetite` | 26 | 30% more reserve before starvation |
+| `birdlike_appetite` | 14 | Reaches full sooner, 30% less reserve |
+
+Because Isekai Core disables hunger-based health regeneration, appetite never secretly changes your healing rate — only your reserve.
+
+### Temperament
+
+Read by [Comfort](/en/wiki/comfort/) when it scales gain, loss and decay.
+
+| Choice | Comfort gain | Comfort loss | Natural decay |
+| --- | --- | --- | --- |
+| `optimistic_nature` | ×1.20 | ×0.80 | ×0.80 |
+| `pessimistic_nature` | ×0.80 | ×1.20 | ×1.25 |
+
+### Countenance
+
+Read per faction, and **only while that faction's reputation is already at or below the wanted threshold**. A kind face does not help you with people who already like you.
+
+| Choice | Effect |
+| --- | --- |
+| `kind_countenance` | Softens faction reaction while you are in bad standing |
+| `fierce_countenance` | Hardens it |
+
+See [Reputation](/en/wiki/reputation/) for how faction standing is tracked.
+
+### Social
+
+NPC dialogue gates read two independent social attributes:
+
+| Attribute | Measures | Pair | Swing |
+| --- | --- | --- | --- |
+| `isekaiexpansion:eloquence` | Verbal persuasion and argument | `silver_tongue` / `tongue_tied` | ±8 |
+| `isekaiexpansion:charm` | Presence, appeal, first impressions | `captivating_presence` / `unassuming_presence` | ±8 |
+
+They are checked separately. Talking a guard round and charming a shopkeeper are different skills, and a build can be good at one and bad at the other.
+
+## For add-on authors
+
+Fate Balance definitions are **common-side content**: the same definition backs the client's draft preview and the server's validation, so availability predicates must be safe on both logical sides.
+
+Register through a dedicated entrypoint in `fabric.mod.json`:
+
+```json
+{
+  "entrypoints": {
+    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
+  }
+}
+```
+
+```java
+public final class ExampleFateBalance implements FateBalanceEntrypoint {
+    private static final Identifier CATEGORY = new Identifier("example", "fate_balance/traveler");
+    private static final Identifier BLESSING = new Identifier("example", "sure_footed");
+    private static final Identifier BURDEN = new Identifier("example", "restless_sleep");
+
+    @Override
+    public void register(FateBalanceRegistrar registrar) {
+        registrar.registerCategory(new FateBalanceCategory(
+                CATEGORY, "screen.example.fate_balance.category.traveler", 20));
+
+        registrar.registerChoice(FateBalanceChoice.builder(BLESSING, FateBalancePolarity.BLESSING, 2)
+                .category(CATEGORY)
+                .severity(FateBalanceSeverity.STANDARD)
+                .tags("travel", "movement")
+                .build());
+
+        registrar.registerChoice(FateBalanceChoice.builder(BURDEN, FateBalancePolarity.BURDEN, 1)
+                .category(CATEGORY)
+                .severity(FateBalanceSeverity.MINOR)
+                .conflictsWith(BLESSING)
+                .build());
+    }
+}
+```
+
+Translation keys default to `fate_balance.<namespace>.<path>` and `…​.description`; override them with `nameKey` and `descriptionKey`. Custom icons expect a 16×16 source texture.
+
+### Applying effects
+
+Definitions carry **no effect callbacks**. Subscribe to `FateBalanceEvents.PROFILE_CHANGED` and reconcile from the immutable previous and current identifier sets. Listeners run after the synchronised component updates and must be idempotent.
+
+For read-only gameplay checks use `FateBalanceApi.isSelected(player, choiceId)`. Trusted server systems may call `FateBalanceApi.commit` to reuse the same validation, persistence, synchronisation and event path as the selection screen.
+
+Cross-choice rules go through `registerRule`; rules return localised `FateBalanceProblem` values and **must not mutate player state**.

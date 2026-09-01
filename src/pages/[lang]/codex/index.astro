@@ -1,0 +1,141 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import LinkCard from '../../../components/cards/LinkCard.astro';
+import PortraitCard from '../../../components/cards/PortraitCard.astro';
+import { localeCodes, localePath, useTranslations, type LocaleCode, type UIKey } from '../../../i18n';
+import { codexPath, getCodexSections } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+const sections = await getCodexSections(lang);
+
+const crumbs = [{ label: t('nav.home'), href: localePath(lang) }, { label: t('codex.title') }];
+
+const SECTION_LABEL: Record<string, UIKey> = {
+  world: 'codex.section.world',
+  character: 'codex.section.characters',
+  faction: 'codex.section.factions',
+  location: 'codex.section.locations',
+  race: 'codex.section.races',
+};
+---
+
+<PageLayout
+  lang={lang}
+  title={t('codex.title')}
+  description={t('codex.lead')}
+  eyebrow="Urdas"
+  heading={t('codex.title')}
+  lead={t('codex.lead')}
+  crumbs={crumbs}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <p slot="masthead" class="codex__badge">{t('codex.spoilerFree')}</p>
+
+  <div class="shell shell--wide codex">
+    {
+      sections.map((section) => (
+        <section class="codex__section" id={section.kind}>
+          <header class="codex__head" data-reveal="fade">
+            <h2 class="codex__title">{t(SECTION_LABEL[section.kind]!)}</h2>
+            <span class="codex__count">{section.entries.length}</span>
+          </header>
+
+          {section.kind === 'character' ? (
+            <div class="grid grid--4" data-reveal-stagger>
+              {section.entries.map((entry, index) => (
+                <div data-reveal="zoom" style={`--reveal-index:${index}`}>
+                  <PortraitCard
+                    href={codexPath(lang, entry)}
+                    name={entry.data.title}
+                    epithet={entry.data.character?.epithet ?? ''}
+                    summary={entry.data.summary}
+                    portrait={entry.data.portrait}
+                    accent={entry.data.accent}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div class="grid grid--3" data-reveal-stagger>
+              {section.entries.map((entry, index) => (
+                <div data-reveal="rise" style={`--reveal-index:${index}`}>
+                  <LinkCard
+                    href={codexPath(lang, entry)}
+                    title={entry.data.title}
+                    body={entry.data.summary}
+                    accent={entry.data.accent}
+                    chips={entry.data.chips.slice(0, 3)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ))
+    }
+
+    <p class="codex__source">{t('codex.sourceNote')}</p>
+  </div>
+</PageLayout>
+
+<style>
+  .codex__badge {
+    display: inline-flex;
+    align-items: center;
+    margin-block-start: var(--space-lg);
+    padding: 0.28em 0.8em;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    color: var(--c-text-muted);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+  }
+
+  .codex {
+    display: grid;
+    gap: var(--space-3xl);
+    padding-block: var(--space-xl) var(--space-3xl);
+  }
+
+  .codex__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin-block-end: var(--space-lg);
+    padding-block-end: var(--space-sm);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  .codex__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .codex__count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .codex__source {
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+</style>

@@ -1,0 +1,165 @@
+---
+import SmartImage from '../base/SmartImage.astro';
+import Icon from '../base/Icon.astro';
+import { formatDate, formatDateISO, useTranslations, type LocaleCode } from '../../i18n';
+import { blogPath, type BlogEntry } from '../../lib/content';
+
+interface Props {
+  lang: LocaleCode;
+  post: BlogEntry;
+  /** Larger treatment with the hero image, used for the newest post. */
+  feature?: boolean;
+  readingMinutes?: number;
+  class?: string;
+}
+
+const { lang, post, feature = false, readingMinutes, class: className } = Astro.props;
+const t = useTranslations(lang);
+const href = blogPath(lang, post);
+const { data } = post;
+---
+
+<article class:list={['post', feature && 'post--feature', 'card card--link card--spotlight', className]}>
+  {
+    data.hero && feature && (
+      <div class="post__media">
+        <SmartImage
+          src={data.hero}
+          alt={data.heroAlt ?? ''}
+          width={1200}
+          sizes="(max-width: 60rem) 100vw, 40rem"
+          class="post__img"
+        />
+      </div>
+    )
+  }
+
+  <div class="post__content">
+    <div class="post__meta">
+      <time datetime={formatDateISO(data.pubDate)}>{formatDate(data.pubDate, lang)}</time>
+      {
+        readingMinutes && (
+          <span>
+            {readingMinutes} {t('blog.readingTime')}
+          </span>
+        )
+      }
+    </div>
+
+    <h3 class="card__title post__title">
+      <a class="card__link" href={href}>{data.title}</a>
+    </h3>
+
+    <p class="card__body">{data.description}</p>
+
+    <div class="card__foot post__foot">
+      {
+        data.tags.length > 0 && (
+          <ul class="post__tags" role="list">
+            {data.tags.slice(0, 3).map((tag) => (
+              <li>#{tag}</li>
+            ))}
+          </ul>
+        )
+      }
+      <span class="post__more">
+        {t('action.readMore')}
+        <Icon name="arrowRight" />
+      </span>
+    </div>
+  </div>
+</article>
+
+<style>
+  .post {
+    --card-pad: 0;
+    overflow: hidden;
+  }
+
+  .post__media {
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--c-surface-3);
+  }
+
+  .post__img {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+    transition: transform var(--dur-slower) var(--ease-out);
+  }
+
+  .post:hover .post__img {
+    transform: scale(1.03);
+  }
+
+  .post__content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: var(--space-lg);
+  }
+
+  .post__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .post__title {
+    margin-block-start: var(--space-sm);
+  }
+
+  .post--feature .post__title {
+    font-size: var(--fs-xl);
+  }
+
+  .post__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+  }
+
+  .post__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin: 0;
+    padding: 0;
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .post__more {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: var(--fs-xs);
+    font-weight: var(--weight-semibold);
+    color: var(--c-accent);
+    opacity: 0;
+    transform: translateX(-0.35rem);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out);
+  }
+
+  .post:hover .post__more,
+  .post:focus-within .post__more {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (max-width: 48rem) {
+    .post__more {
+      opacity: 1;
+      transform: none;
+    }
+  }
+</style>

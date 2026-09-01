@@ -1,0 +1,263 @@
+---
+import Icon from '../base/Icon.astro';
+import { localePath, useTranslations, type LocaleCode } from '../../i18n';
+
+interface Props {
+  lang: LocaleCode;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const strings = {
+  empty: t('search.empty'),
+  emptyHint: t('search.emptyHint'),
+  idle: t('search.idle'),
+  groups: {
+    wiki: t('search.group.wiki'),
+    codex: t('search.group.codex'),
+    blog: t('search.group.blog'),
+    page: t('search.group.page'),
+  },
+};
+---
+
+<dialog
+  class="search"
+  data-search-dialog
+  data-endpoint={`${localePath(lang)}search.json`}
+  data-strings={JSON.stringify(strings)}
+  aria-label={t('action.search')}
+>
+  <div class="search__panel">
+    <div class="search__field">
+      <Icon name="search" class="search__icon" />
+      <input
+        type="search"
+        class="search__input"
+        data-search-input
+        placeholder={t('search.placeholder')}
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="search-results"
+        aria-autocomplete="list"
+      />
+      <button type="button" class="search__close" aria-label={t('nav.close')} data-search-close>
+        <kbd>Esc</kbd>
+      </button>
+    </div>
+
+    <div class="search__body scroll-thin">
+      <p class="search__status" data-search-status></p>
+      <ul id="search-results" class="search__results" role="listbox" data-search-results></ul>
+    </div>
+
+    <footer class="search__foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> {t('search.hintNav')}</span>
+      <span><kbd>↵</kbd> {t('search.hintSelect')}</span>
+      <span><kbd>Esc</kbd> {t('search.hintClose')}</span>
+    </footer>
+  </div>
+</dialog>
+
+<style>
+  .search {
+    inline-size: min(38rem, calc(100vw - 2rem));
+    margin: min(12vh, 7rem) auto auto;
+    padding: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  .search::backdrop {
+    background: color-mix(in oklab, var(--hue-navy-900) 62%, transparent);
+    backdrop-filter: blur(6px);
+    animation: fade-in var(--dur-base) var(--ease-out);
+  }
+
+  .search[open] .search__panel {
+    animation: search-in var(--dur-base) var(--ease-out);
+  }
+
+  @keyframes search-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.75rem) scale(0.985);
+    }
+  }
+
+  .search__panel {
+    display: flex;
+    flex-direction: column;
+    max-block-size: min(32rem, 76vh);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line-strong);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+
+  .search__field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  .search__icon {
+    color: var(--c-text-faint);
+    flex: none;
+  }
+
+  .search__input {
+    flex: 1;
+    min-inline-size: 0;
+    border: 0;
+    background: none;
+    outline: none;
+    font-size: var(--fs-md);
+    color: var(--c-text);
+  }
+
+  .search__input::placeholder {
+    color: var(--c-text-faint);
+  }
+
+  .search__input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .search__close {
+    flex: none;
+  }
+
+  .search__body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .search__status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    padding: var(--space-xl) var(--space-lg);
+    color: var(--c-text-muted);
+    font-size: var(--fs-sm);
+    text-align: center;
+  }
+
+  .search__status :global(strong) {
+    color: var(--c-text);
+    font-weight: var(--weight-semibold);
+  }
+
+  .search__results {
+    list-style: none;
+    margin: 0;
+    padding: var(--space-xs);
+  }
+
+  .search__results :global(li) {
+    border-radius: var(--radius-sm);
+  }
+
+  .search__results :global(li[data-active]) {
+    background: var(--c-accent-soft);
+  }
+
+  .search__results :global(a) {
+    display: grid;
+    gap: 0.15rem;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+  }
+
+  .search__results :global(.search__group) {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-accent);
+  }
+
+  .search__results :global(.search__title) {
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    line-height: var(--lh-snug);
+  }
+
+  .search__results :global(.search__desc) {
+    font-size: var(--fs-xs);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .search__results :global(mark) {
+    background: var(--c-warm-soft);
+    color: inherit;
+    border-radius: 2px;
+    padding-inline: 0.1em;
+  }
+
+  .search__foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-lg);
+    border-block-start: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    font-size: var(--fs-2xs);
+    color: var(--c-text-faint);
+  }
+
+  .search__foot span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+  }
+
+  kbd {
+    display: inline-block;
+    min-inline-size: 1.4em;
+    padding: 0.1em 0.35em;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--c-line-strong);
+    background: var(--c-surface-3);
+    color: var(--c-text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 30rem) {
+    .search {
+      margin-block-start: 0;
+      inline-size: 100vw;
+      max-inline-size: 100vw;
+    }
+    .search__panel {
+      border-radius: 0;
+      max-block-size: 100svh;
+      block-size: 100svh;
+    }
+    .search__foot {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  import { initSearch } from '../../scripts/search';
+  initSearch();
+</script>

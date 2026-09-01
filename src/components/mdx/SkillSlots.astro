@@ -1,0 +1,288 @@
+---
+import { Image } from 'astro:assets';
+
+import aSkill from '../../assets/images/ktm2/wiki/skillslot/a_skill.png';
+import lSkill from '../../assets/images/ktm2/wiki/skillslot/l_skill.png';
+import pSkill from '../../assets/images/ktm2/wiki/skillslot/p_skill.png';
+import { splitLocalePath, type LocaleCode } from '../../i18n';
+
+interface Props {
+  /** Defaults to the language of the page being rendered. */
+  lang?: LocaleCode;
+}
+
+const { lang = splitLocalePath(Astro.url.pathname).lang } = Astro.props;
+
+const SLOTS = [
+  {
+    key: 'A',
+    icon: aSkill,
+    name: { en: 'Active', 'zh-cn': '主动' },
+    body: {
+      en: 'Fired by the player with right-click or a bound key. One per piece of equipment, never more.',
+      'zh-cn': '由玩家用右键或自定义按键主动释放。每件装备最多只有一个。',
+    },
+  },
+  {
+    key: 'P',
+    icon: pSkill,
+    name: { en: 'Passive', 'zh-cn': '被动' },
+    body: {
+      en: 'Applies on its own once its condition is met. Conditions and effects are the widest of the three.',
+      'zh-cn': '满足条件后自动生效。三者之中触发条件与效果最宽泛。',
+    },
+  },
+  {
+    key: 'L',
+    icon: lSkill,
+    name: { en: 'Linked', 'zh-cn': '联动' },
+    body: {
+      en: 'Reacts to your other gear, or to creatures nearby. The reason a build is more than a sum of items.',
+      'zh-cn': '与你的其它装备或周围的生物产生联动。正是它让配装不只是道具的叠加。',
+    },
+  },
+] as const;
+
+const LAYOUTS = [
+  {
+    pattern: 'APPP',
+    name: { en: 'The standard', 'zh-cn': '标准型' },
+    body: {
+      en: 'One button to press, three things that always help. The first layout designed, and still the most useful.',
+      'zh-cn': '一个可以按的按键，三个永远在生效的加成。最早设计出来的方案，也依然是最实用的。',
+    },
+  },
+  {
+    pattern: 'APPL',
+    name: { en: 'The all-rounder', 'zh-cn': '综合型' },
+    body: {
+      en: 'Trades one passive for a link. Broad coverage without committing to a build.',
+      'zh-cn': '用一个被动换一个联动。覆盖面广，也不需要为某套配装定死。',
+    },
+  },
+  {
+    pattern: 'APLL',
+    name: { en: 'The combo piece', 'zh-cn': '连携型' },
+    body: {
+      en: 'Two links. Wants specific partners in the other slots and pays off when it gets them.',
+      'zh-cn': '两个联动。需要其它槽位的特定搭档，配齐之后收益很高。',
+    },
+  },
+  {
+    pattern: 'ALLL',
+    name: { en: 'The specialist', 'zh-cn': '特化型' },
+    body: {
+      en: 'All links. Built for one specific set or one specific enemy type.',
+      'zh-cn': '全部联动。为某一套装备或某一类敌人量身打造。',
+    },
+  },
+  {
+    pattern: 'PPPP',
+    name: { en: 'The off-hand', 'zh-cn': '副手型' },
+    body: {
+      en: 'No button at all. For gear that works without being held, or that lives on passive value.',
+      'zh-cn': '完全没有主动技能。适合不需要拿在手上也生效、或者收益全靠被动的装备。',
+    },
+  },
+] as const;
+
+const copy = {
+  en: { types: 'Slot types', layouts: 'Common layouts' },
+  'zh-cn': { types: '槽位类型', layouts: '常见组合' },
+}[lang];
+---
+
+<div class="slots">
+  <section>
+    <h3 class="slots__heading">{copy.types}</h3>
+    <div class="slots__types" data-reveal-stagger>
+      {
+        SLOTS.map((slot, index) => (
+          <article class="slot" data-reveal="rise" style={`--reveal-index:${index}`}>
+            <Image
+              src={slot.icon}
+              alt=""
+              width={32}
+              height={32}
+              class="slot__icon"
+              loading="lazy"
+              decoding="async"
+            />
+            <div>
+              <h4 class="slot__name">
+                <span class="slot__key">{slot.key}</span>
+                {slot.name[lang]}
+              </h4>
+              <p class="slot__body">{slot.body[lang]}</p>
+            </div>
+          </article>
+        ))
+      }
+    </div>
+  </section>
+
+  <section>
+    <h3 class="slots__heading">{copy.layouts}</h3>
+    <ul class="slots__layouts" role="list">
+      {
+        LAYOUTS.map((layout) => (
+          <li class="layout">
+            <span class="layout__pattern" aria-hidden="true">
+              {[...layout.pattern].map((letter) => (
+                <span class={`layout__cell layout__cell--${letter.toLowerCase()}`}>{letter}</span>
+              ))}
+            </span>
+            <div>
+              <h4 class="layout__name">{layout.name[lang]}</h4>
+              <p class="layout__body">{layout.body[lang]}</p>
+            </div>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+</div>
+
+<style>
+  .slots {
+    display: grid;
+    gap: var(--space-2xl);
+    margin-block: 2em;
+  }
+
+  .slots__heading {
+    margin: 0 0 var(--space-md);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .slots__types {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+  }
+
+  .slot {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+  }
+
+  .slot__icon {
+    inline-size: 2rem;
+    block-size: 2rem;
+    flex: none;
+    image-rendering: pixelated;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .slot__name {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin: 0;
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .slot__key {
+    display: grid;
+    place-items: center;
+    inline-size: 1.35em;
+    block-size: 1.35em;
+    border-radius: var(--radius-xs);
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+  }
+
+  .slot__body {
+    margin-block-start: 0.35em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+
+  .slots__layouts {
+    display: grid;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0;
+  }
+
+  .layout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-lg);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line-faint);
+    background: var(--c-surface-2);
+  }
+
+  .layout::before {
+    display: none;
+  }
+
+  .layout__pattern {
+    display: flex;
+    gap: 3px;
+    flex: none;
+  }
+
+  .layout__cell {
+    display: grid;
+    place-items: center;
+    inline-size: 1.65rem;
+    block-size: 1.65rem;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: var(--weight-bold);
+  }
+
+  .layout__cell--a {
+    background: var(--c-warm-soft);
+    color: var(--c-warm);
+  }
+
+  .layout__cell--p {
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+  }
+
+  .layout__cell--l {
+    background: var(--c-arcane-soft);
+    color: var(--c-arcane);
+  }
+
+  .layout__name {
+    margin: 0;
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .layout__body {
+    margin-block-start: 0.3em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+
+  @media (max-width: 34rem) {
+    .layout {
+      flex-direction: column;
+      gap: var(--space-sm);
+    }
+  }
+</style>

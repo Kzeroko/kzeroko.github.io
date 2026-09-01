@@ -1,0 +1,274 @@
+---
+import { useTranslations, type LocaleCode } from '../../i18n';
+
+/**
+ * Structured tail of a character entry: traits, timeline, ties and voice.
+ *
+ * Kept out of the MDX body on purpose — this is data with a fixed shape, and
+ * rendering it from frontmatter guarantees every character card presents the
+ * same sections in the same order in both languages.
+ */
+interface Props {
+  lang: LocaleCode;
+  accent: string;
+  traits: { title: string; body: string }[];
+  timeline: { when: string; what: string }[];
+  relations: { name: string; note: string }[];
+  voice: { scene: string; line: string }[];
+}
+
+const { lang, accent, traits, timeline, relations, voice } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<div class="appendix" data-accent={accent}>
+  {
+    traits.length > 0 && (
+      <section class="appendix__section">
+        <h2 class="appendix__title">{t('codex.character.traits')}</h2>
+        <div class="traits" data-reveal-stagger>
+          {traits.map((trait, index) => (
+            <article class="trait" data-reveal="rise" style={`--reveal-index:${index}`}>
+              <h3>{trait.title}</h3>
+              <p>{trait.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  {
+    timeline.length > 0 && (
+      <section class="appendix__section">
+        <h2 class="appendix__title">{t('codex.character.timeline')}</h2>
+        <ol class="timeline" role="list" data-reveal-stagger>
+          {timeline.map((event, index) => (
+            <li data-reveal="fade" style={`--reveal-index:${index}`}>
+              <span class="timeline__when">{event.when}</span>
+              <span class="timeline__what">{event.what}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+    )
+  }
+
+  {
+    relations.length > 0 && (
+      <section class="appendix__section">
+        <h2 class="appendix__title">{t('codex.character.relations')}</h2>
+        <dl class="relations">
+          {relations.map((relation) => (
+            <>
+              <dt>{relation.name}</dt>
+              <dd>{relation.note}</dd>
+            </>
+          ))}
+        </dl>
+      </section>
+    )
+  }
+
+  {
+    voice.length > 0 && (
+      <section class="appendix__section">
+        <h2 class="appendix__title">{t('codex.character.quotes')}</h2>
+        <ul class="voice" role="list" data-reveal-stagger>
+          {voice.map((line, index) => (
+            <li data-reveal="rise" style={`--reveal-index:${index}`}>
+              <span class="voice__scene">{line.scene}</span>
+              <p class="voice__line">{line.line}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+</div>
+
+<style>
+  .appendix {
+    display: grid;
+    gap: var(--space-2xl);
+    margin-block-start: var(--space-2xl);
+    padding-block-start: var(--space-2xl);
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .appendix__title {
+    margin-block-end: var(--space-lg);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  /* -------------------------------------------------------------- traits -- */
+
+  .traits {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+  }
+
+  .trait {
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    border-inline-start: 2px solid var(--accent);
+    background: var(--c-surface);
+  }
+
+  .trait h3 {
+    font-family: var(--font-display);
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .trait p {
+    margin-block-start: 0.4em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  /* ------------------------------------------------------------ timeline -- */
+
+  .timeline {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    border-inline-start: 1px solid var(--c-line);
+  }
+
+  .timeline li {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(6rem, max-content) 1fr;
+    gap: var(--space-md) var(--space-lg);
+    padding: var(--space-sm) 0 var(--space-sm) var(--space-lg);
+  }
+
+  .timeline li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: -4px;
+    inset-block-start: 1.25em;
+    inline-size: 7px;
+    block-size: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--c-bg);
+  }
+
+  .timeline__when {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--accent);
+    letter-spacing: var(--tracking-wide);
+    padding-block-start: 0.2em;
+  }
+
+  .timeline__what {
+    font-size: var(--fs-sm);
+    color: var(--c-text-soft);
+    line-height: var(--lh-normal);
+  }
+
+  /* ----------------------------------------------------------- relations -- */
+
+  /*
+   * One grid for the whole list rather than a grid per row, so the note column
+   * starts at the same x no matter how long a name is.
+   */
+  .relations {
+    display: grid;
+    grid-template-columns: minmax(7rem, max-content) 1fr;
+    column-gap: var(--space-lg);
+  }
+
+  .relations :is(dt, dd) {
+    padding-block: 0 var(--space-md);
+    margin-block-start: var(--space-md);
+    border-block-end: 1px solid var(--c-line-faint);
+  }
+
+  .relations dt {
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    font-size: var(--fs-sm);
+  }
+
+  .relations dd {
+    margin-inline: 0;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  /* --------------------------------------------------------------- voice -- */
+
+  .voice {
+    display: grid;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0;
+  }
+
+  .voice li {
+    display: grid;
+    grid-template-columns: minmax(7rem, max-content) 1fr;
+    gap: var(--space-lg);
+    align-items: baseline;
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    background: var(--c-surface-2);
+    transition: background-color var(--dur-base) var(--ease-out);
+  }
+
+  .voice li:hover {
+    background: var(--accent-soft);
+  }
+
+  .voice__scene {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .voice__line {
+    font-size: var(--fs-sm);
+    color: var(--c-text-soft);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  @media (max-width: 44rem) {
+    .timeline li,
+    .voice li {
+      grid-template-columns: 1fr;
+      gap: var(--space-2xs);
+    }
+
+    .relations {
+      grid-template-columns: 1fr;
+    }
+
+    .relations dt {
+      border-block-end: 0;
+      padding-block-end: 0;
+    }
+
+    .relations dd {
+      margin-block-start: var(--space-2xs);
+    }
+  }
+</style>

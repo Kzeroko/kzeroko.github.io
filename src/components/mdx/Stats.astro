@@ -1,0 +1,69 @@
+---
+/** Row of headline figures. Used for pack facts and system summaries. */
+interface Props {
+  items: { value: string; label: string; hint?: string }[];
+  class?: string;
+}
+
+const { items, class: className } = Astro.props;
+---
+
+<dl class:list={['stats', className]} data-reveal-stagger>
+  {
+    items.map((item, index) => (
+      <div class="stats__item" data-reveal="rise" style={`--reveal-index:${index}`}>
+        <dt>{item.label}</dt>
+        <dd>
+          <span class="stats__value">{item.value}</span>
+          {item.hint && <span class="stats__hint">{item.hint}</span>}
+        </dd>
+      </div>
+    ))
+  }
+</dl>
+
+<style>
+  .stats {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+    margin-block: 1.75em;
+  }
+
+  .stats__item {
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+  }
+
+  .stats dt {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .stats dd {
+    margin: 0;
+    margin-block-start: 0.35rem;
+  }
+
+  .stats__value {
+    display: block;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--c-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stats__hint {
+    display: block;
+    margin-block-start: 0.2rem;
+    font-size: var(--fs-xs);
+    color: var(--c-text-muted);
+  }
+</style>

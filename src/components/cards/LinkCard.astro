@@ -1,0 +1,136 @@
+---
+import Icon from '../base/Icon.astro';
+import type { IconName } from '../base/icons';
+
+/** Generic navigational card: used for wiki topics, codex sections and modules. */
+interface Props {
+  href: string;
+  title: string;
+  body?: string;
+  eyebrow?: string;
+  icon?: IconName;
+  chips?: string[];
+  accent?: string;
+  external?: boolean;
+  class?: string;
+}
+
+const {
+  href,
+  title,
+  body,
+  eyebrow,
+  icon,
+  chips = [],
+  accent = 'teal',
+  external = false,
+  class: className,
+} = Astro.props;
+---
+
+<article class:list={['card card--link card--spotlight linkcard', className]} data-accent={accent}>
+  {
+    icon && (
+      <span class="linkcard__icon" aria-hidden="true">
+        <Icon name={icon} />
+      </span>
+    )
+  }
+
+  {eyebrow && <p class="linkcard__eyebrow">{eyebrow}</p>}
+
+  <h3 class="card__title">
+    <a
+      class="card__link"
+      href={href}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noopener noreferrer' : undefined}
+    >
+      {title}
+    </a>
+  </h3>
+
+  {body && <p class="card__body">{body}</p>}
+
+  {
+    chips.length > 0 && (
+      <ul class="linkcard__chips" role="list">
+        {chips.map((chip) => (
+          <li>{chip}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  <span class="linkcard__arrow" aria-hidden="true">
+    <Icon name={external ? 'arrowUpRight' : 'arrowRight'} />
+  </span>
+</article>
+
+<style>
+  .linkcard {
+    --card-pad: var(--space-lg);
+    padding-inline-end: var(--space-2xl);
+  }
+
+  .linkcard__icon {
+    display: grid;
+    place-items: center;
+    inline-size: 2.4rem;
+    block-size: 2.4rem;
+    margin-block-end: var(--space-md);
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    transition: transform var(--dur-base) var(--ease-spring);
+  }
+
+  .linkcard:hover .linkcard__icon {
+    transform: translateY(-2px) rotate(-4deg);
+  }
+
+  .linkcard__eyebrow {
+    margin-block-end: var(--space-2xs);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .linkcard__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin-block-start: var(--space-md);
+    padding: 0;
+  }
+
+  .linkcard__chips li {
+    padding: 0.2em 0.6em;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--c-line);
+    font-size: var(--fs-2xs);
+    color: var(--c-text-faint);
+  }
+
+  .linkcard__arrow {
+    position: absolute;
+    inset-block-start: var(--space-lg);
+    inset-inline-end: var(--space-lg);
+    color: var(--c-text-faint);
+    opacity: 0;
+    transform: translate(-0.35rem, 0.35rem);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out),
+      color var(--dur-base) var(--ease-out);
+  }
+
+  .linkcard:hover .linkcard__arrow,
+  .linkcard:focus-within .linkcard__arrow {
+    opacity: 1;
+    transform: none;
+    color: var(--accent);
+  }
+</style>

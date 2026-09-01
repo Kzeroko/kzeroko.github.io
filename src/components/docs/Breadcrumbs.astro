@@ -1,0 +1,69 @@
+---
+import Icon from '../base/Icon.astro';
+import { useTranslations, type LocaleCode } from '../../i18n';
+
+interface Props {
+  lang: LocaleCode;
+  items: { label: string; href?: string }[];
+  class?: string;
+}
+
+const { lang, items, class: className } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<nav class:list={['crumbs', className]} aria-label={t('nav.breadcrumb')}>
+  <ol role="list">
+    {
+      items.map((item, index) => (
+        <li>
+          {item.href && index < items.length - 1 ? (
+            <a href={item.href}>{item.label}</a>
+          ) : (
+            <span aria-current="page">{item.label}</span>
+          )}
+          {index < items.length - 1 && <Icon name="chevronRight" class="crumbs__sep" />}
+        </li>
+      ))
+    }
+  </ol>
+</nav>
+
+<style>
+  .crumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.15rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .crumbs li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+  }
+
+  .crumbs a {
+    color: var(--c-text-muted);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .crumbs a:hover {
+    color: var(--c-accent);
+  }
+
+  .crumbs [aria-current='page'] {
+    color: var(--c-text-soft);
+  }
+
+  .crumbs__sep {
+    inline-size: 0.8em;
+    block-size: 0.8em;
+    opacity: 0.5;
+  }
+</style>

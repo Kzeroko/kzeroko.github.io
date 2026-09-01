@@ -1,0 +1,79 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../../layouts/PageLayout.astro';
+import PostCard from '../../../../components/cards/PostCard.astro';
+import Button from '../../../../components/base/Button.astro';
+import { localeCodes, localePath, readingTime, useTranslations, type LocaleCode } from '../../../../i18n';
+import { getBlogPosts, tagSlug, type BlogEntry } from '../../../../lib/content';
+
+export const getStaticPaths = (async () => {
+  const paths = [];
+  for (const lang of localeCodes) {
+    const posts = await getBlogPosts(lang);
+    const tags = new Set(posts.flatMap((post) => post.data.tags));
+    for (const tag of tags) {
+      paths.push({
+        params: { lang, tag: tagSlug(tag) },
+        props: { posts: posts.filter((post) => post.data.tags.includes(tag)), tag },
+      });
+    }
+  }
+  return paths;
+}) satisfies GetStaticPaths;
+
+interface Props {
+  posts: BlogEntry[]; tag: string;
+}
+
+const { posts, tag } = Astro.props as Props;
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: t('blog.title'), href: localePath(lang, 'blog') },
+  { label: `#${tag}` },
+];
+---
+
+<PageLayout
+  lang={lang}
+  title={`#${tag}`}
+  description={`${t('blog.tagged')} #${tag} — ${posts.length} ${t('blog.postsCount')}`}
+  eyebrow={t('blog.tagged')}
+  heading={`#${tag}`}
+  lead={`${posts.length} ${t('blog.postsCount')}`}
+  crumbs={crumbs}
+  noindex
+  translatedPaths={Object.fromEntries(localeCodes.map((code) => [code, localePath(code, 'blog')]))}
+>
+  <div class="shell shell--wide tagpage">
+    <div class="grid grid--3" data-reveal-stagger>
+      {
+        posts.map((post, index) => (
+          <div data-reveal="rise" style={`--reveal-index:${index}`}>
+            <PostCard lang={lang} post={post} readingMinutes={readingTime(post.body ?? '', lang)} />
+          </div>
+        ))
+      }
+    </div>
+
+    <Button href={localePath(lang, 'blog')} variant="ghost" icon="arrowLeft" class="tagpage__back">
+      {t('blog.title')}
+    </Button>
+  </div>
+</PageLayout>
+
+<style>
+  .tagpage {
+    display: grid;
+    gap: var(--space-2xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+    justify-items: start;
+  }
+
+  .tagpage__back {
+    justify-self: start;
+  }
+</style>

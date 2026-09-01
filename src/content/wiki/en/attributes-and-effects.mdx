@@ -1,0 +1,165 @@
+---
+title: "Attributes & effects"
+description: "The complete IsekaiExpansion attribute list and status effect registry, with ranges, defaults and what each one actually does."
+category: combat
+order: 10
+updated: 2026-09-01
+tagline: "Every custom stat and status in the pack, with its real range."
+tags: ['combat', 'reference', 'attributes']
+---
+
+IsekaiExpansion registers **44 `isekaiexpansion:*` attributes** and **7 custom `spell_power:*` school attributes**. The ranges and defaults below are the shipped values.
+
+## Resource & shield
+
+| Attribute | Range / default | What it does |
+| --- | --- | --- |
+| `max_energy` | `0–10000`, default `30` | Astral Energy cap. Current energy is clamped down if it exceeds the cap. |
+| `energy_regen_speed` | `0.2–200`, default `0.5` | Passive refill interval, `regen_ticks = 20 / value`. Higher is faster. |
+| `max_shield_gauge` | `0–1000`, default `75` | Base shield gauge before `shield_power` is applied. |
+| `shield_gauge_regen_speed` | `0.5–10`, default `2` | Gauge refill interval, `max(1, round(20 / value))` ticks. |
+
+## Combat, recovery, threat & control
+
+| Attribute | Range / default | What it does |
+| --- | --- | --- |
+| `ability_haste` | `-99–500`, default `0` | Reduces skill cooldowns with haste math. Negative haste **lengthens** them. |
+| `armor_penetration` | `0–100`, default `0` | Physical hits ignore part of target armour before vanilla reduction. Applies to melee, ranged and the non-magic fallback category. |
+| `magic_penetration` | `0–100`, default `0` | Spell damage ignores part of generic Spell Power resistance. Does **not** reduce school-specific resistances. |
+| `tenacity` | `0–100`, default `0` | Shortens crowd control and makes hostile effects harder to land. Reduction caps at 95%. |
+| `enmity` | `0–100`, default `0` | Increases outgoing damage **at low health**. |
+| `stamina` | `0–100`, default `0` | Increases outgoing damage **at high health**. |
+| `omnivamp` | `0–100`, default `0` | Heals from post-mitigation damage. Extra hits in the same tick use AOE falloff. |
+| `shield_power` | `0–100`, default `0` | Raises gauge cap, gauge regen amount and guard cost efficiency. |
+| `aggro_generation` | `-100–500`, default `0` | How strongly mobs retarget onto you, on hit and during Provoke. |
+| `burst_damage` | `0–1000`, default `0` | Only affects damage sourced from `isekaiexpansion:ultimate_burst`. |
+| `energy_leech` | `0–100`, default `0` | Restores Astral Energy after spell, melee or ranged hits. |
+| `shield_break` | `0–100`, default `0` | Extra damage against a player actively guarding with usable shield gauge. |
+| `evasion_counter` | `0–1000`, default `0` | When Dodge or Foresight prevents damage, lets the defender counterattack a nearby attacker. |
+| `debuff_accuracy` | `0–1000`, default `0` | Pushes harmful effects through Tenacity. At 100% or more the accuracy roll is forced to pass. |
+| `guts_chance` | `0–100`, default `0` | Chance to survive lethal damage at 1 HP, **only if health was above 25% before the hit**. |
+| `stealth_efficiency` | `0–100`, default `0` | Shrinks hostile detection range. At 100% passive acquisition fails outright. |
+| `environmental_resistance` | `0–100`, default `0` | Reduces fire/lava, hot floor, freezing, dry-out, cactus and berry bush damage — and Inversed Breathing land damage. Does **not** reduce drowning or starvation. |
+
+<Callout type="tip" title="Enmity and Stamina are opposites on purpose">
+They reward two different playstyles and stack badly together. Pick the one your build actually produces: a glass cannon that never gets hit wants Stamina; a bruiser that fights at low health wants Enmity.
+</Callout>
+
+## Critical & spell wrappers
+
+These exist so KTM2 gear can carry one consistent stat name while the value is routed into the mod that owns the mechanic.
+
+| Attribute | Routed into |
+| --- | --- |
+| `melee_crit_chance` | `playerex:melee_crit_chance` |
+| `melee_crit_damage` | `playerex:melee_crit_damage` |
+| `range_crit_chance` | `playerex:ranged_crit_chance` |
+| `range_crit_damage` | `playerex:ranged_crit_damage` |
+| `magic_crit_chance` | `spell_power:critical_chance` |
+| `magic_crit_damage` | `spell_power:critical_damage` |
+| `elemental_power` | fire, frost, lightning, water, wind and earth spell power |
+| `dys_aether` | `elemental_power`, plus arcane, soul and dark |
+| `aether_power` | `dys_aether`, plus healing, light and astral |
+
+The last three nest: `aether_power` is the widest, feeding `dys_aether`, which feeds `elemental_power`. One point of Aether Power therefore touches every school.
+
+## PlayerEx base stat wrappers
+
+Seven pass-through wrappers, each `target += value × 1.0`:
+
+`constitution` · `strength` · `dexterity` · `intelligence` · `technique` · `perception` · `belief`
+
+## Social
+
+| Attribute | Range / default | What it does |
+| --- | --- | --- |
+| `eloquence` | `-100–1000`, default `0` | Verbal persuasion gate used by NPC menus and dialogue branches through `NpcDialogueRequirements`. |
+| `charm` | `-100–1000`, default `0` | Presence and first-impression gate, checked independently of Eloquence. |
+
+## Miscellaneous
+
+| Attribute | Range / default | What it does |
+| --- | --- | --- |
+| `tenju_affinity` | `0–∞`, default `0` | Raises Tenju effect level while using Origami weapons. |
+| `bonus_damage_level` | `0–9`, default `0` | Strengthens each hit produced by the `bonus_damage` effect. |
+| `magic_sword_sense` | `0–30`, default `0` | Extends floating sword and attachable lock-on range. |
+
+## Custom spell schools
+
+| Attribute | School |
+| --- | --- |
+| `spell_power:magic_water` | Water — damage and school-based healing |
+| `spell_power:magic_wind` | Wind |
+| `spell_power:magic_earth` | Earth |
+| `spell_power:magic_light` | Light |
+| `spell_power:magic_dark` | Dark |
+| `spell_power:magic_astral` | Astral |
+| `spell_power:magic_physical_melee` | Physical melee — lets Spell Engine damage read as melee-like magic |
+
+---
+
+## Status effects
+
+### Combat & weapon effects
+
+| Effect | Type / category | Clearable | What it does |
+| --- | --- | --- | --- |
+| `tenju` | Beneficial / ATTACK | no | Origami weapon buff. Held-only. Origami melee damage counts as magic category while active. |
+| `pandoras_vision` | Beneficial / ATTACK | yes | Pandora self-buff; also enables Pandora on-hit effects. |
+| `pandoras_dance` | Beneficial / ATTACK | yes | Pandora self-buff used with Vision for the stronger on-hit branch. |
+| `enhanced_strength` | Beneficial / ATTACK | yes | Burst strength buff from Prosthetic Armcoat, synced for custom visuals. |
+| `demonic_power` | Beneficial / ATTACK | yes | Kisara's Demonset buff. Unlocks Demon Sword's conditional heal and Weakness proc with the set worn. |
+| `fire_of_rebirth` | Beneficial / REGEN | no | Strong timed healing; applied by Phoenix Mantle after its protection trigger. |
+| `stagger` | Harmful / CC | yes | Hard disable. No attacking, swinging, normal movement, equipment use or casting. |
+| `ego_return` | Beneficial / COMMON | no | Domain of Ego stack marker; each special shot refreshes or raises the amplifier. |
+| `groove` | Beneficial / ATTACK | no | Raven kill-streak buff. Held-only. |
+| `adapt` | Beneficial / DEFENSE | no | Raven defensive buff. Held-only. |
+| `ittou_shura` | Beneficial / IMMUNITY | no | Intetsu overdrive; also grants fall immunity. Main-hand only. |
+| `foresight` | Beneficial / IMMUNITY | no | Dodge state. Prevents damage unless the source is undodgeable; attacking or being hit removes it. |
+| `provoke` | Harmful / CC | no | Taunt aura. Every second it pressures nearby mobs onto you and strips Provoke from other nearby players. |
+| `shadow_phase` | Beneficial / STEALTH | no | Renders at 25% alpha, counts as invisible, blocks detection, and removes itself when a hostile is within 2 blocks. |
+| `charm` | Harmful / CC | yes | Adds `CharmGoal`; monsters and angerable mobs fail `canSee` against players. Charmed villagers can give trade discounts. |
+| `fear` | Harmful / CC | yes | Adds `FearGoal` to path-aware mobs and blocks revenge targeting. |
+| `bonus_damage` | Beneficial / ATTACK | yes | Extra no-cooldown hits when you deal damage. |
+| `minds_eye` | Beneficial / ATTACK | yes | Melee crit chance. |
+| `shatter_strike` | Beneficial / ATTACK | yes | Melee crit damage. |
+| `lock_on_weakness` | Beneficial / ATTACK | yes | Ranged crit chance. |
+| `fatal_pierce` | Beneficial / ATTACK | yes | Ranged crit damage. |
+| `astral_concentration` | Beneficial / ATTACK | yes | Magic crit chance. |
+| `astral_annihilation` | Beneficial / ATTACK | yes | Magic crit damage. |
+| `magic_field` | Beneficial / ATTACK | yes | Astral Energy field buff. |
+| `silence` | Harmful / CC | no | Spell Engine action-impairing silence. |
+| `armor_break` | Harmful / DEFENSE | yes | Reduces armour. |
+| `inversed_breathing` | Beneficial / UTIL | yes | Breathe underwater — but players lose air on land and take damage once air crosses −20. |
+| `death_defiance` | Beneficial / IMMUNITY | yes | While active, fatal damage leaves you at 1 HP. Separate from the `guts_chance` roll. |
+
+### Damage over time
+
+| Effect | Damage type |
+| --- | --- |
+| `burning` | `minecraft:on_fire` |
+| `bleeding` | `minecraft:generic` |
+| `poisoned` | `minecraft:magic` |
+
+### Elemental vulnerability
+
+These mark a target as open to a specific school. Four of them are consumed by a direct hit; two persist.
+
+| Effect | Strongly weak to | Mildly weak to | Removed by direct hit | Side effect |
+| --- | --- | --- | --- | --- |
+| `electrified` | Frost | Water | yes | — |
+| `iced` | Water | Lightning | yes | Extinguishes the target every tick |
+| `ignite` | Wind | Lightning | yes | Keeps the target on fire for 5s |
+| `wet` | Earth | Frost | yes | Extinguishes the target every tick |
+| `luminous` | Dark | Arcane | no | — |
+| `shadowed` | Light | Arcane | no | — |
+
+<Callout type="tip" title="This is the combo system">
+Apply a vulnerability, then hit it with the matching school. The four consumable ones are meant to be spent immediately; Luminous and Shadowed persist, so they suit sustained pressure instead.
+</Callout>
+
+### Persistent penalties
+
+| Effect | What it does |
+| --- | --- |
+| `energy_inefficiency` | Astral Energy sickness. Prevents energy spending, disables sprinting, increases damage taken, lowers movement and lowers Aether Power. |

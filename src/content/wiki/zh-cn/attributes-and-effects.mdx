@@ -1,0 +1,165 @@
+---
+title: "属性与状态"
+description: "IsekaiExpansion 的完整属性列表与状态效果注册表，含取值范围、默认值以及各自的实际作用。"
+category: combat
+order: 10
+updated: 2026-09-01
+tagline: "整合包里全部的自定义属性与状态，附真实数值范围。"
+tags: ['战斗', '速查', '属性']
+---
+
+IsekaiExpansion 注册了 **44 条 `isekaiexpansion:*` 属性**与 **7 条自定义 `spell_power:*` 学派属性**。下面的范围与默认值都是实际发布的数值。
+
+## 资源与护盾
+
+| 属性 | 范围 / 默认 | 作用 |
+| --- | --- | --- |
+| `max_energy` | `0–10000`，默认 `30` | 星能上限。当前星能超过上限时会被压回。 |
+| `energy_regen_speed` | `0.2–200`，默认 `0.5` | 被动回复间隔，`回复刻 = 20 / 数值`。越高越快。 |
+| `max_shield_gauge` | `0–1000`，默认 `75` | 应用 `shield_power` 之前的基础护盾槽。 |
+| `shield_gauge_regen_speed` | `0.5–10`，默认 `2` | 护盾槽回复间隔，`max(1, round(20 / 数值))` 刻。 |
+
+## 战斗、恢复、仇恨与控制
+
+| 属性 | 范围 / 默认 | 作用 |
+| --- | --- | --- |
+| `ability_haste` | `-99–500`，默认 `0` | 按急速公式缩短技能冷却。**负值会拉长冷却**。 |
+| `armor_penetration` | `0–100`，默认 `0` | 物理伤害在原版减免前无视部分目标护甲。适用于近战、远程与非魔法回退类别。 |
+| `magic_penetration` | `0–100`，默认 `0` | 法术伤害无视部分通用法术抗性。**不**削减按学派细分的抗性条目。 |
+| `tenacity` | `0–100`，默认 `0` | 缩短控制时间，并让有害效果更难命中。减免上限 95%。 |
+| `enmity` | `0–100`，默认 `0` | **生命值低时**提升输出。 |
+| `stamina` | `0–100`，默认 `0` | **生命值高时**提升输出。 |
+| `omnivamp` | `0–100`，默认 `0` | 按减免后的伤害回复生命。同一刻内后续命中按 AOE 衰减计算。 |
+| `shield_power` | `0–100`，默认 `0` | 提升护盾槽上限、回复量与格挡消耗效率。 |
+| `aggro_generation` | `-100–500`，默认 `0` | 命中时与嘲讽期间，怪物切换目标到你身上的强度。 |
+| `burst_damage` | `0–1000`，默认 `0` | 仅对来源为 `isekaiexpansion:ultimate_burst` 的伤害生效。 |
+| `energy_leech` | `0–100`，默认 `0` | 法术、近战或远程命中后回复星能。 |
+| `shield_break` | `0–100`，默认 `0` | 对正在格挡且护盾槽可用的玩家造成额外伤害。 |
+| `evasion_counter` | `0–1000`，默认 `0` | 闪避或先见挡下伤害时，防守方可对附近的攻击者反击。 |
+| `debuff_accuracy` | `0–1000`，默认 `0` | 让有害效果穿透韧性。达到 100% 或以上时命中判定强制通过。 |
+| `guts_chance` | `0–100`，默认 `0` | 在致命伤害下以 1 点生命存活的几率，**且仅在受击前生命高于 25% 时**生效。 |
+| `stealth_efficiency` | `0–100`，默认 `0` | 缩小敌对探测范围。100% 时被动索敌完全失效。 |
+| `environmental_resistance` | `0–100`，默认 `0` | 减免火焰/岩浆、灼热地面、冻伤、脱水、仙人掌与浆果丛伤害，以及逆呼吸的陆上伤害。**不**减免溺水与饥饿。 |
+
+<Callout type="tip" title="仇恨与耐力是刻意对立的">
+它们奖励两种不同的打法，叠在一起收益很差。选那个符合你实际打法的：不挨打的爆发流要耐力，残血硬吃的战士流要仇恨。
+</Callout>
+
+## 暴击与法术包装属性
+
+KTM2 的装备只写一个统一的属性名，数值再转到真正实现这套机制的模组上。
+
+| 属性 | 路由到 |
+| --- | --- |
+| `melee_crit_chance` | `playerex:melee_crit_chance` |
+| `melee_crit_damage` | `playerex:melee_crit_damage` |
+| `range_crit_chance` | `playerex:ranged_crit_chance` |
+| `range_crit_damage` | `playerex:ranged_crit_damage` |
+| `magic_crit_chance` | `spell_power:critical_chance` |
+| `magic_crit_damage` | `spell_power:critical_damage` |
+| `elemental_power` | 火、冰霜、雷、水、风、地 六系法术强度 |
+| `dys_aether` | `elemental_power`，外加奥术、灵魂、暗 |
+| `aether_power` | `dys_aether`，外加治疗、光、星界 |
+
+最后三条是嵌套的：`aether_power` 覆盖面最广，喂给 `dys_aether`，后者再喂给 `elemental_power`。所以一点以太之力会波及每一个学派。
+
+## PlayerEx 基础属性包装
+
+七条直通包装，均为 `目标 += 数值 × 1.0`：
+
+`constitution`（体质）· `strength`（力量）· `dexterity`（敏捷）· `intelligence`（智力）· `technique`（技巧）· `perception`（感知）· `belief`（信念）
+
+## 社交
+
+| 属性 | 范围 / 默认 | 作用 |
+| --- | --- | --- |
+| `eloquence` | `-100–1000`，默认 `0` | 口才门槛，由 NPC 菜单与对话分支通过 `NpcDialogueRequirements` 读取。 |
+| `charm` | `-100–1000`，默认 `0` | 气场与第一印象门槛，与口才分别判定。 |
+
+## 杂项
+
+| 属性 | 范围 / 默认 | 作用 |
+| --- | --- | --- |
+| `tenju_affinity` | `0–∞`，默认 `0` | 使用折纸武器时提升天授效果等级。 |
+| `bonus_damage_level` | `0–9`，默认 `0` | 强化 `bonus_damage` 效果打出的每一次追击。 |
+| `magic_sword_sense` | `0–30`，默认 `0` | 延长浮游剑与附着型武器的锁定距离。 |
+
+## 自定义法术学派
+
+| 属性 | 学派 |
+| --- | --- |
+| `spell_power:magic_water` | 水——伤害与基于学派的治疗 |
+| `spell_power:magic_wind` | 风 |
+| `spell_power:magic_earth` | 地 |
+| `spell_power:magic_light` | 光 |
+| `spell_power:magic_dark` | 暗 |
+| `spell_power:magic_astral` | 星界 |
+| `spell_power:magic_physical_melee` | 物理近战——让 Spell Engine 的伤害表现为近战型魔法 |
+
+---
+
+## 状态效果
+
+### 战斗与武器效果
+
+| 效果 | 类型 / 分类 | 可驱散 | 作用 |
+| --- | --- | --- | --- |
+| `tenju`（天授） | 增益 / 攻击 | 否 | 折纸武器增益，仅在手持时保留。生效期间折纸近战伤害按魔法类别计算。 |
+| `pandoras_vision` | 增益 / 攻击 | 是 | 潘多拉自身增益，同时启用潘多拉的命中特效。 |
+| `pandoras_dance` | 增益 / 攻击 | 是 | 与 Vision 搭配使用、进入更强命中分支的自身增益。 |
+| `enhanced_strength` | 增益 / 攻击 | 是 | 义肢外衣的爆发力量增益，已同步用于自定义演出。 |
+| `demonic_power` | 增益 / 攻击 | 是 | 绮良罗魔装套增益。穿齐套装时解锁魔剑的条件治疗与虚弱触发。 |
+| `fire_of_rebirth` | 增益 / 回复 | 否 | 强力的限时治疗，由不死鸟披风在保护触发后施加。 |
+| `stagger`（硬直） | 减益 / 控制 | 是 | 硬控。无法攻击、挥击、正常移动、使用装备或施法。 |
+| `ego_return` | 增益 / 通用 | 否 | 自我领域的层数标记，每次特殊射击刷新或提升层数。 |
+| `groove` | 增益 / 攻击 | 否 | 渡鸦的连杀增益，仅在手持时保留。 |
+| `adapt` | 增益 / 防御 | 否 | 渡鸦的防御增益，仅在手持时保留。 |
+| `ittou_shura`（一刀修罗） | 增益 / 免疫 | 否 | 韧铁的超载状态，同时提供坠落免疫，仅在主手时保留。 |
+| `foresight`（先见） | 增益 / 免疫 | 否 | 闪避状态。除不可闪避的来源外免除伤害；攻击或受击会解除。 |
+| `provoke`（嘲讽） | 减益 / 控制 | 否 | 嘲讽光环。每秒把附近怪物压向你，并移除附近其他玩家身上的嘲讽。 |
+| `shadow_phase`（影遁） | 增益 / 潜行 | 否 | 以 25% 透明度渲染，判定为隐形，阻断探测；敌对生物进入 2 格内时自动解除。 |
+| `charm`（魅惑） | 减益 / 控制 | 是 | 附加 `CharmGoal`，使怪物与可激怒生物对玩家的 `canSee` 判定失败。被魅惑的村民可能给出交易折扣。 |
+| `fear`（恐惧） | 减益 / 控制 | 是 | 对具备寻路能力的生物附加 `FearGoal`，并阻断复仇索敌。 |
+| `bonus_damage` | 增益 / 攻击 | 是 | 造成伤害时追加无冷却的额外命中。 |
+| `minds_eye`（心眼） | 增益 / 攻击 | 是 | 近战暴击率。 |
+| `shatter_strike` | 增益 / 攻击 | 是 | 近战暴击伤害。 |
+| `lock_on_weakness` | 增益 / 攻击 | 是 | 远程暴击率。 |
+| `fatal_pierce` | 增益 / 攻击 | 是 | 远程暴击伤害。 |
+| `astral_concentration` | 增益 / 攻击 | 是 | 魔法暴击率。 |
+| `astral_annihilation` | 增益 / 攻击 | 是 | 魔法暴击伤害。 |
+| `magic_field` | 增益 / 攻击 | 是 | 星能力场增益。 |
+| `silence`（沉默） | 减益 / 控制 | 否 | Spell Engine 的行动妨碍型沉默。 |
+| `armor_break`（破甲） | 减益 / 防御 | 是 | 降低护甲。 |
+| `inversed_breathing`（逆呼吸） | 增益 / 功能 | 是 | 可在水下呼吸，但玩家在陆地上会流失氧气，氧气低于 −20 后开始受伤。 |
+| `death_defiance`（死之抗拒） | 增益 / 免疫 | 是 | 生效期间致命伤害只会把你留在 1 点生命。与 `guts_chance` 的几率判定互相独立。 |
+
+### 持续伤害
+
+| 效果 | 使用的伤害类型 |
+| --- | --- |
+| `burning`（燃烧） | `minecraft:on_fire` |
+| `bleeding`（流血） | `minecraft:generic` |
+| `poisoned`（中毒） | `minecraft:magic` |
+
+### 元素易伤
+
+这些标记会让目标对特定学派门户大开。其中四种会被直接命中消耗掉，两种会一直留着。
+
+| 效果 | 强易伤 | 轻易伤 | 被直接命中移除 | 附带效果 |
+| --- | --- | --- | --- | --- |
+| `electrified`（带电） | 冰霜 | 水 | 是 | — |
+| `iced`（冰封） | 水 | 雷 | 是 | 每刻为目标灭火 |
+| `ignite`（点燃） | 风 | 雷 | 是 | 持续让目标着火 5 秒 |
+| `wet`（潮湿） | 地 | 冰霜 | 是 | 每刻为目标灭火 |
+| `luminous`（辉光） | 暗 | 奥术 | 否 | — |
+| `shadowed`（笼影） | 光 | 奥术 | 否 | — |
+
+<Callout type="tip" title="这就是连携系统">
+先挂上易伤，再用对应学派打上去。会被消耗的那四种适合立刻兑现，辉光与笼影会留着，更适合持续施压的打法。
+</Callout>
+
+### 持续性惩罚
+
+| 效果 | 作用 |
+| --- | --- |
+| `energy_inefficiency` | 星能失调。禁止消耗星能、禁止疾跑、提高受到的伤害、降低移动速度并降低以太之力。 |

@@ -1,0 +1,148 @@
+---
+title: "Reputation & factions"
+description: "How factions are assigned, how relations resolve, what counts as theft, and what being wanted actually costs."
+category: world
+order: 10
+updated: 2026-09-01
+tagline: "Standing is tracked per faction, and the factions disagree."
+tags: ['world', 'factions', 'npc']
+---
+
+Reputation in KTM2 is not one number. Every faction stores its own, evaluates its own wanted state, and reacts on its own terms. Helping one side is frequently how you lose standing with another.
+
+## How an entity gets a faction
+
+An entity's factions come from four sources, and **only** these four:
+
+<Steps>
+
+1. Data-driven **entity faction rules**, described in the datapack reference below.
+
+2. The factions KTM2's own NPCs ship with.
+
+3. Factions a mod assigns to a creature directly.
+
+4. The **structure-origin** faction recorded on a creature.
+
+</Steps>
+
+<Callout type="note" title="Standing in a village does not make you a villager">
+Reputation deliberately does not add a location faction just because something is standing inside a structure. A skeleton wandering into a village does not become village-affiliated, so killing it does not anger the village.
+</Callout>
+
+A structure-origin faction belongs only to creatures **generated as part of the structure itself**. Later natural spawns, spawner mobs, patrols, spawn eggs, commands, and anything that merely walks in do not inherit it.
+
+## Faction relations
+
+Relations are declared in datapacks as `friendly`, `neutral` or `hostile` — aliases `ally`, `enemy` and `war` are accepted.
+
+Resolution order:
+
+<Steps>
+
+1. **Runtime relations set by story events.** They persist in the world save and sit deliberately above datapack defaults, so a story beat can start or end a war.
+
+2. **Datapack relation rules**, highest `priority` first.
+
+3. **Fallback** — same faction is friendly, anything else is neutral.
+
+</Steps>
+
+When equal-priority rules conflict: **hostile beats friendly, and friendly beats neutral.**
+
+### Targeting fallbacks
+
+Targeting uses the same explicit factions plus one small implicit rule:
+
+- KTM2's own NPCs default to `isekaiexpansion:side/civilization`.
+- A mob with **no explicit faction rule** that is vanilla-hostile or in the monster spawn group counts as `isekaiexpansion:side/monster` — **for targeting only**.
+
+If a mob does have an explicit rule, that rule controls relation behaviour and the generic monster fallback is not added on top.
+
+## Theft and protected containers
+
+Whether opening a chest is theft is decided by the container itself, not by where it is standing:
+
+<Steps>
+
+1. **A container a player placed** is personal storage, and faction theft reputation ignores it entirely.
+
+2. Any other container is judged by the owning faction recorded on it.
+
+3. With neither of those, a legacy location fallback still protects unmarked containers inside supported faction structures.
+
+</Steps>
+
+Loot filling never writes faction ownership onto a player-placed container. A chest you put down inside a village does not become village property.
+
+## Being wanted
+
+A faction considers you **wanted at −100 or lower**. Wanted state is evaluated independently per faction, **before** a reputation change is applied.
+
+The [Fate Balance](/en/wiki/fate-balance/) countenance pair only changes deltas for factions that are already wanted:
+
+| Fate | Positive reputation | Negative reputation | Factions above −100 |
+| --- | --- | --- | --- |
+| `kind_countenance` | ×1.25 | ×0.80 | unchanged |
+| `fierce_countenance` | ×0.80 | ×1.25 | unchanged |
+
+<Callout type="tip" title="A kind face is a recovery tool">
+Because the multipliers only apply below −100, `kind_countenance` does nothing while you are in good standing. It is insurance against a bad night, not a permanent charisma bonus.
+</Callout>
+
+When one event touches factions in different wanted states, each faction settles against its own wanted state. Countenance modifiers never leak onto factions that had no reason to distrust you.
+
+## Defender credit
+
+An entity rule can carry the `protector` role. A protector counts as a defender for its own factions while it is fighting a hostile target — so **killing something a guard is already fighting credits defender reputation to that guard's factions**. Helping the watch is recognised as helping the watch.
+
+## Datapack reference
+
+### Entity faction rules
+
+These live in `data/<namespace>/reputation/entity_factions/*.json`, one file per entity group and one rule per file. An entity matching several files receives factions and roles from all of them.
+
+| Key | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `entity_types` | string[] | yes | Entity type ids or tags. Tags start with `#`. |
+| `factions` | string[] | no | Static faction ids added to every match. Use stable namespaced ids. |
+| `dynamic_factions` | string[] | no | Factions generated from entity state. Supported: `minecraft:villager_profession`. |
+| `roles` | string[] | no | Behaviour roles, not faction ids. Supported: `protector`. |
+| `include_structure_origin_factions` | boolean | no | Allows structure-origin factions, still only for creatures generated with the structure. Default `false`. |
+
+```json
+{
+  "entity_types": ["minecraft:villager", "#example:guards"],
+  "factions": ["minecraft:village", "example:merchant_guild"],
+  "dynamic_factions": ["minecraft:villager_profession"],
+  "roles": ["protector"],
+  "include_structure_origin_factions": true
+}
+```
+
+`minecraft:villager_profession` emits one faction per villager profession, for example `minecraft:villager_profession/minecraft:librarian`. Values without a namespace normalise to `minecraft`.
+
+### Relation rules
+
+These live in `data/<namespace>/reputation/faction_relations/*.json`.
+
+| Key | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `source_factions` | string[] | yes | Acting side. |
+| `target_factions` | string[] | yes | Target side. |
+| `relation` | string | yes | `friendly`, `neutral` or `hostile`. |
+| `bidirectional` | boolean | no | Default `true`. |
+| `priority` | integer | no | Higher wins when a broad side rule and a narrow faction rule both match. Default `0`. |
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/human"],
+  "target_factions": ["isekaiexpansion:side/demon"],
+  "relation": "hostile",
+  "priority": 10
+}
+```
+
+### Id normalisation
+
+Faction ids are normalised as they are read: trimmed, lower-cased, backslashes and `|` become `/`, spaces become `_`, and a blank id becomes `unknown`. Write them cleanly anyway — normalisation is a safety net, not a style guide.

@@ -1,0 +1,13 @@
+/*
+ * Single global stylesheet entry, imported once by BaseLayout.
+ *
+ * Order matters: reset (element selectors) -> tokens (custom properties) ->
+ * base (component vocabulary) -> prose (long-form) -> motion (animation).
+ * Global rules deliberately stay at single-class specificity so Astro's
+ * component-scoped styles always win without `!important`.
+ */
+@import url('./reset.css');
+@import url('./tokens.css');
+@import url('./base.css');
+@import url('./prose.css');
+@import url('./motion.css');

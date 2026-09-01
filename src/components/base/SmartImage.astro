@@ -1,0 +1,54 @@
+---
+import { Image, type LocalImageProps } from 'astro:assets';
+
+/**
+ * Project defaults for every raster image.
+ *
+ * Astro's `<Image>` already handles format negotiation and width descriptors;
+ * this wrapper only pins the decisions we want to be consistent site-wide:
+ * lazy + async by default, a real `sizes` value so the browser does not
+ * download a 3200px screenshot into a 400px card, and a subtle blur-up.
+ */
+type Props = Omit<LocalImageProps, 'loading' | 'decoding'> & {
+  /** Set for above-the-fold images so they are fetched eagerly. */
+  priority?: boolean;
+  class?: string;
+  /** Fades the image in once decoded; disable for icons and sprites. */
+  fadeIn?: boolean;
+};
+
+const {
+  priority = false,
+  class: className,
+  fadeIn = true,
+  sizes = '(max-width: 48rem) 100vw, 50vw',
+  ...rest
+} = Astro.props;
+---
+
+<!--
+  `LocalImageProps` is a union; spreading the rest widens `width` to
+  `number | undefined`, which the union's remote branch rejects. The source is
+  always an imported asset here, so narrowing it back is safe.
+-->
+<Image
+  {...(rest as LocalImageProps)}
+  sizes={sizes}
+  loading={priority ? 'eager' : 'lazy'}
+  decoding={priority ? 'sync' : 'async'}
+  fetchpriority={priority ? 'high' : undefined}
+  class:list={[className, fadeIn && 'smart-image']}
+  data-fade={fadeIn && !priority ? '' : undefined}
+/>
+
+<style>
+  /* `media.ts` flips data-fade to data-loaded once the bitmap is decoded. */
+  .smart-image[data-fade] {
+    opacity: 0;
+    transition: opacity var(--dur-slow) var(--ease-out);
+  }
+
+  .smart-image[data-fade][data-loaded] {
+    opacity: 1;
+  }
+</style>

@@ -1,0 +1,145 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import PostCard from '../../../components/cards/PostCard.astro';
+import Icon from '../../../components/base/Icon.astro';
+import { localeCodes, localePath, readingTime, useTranslations, type LocaleCode } from '../../../i18n';
+import { blogTagPath, getBlogTags, getRankedBlogPosts } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const [posts, tags] = await Promise.all([getRankedBlogPosts(lang), getBlogTags(lang)]);
+const [lead, ...rest] = posts;
+
+const crumbs = [{ label: t('nav.home'), href: localePath(lang) }, { label: t('blog.title') }];
+---
+
+<PageLayout
+  lang={lang}
+  title={t('blog.title')}
+  description={t('blog.lead')}
+  eyebrow={t('site.author')}
+  heading={t('blog.title')}
+  lead={t('blog.lead')}
+  crumbs={crumbs}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <div slot="masthead" class="blog__toolbar">
+    {
+      tags.length > 0 && (
+        <ul class="blog__tags" role="list">
+          <li>
+            <span class="badge badge--accent">{t('blog.allTags')}</span>
+          </li>
+          {tags.map((tag) => (
+            <li>
+              <a class="badge" href={blogTagPath(lang, tag.tag)}>
+                #{tag.tag}
+                <span class="blog__tagCount">{tag.count}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+
+    <a class="blog__rss" href={`${localePath(lang, 'blog')}rss.xml`}>
+      <Icon name="rss" />
+      {t('blog.rss')}
+    </a>
+  </div>
+
+  <div class="shell shell--wide blog">
+    {
+      posts.length === 0 ? (
+        <p class="text-muted">{t('blog.empty')}</p>
+      ) : (
+        <>
+          {lead && (
+            <div data-reveal="zoom">
+              <PostCard
+                lang={lang}
+                post={lead}
+                feature
+                readingMinutes={readingTime(lead.body ?? '', lang)}
+              />
+            </div>
+          )}
+
+          {rest.length > 0 && (
+            <div class="grid grid--3 blog__grid" data-reveal-stagger>
+              {rest.map((post, index) => (
+                <div data-reveal="rise" style={`--reveal-index:${index}`}>
+                  <PostCard
+                    lang={lang}
+                    post={post}
+                    readingMinutes={readingTime(post.body ?? '', lang)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )
+    }
+  </div>
+</PageLayout>
+
+<style>
+  .blog__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-block-start: var(--space-xl);
+  }
+
+  .blog__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin: 0;
+    padding: 0;
+  }
+
+  .blog__tags a:hover {
+    border-color: var(--c-accent);
+    color: var(--c-accent);
+  }
+
+  .blog__tagCount {
+    color: var(--c-text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .blog__rss {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: var(--fs-xs);
+    color: var(--c-text-muted);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .blog__rss:hover {
+    color: var(--c-accent);
+  }
+
+  .blog {
+    display: grid;
+    gap: var(--space-xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+  }
+</style>

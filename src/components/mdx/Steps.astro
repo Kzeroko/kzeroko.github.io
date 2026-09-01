@@ -1,0 +1,62 @@
+---
+/**
+ * Turns a plain ordered list into a numbered procedure with a connecting rail.
+ * Authors keep writing normal Markdown; only the wrapper is a component.
+ */
+interface Props {
+  class?: string;
+}
+const { class: className } = Astro.props;
+---
+
+<div class:list={['steps', className]}>
+  <slot />
+</div>
+
+<style>
+  .steps :global(ol) {
+    counter-reset: step;
+    list-style: none;
+    margin-block: 1.5em;
+    padding: 0;
+  }
+
+  .steps :global(ol > li) {
+    position: relative;
+    counter-increment: step;
+    padding-inline-start: 3rem;
+    padding-block-end: 1.4em;
+  }
+
+  .steps :global(ol > li:last-child) {
+    padding-block-end: 0;
+  }
+
+  .steps :global(ol > li::before) {
+    content: counter(step);
+    position: absolute;
+    inset-inline-start: 0;
+    inset-block-start: -0.15em;
+    display: grid;
+    place-items: center;
+    inline-size: 2rem;
+    block-size: 2rem;
+    border-radius: 50%;
+    border: 1px solid var(--c-accent);
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+    font-size: var(--fs-sm);
+    font-weight: var(--weight-bold);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The rail visually joins consecutive steps. */
+  .steps :global(ol > li:not(:last-child)::after) {
+    content: '';
+    position: absolute;
+    inset-inline-start: 1rem;
+    inset-block: 2.1em 0.35em;
+    inline-size: 1px;
+    background: linear-gradient(var(--c-line-strong), var(--c-line-faint));
+  }
+</style>

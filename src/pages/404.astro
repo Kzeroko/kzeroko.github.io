@@ -1,0 +1,128 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import BrandMark from '../components/layout/BrandMark.astro';
+import Button from '../components/base/Button.astro';
+import { defaultLocale, localePath, locales, useTranslations } from '../i18n';
+import { PRIMARY_NAV, SITE } from '../data/site';
+
+/**
+ * GitHub Pages serves this one file for every unmatched path, in both language
+ * trees, so it renders without the site chrome: one language's header wrapped
+ * around a bilingual error message reads worse than no header at all. The body
+ * carries full navigation in both languages instead.
+ */
+const t = useTranslations(defaultLocale);
+---
+
+<BaseLayout
+  lang={defaultLocale}
+  title={t('error.404.title')}
+  description={t('error.404.lead')}
+  noindex
+  chrome="bare"
+  translatedPaths={Object.fromEntries(locales.map((locale) => [locale.code, localePath(locale.code)]))}
+>
+  <div class="notfound">
+    <a class="notfound__brand" href="/" aria-label={SITE.domain}>
+      <BrandMark id="notfound" size={36} />
+      <span>{SITE.domain}</span>
+    </a>
+
+    <p class="notfound__code" aria-hidden="true">404</p>
+
+    {
+      locales.map((locale) => {
+        const tr = useTranslations(locale.code);
+        return (
+          <section class="notfound__block" lang={locale.htmlLang}>
+            <h2 class="notfound__title">{tr('error.404.title')}</h2>
+            <p class="notfound__lead">{tr('error.404.lead')}</p>
+
+            <ul class="notfound__links" role="list">
+              <li>
+                <Button href={localePath(locale.code)} variant="primary" size="sm">
+                  {tr('error.404.home')}
+                </Button>
+              </li>
+              {PRIMARY_NAV.map((item) => (
+                <li>
+                  <Button href={localePath(locale.code, item.path)} variant="ghost" size="sm">
+                    {item.label[locale.code]}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })
+    }
+  </div>
+</BaseLayout>
+
+<style>
+  .notfound {
+    display: grid;
+    gap: var(--space-2xl);
+    inline-size: 100%;
+    max-inline-size: 46rem;
+    margin-inline: auto;
+    padding: var(--space-4xl) var(--gutter);
+  }
+
+  .notfound__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    justify-self: start;
+    font-family: var(--font-display);
+    font-size: var(--fs-sm);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-muted);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .notfound__brand:hover {
+    color: var(--c-text);
+  }
+
+  .notfound__code {
+    font-family: var(--font-display);
+    font-size: var(--fs-4xl);
+    font-weight: var(--weight-bold);
+    line-height: 1;
+    letter-spacing: var(--tracking-tight);
+    background: linear-gradient(120deg, var(--c-accent), var(--c-arcane) 55%, var(--c-warm));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .notfound__block + .notfound__block {
+    padding-block-start: var(--space-xl);
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .notfound__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-xl);
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .notfound__lead {
+    margin-block-start: var(--space-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+  }
+
+  .notfound__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    margin-block-start: var(--space-lg);
+    padding: 0;
+  }
+</style>

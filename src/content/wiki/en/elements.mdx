@@ -1,0 +1,59 @@
+---
+title: "Elements"
+description: "How defence elements and damage types interact, including the multi-element stacking rule and the full affinity chart."
+category: combat
+order: 20
+updated: 2026-09-01
+tagline: "A ±25% swing decided before armour is even considered."
+tags: ['combat', 'damage', 'elements']
+---
+
+Every creature in KTM2 carries one or more **defence elements**. Incoming damage is compared against each of them, and the result multiplies your damage before armour is applied.
+
+## The multiplier
+
+| Match | Multiplier |
+| --- | --- |
+| Damage type the element is weak to | **+25%** |
+| Damage type the element resists | **−25%** |
+| Anything else | ±0% |
+
+### Stacking across multiple elements
+
+When a creature has several elements and your damage type is effective against more than two of them, each layer beyond the second adds another **10%**.
+
+<Callout type="note" title="Worked example">
+A creature carrying Fire, Lightning and Earth, hit by a damage type that is effective against all three:
+
+`125% + (2 × 10%) = 145%`
+
+The same rule mirrors on the penalty side:
+
+`75% − (2 × 10%) = 55%`
+</Callout>
+
+This is the reason a single "best" weapon does not exist. Against a triple-element enemy the difference between the right and wrong damage type is roughly **2.6×**.
+
+## Damage types vs defence elements
+
+Not every damage type is something a creature can *be*. Thirteen elements can be worn as defences; several more exist only as damage:
+
+**Defence elements** — Normal, Dragon, Shard, Arcane, Fire, Water, Frost, Wind, Earth, Soul, Astral, Light, Dark
+
+**Damage-only types** — Lightning, Blast, Flame, Melee, Execute, Healing, Wither, Thorns, Trident
+
+Healing appearing as a damage type is not a bug: against Soul and Dark, a heal is a weapon.
+
+## Affinity chart
+
+<ElementMatrix />
+
+<Callout type="caution" title="Not final">
+Anything not listed above deals normal damage. This table is still being balanced and will change.
+</Callout>
+
+## Building around it
+
+- **Elemental vulnerabilities** ([Attributes & effects](/en/wiki/attributes-and-effects/)) let you *create* a weakness rather than wait for one. Apply `ignite`, then hit with Wind.
+- The nested spell power attributes (`aether_power` → `dys_aether` → `elemental_power`) exist so a hybrid build can carry several schools without a separate stat line for each.
+- Element gems ([Gems & sockets](/en/wiki/gems-and-sockets/)) add a proc from a configured magic school, which is the cheapest way to cover a school your weapon does not have.

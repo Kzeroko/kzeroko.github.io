@@ -1,17 +1,29 @@
 {
-  "name": "kzeroko.github.io",
+  "name": "kentomahou-site",
   "type": "module",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal site, devlog and official home of the KTM2 modpack and the Isekai Series mods.",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro check && astro build",
+    "build:fast": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "check": "astro check",
+    "sync": "astro sync",
+    "astro": "astro",
+    "assets": "node scripts/generate-static-assets.mjs"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.37.6",
-    "astro": "^5.6.1",
+    "@astrojs/mdx": "^4.3.13",
+    "@astrojs/rss": "^4.0.12",
+    "@astrojs/sitemap": "^3.7.0",
+    "astro": "^5.18.0",
     "sharp": "^0.34.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "typescript": "^5.7.3"
   }
 }

@@ -1,0 +1,556 @@
+/* Document chrome, layout primitives, and the shared component vocabulary. */
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  color: var(--c-text);
+  background-color: var(--c-bg);
+  /* Faint field of light so large flat areas are never truly dead. */
+  background-image:
+    radial-gradient(120vw 70vh at 80% -10%, var(--glow-b), transparent 60%),
+    radial-gradient(90vw 60vh at 10% 0%, var(--glow-a), transparent 55%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  display: flex;
+  flex-direction: column;
+  overflow-x: clip;
+}
+
+/* Locks scroll while the search dialog or mobile menu is open. */
+body[data-scroll-locked] {
+  overflow: hidden;
+}
+
+main {
+  flex: 1 0 auto;
+}
+
+/* ---------------------------------------------------------------- layout -- */
+
+.shell {
+  width: 100%;
+  max-width: var(--width-content);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.shell--wide {
+  max-width: var(--width-wide);
+}
+
+.shell--prose {
+  max-width: calc(var(--width-prose) + var(--gutter) * 2);
+}
+
+.stack > * + * {
+  margin-block-start: var(--stack-gap, var(--space-md));
+}
+
+.section {
+  padding-block: var(--space-4xl);
+}
+
+.section--tight {
+  padding-block: var(--space-3xl);
+}
+
+.section + .section {
+  padding-block-start: 0;
+}
+
+.section__head {
+  max-width: 46rem;
+  margin-block-end: var(--space-2xl);
+}
+
+.section__head--split {
+  max-width: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-lg);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--fs-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--c-accent);
+}
+
+.eyebrow::before {
+  content: '';
+  inline-size: 1.5rem;
+  block-size: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.eyebrow--plain::before {
+  display: none;
+}
+
+.section__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: var(--weight-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  margin-block-start: var(--space-sm);
+}
+
+.section__lead {
+  margin-block-start: var(--space-md);
+  font-size: var(--fs-md);
+  color: var(--c-text-muted);
+  line-height: var(--lh-relaxed);
+  max-width: 52ch;
+}
+
+.grid {
+  display: grid;
+  gap: var(--grid-gap, var(--space-lg));
+}
+
+/*
+ * Column minimums are tuned against the 1185px content width so `--2`, `--3`
+ * and `--4` actually produce that many columns on a desktop, then fold down
+ * one column at a time as the viewport narrows.
+ */
+.grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(min(26rem, 100%), 1fr));
+}
+
+.grid--3 {
+  grid-template-columns: repeat(auto-fit, minmax(min(21rem, 100%), 1fr));
+}
+
+.grid--4 {
+  grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+}
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cluster-gap, var(--space-sm));
+}
+
+.divider {
+  border: 0;
+  block-size: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-line), transparent);
+}
+
+/* ----------------------------------------------------------- typography -- */
+
+.text-muted {
+  color: var(--c-text-muted);
+}
+
+.text-soft {
+  color: var(--c-text-soft);
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  font-variant-ligatures: none;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.text-pretty {
+  text-wrap: pretty;
+}
+
+.sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: var(--space-sm);
+  inset-inline-start: var(--space-sm);
+  z-index: calc(var(--z-toast) + 1);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--c-accent);
+  color: var(--c-accent-contrast);
+  font-weight: var(--weight-semibold);
+  transform: translateY(-150%);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+/* ---------------------------------------------------------------- links -- */
+
+.link {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out), color var(--dur-fast);
+}
+
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Animated underline used in nav and card titles. */
+.link-slide {
+  position: relative;
+  display: inline-block;
+}
+
+.link-slide::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: -0.14em;
+  block-size: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.link-slide:hover::after,
+a:hover .link-slide::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* -------------------------------------------------------------- buttons -- */
+
+.btn {
+  --btn-bg: transparent;
+  --btn-fg: var(--c-text);
+  --btn-border: var(--c-line-strong);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: 0.7em 1.25em;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-size: var(--fs-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.btn--primary {
+  --btn-bg: var(--c-accent);
+  --btn-fg: var(--c-accent-contrast);
+  --btn-border: transparent;
+  box-shadow: 0 6px 22px -10px var(--glow-a);
+}
+
+.btn--primary:hover {
+  --btn-bg: var(--c-accent-hover);
+  box-shadow: 0 10px 30px -10px var(--glow-a);
+}
+
+.btn--ghost:hover {
+  --btn-border: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.btn--quiet {
+  --btn-border: transparent;
+  padding-inline: 0.85em;
+}
+
+.btn--quiet:hover {
+  background: var(--c-surface-3);
+}
+
+.btn--sm {
+  padding: 0.5em 0.95em;
+  font-size: var(--fs-xs);
+}
+
+.btn--lg {
+  padding: 0.85em 1.6em;
+  font-size: var(--fs-base);
+}
+
+/* Sheen that sweeps across primary buttons on hover. */
+.btn--primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform var(--dur-slower) var(--ease-out);
+}
+
+.btn--primary:hover::after {
+  transform: translateX(120%);
+}
+
+/* ------------------------------------------------------- icon utilities -- */
+
+.icon {
+  inline-size: 1.15em;
+  block-size: 1.15em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon--filled {
+  fill: currentColor;
+  stroke: none;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  border-radius: var(--radius-sm);
+  color: var(--c-text-muted);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--c-surface-3);
+  color: var(--c-text);
+}
+
+/* -------------------------------------------------------------- badges --- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.28em 0.7em;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+  color: var(--c-text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.badge--accent {
+  border-color: transparent;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.badge--warm {
+  border-color: transparent;
+  background: var(--c-warm-soft);
+  color: var(--c-warm);
+}
+
+.badge--arcane {
+  border-color: transparent;
+  background: var(--c-arcane-soft);
+  color: var(--c-arcane);
+}
+
+.badge--dot::before {
+  content: '';
+  inline-size: 0.45em;
+  block-size: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ---------------------------------------------------------------- cards -- */
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: var(--card-pad, var(--space-lg));
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  overflow: hidden;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.card--link:hover,
+.card--link:focus-within {
+  transform: translateY(-3px);
+  border-color: var(--c-line-strong);
+  box-shadow: var(--shadow-md);
+}
+
+/* Pointer-tracked highlight; the custom properties are set by card-hover.ts. */
+.card--spotlight::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    16rem 16rem at var(--pointer-x, 50%) var(--pointer-y, 0%),
+    var(--c-accent-soft),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+
+.card--spotlight:hover::before,
+.card--spotlight:focus-within::before {
+  opacity: 1;
+}
+
+.card__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-snug);
+}
+
+.card__body {
+  margin-block-start: var(--space-sm);
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  text-wrap: pretty;
+}
+
+.card__foot {
+  margin-block-start: auto;
+  padding-block-start: var(--space-md);
+}
+
+/* Full-card click target that keeps the real link accessible. */
+.card__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* --------------------------------------------------------------- panels -- */
+
+.panel {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+  padding: var(--space-lg);
+}
+
+.panel--inset {
+  background: var(--c-surface-inset);
+}
+
+/* ------------------------------------------------------------ scrollbar -- */
+
+@supports selector(::-webkit-scrollbar) {
+  .scroll-thin::-webkit-scrollbar {
+    inline-size: 8px;
+    block-size: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--c-line-strong);
+    border-radius: var(--radius-full);
+  }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-line-strong) transparent;
+}
+
+/* -------------------------------------------------------------- accents -- */
+
+/*
+ * Per-entry accent. Components read `--accent` / `--accent-soft` and never the
+ * hue tokens directly, so a card, a portrait frame and a heading rule all shift
+ * together when a codex entry declares its colour.
+ */
+[data-accent] {
+  --accent: var(--c-accent);
+  --accent-soft: var(--c-accent-soft);
+}
+
+[data-accent='amber'] {
+  --accent: var(--c-warm);
+  --accent-soft: var(--c-warm-soft);
+}
+
+[data-accent='violet'] {
+  --accent: var(--c-arcane);
+  --accent-soft: var(--c-arcane-soft);
+}
+
+[data-accent='rose'] {
+  --accent: var(--c-rose);
+  --accent-soft: var(--c-rose-soft);
+}
+
+[data-accent='green'] {
+  --accent: var(--c-green);
+  --accent-soft: var(--c-green-soft);
+}
+
+[data-accent='azure'] {
+  --accent: var(--c-azure);
+  --accent-soft: var(--c-azure-soft);
+}

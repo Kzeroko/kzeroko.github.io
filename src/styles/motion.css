@@ -1,0 +1,207 @@
+/*
+ * Motion layer.
+ *
+ * Two rules govern everything here:
+ *  1. Motion communicates hierarchy or state. Decoration that does neither is cut.
+ *  2. Every effect is gated behind `prefers-reduced-motion` at the bottom of the file.
+ */
+
+/* --------------------------------------------------------- scroll reveal -- */
+
+/*
+ * `reveal.ts` adds `data-reveal-ready` once the observer is attached, so content
+ * stays visible for crawlers and for readers whose JS never runs.
+ */
+[data-reveal][data-reveal-ready] {
+  opacity: 0;
+  transform: translate3d(0, var(--reveal-y, 14px), 0) scale(var(--reveal-scale, 1));
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+
+[data-reveal][data-reveal-ready][data-revealed] {
+  opacity: 1;
+  transform: none;
+  will-change: auto;
+}
+
+[data-reveal='fade'] {
+  --reveal-y: 0px;
+}
+
+[data-reveal='rise'] {
+  --reveal-y: 22px;
+}
+
+[data-reveal='zoom'] {
+  --reveal-y: 8px;
+  --reveal-scale: 0.97;
+}
+
+/* Staggers direct children of the marked container. */
+[data-reveal-stagger] > * {
+  --reveal-delay: calc(var(--reveal-index, 0) * var(--reveal-step, 70ms));
+}
+
+/* ------------------------------------------------------- entrance motion -- */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 1.2rem, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sweep-in {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -0.6rem, 0);
+  }
+}
+
+@keyframes aurora-shift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1);
+  }
+  50% {
+    transform: translate3d(4%, 3%, 0) rotate(6deg) scale(1.08);
+  }
+  100% {
+    transform: translate3d(-4%, -2%, 0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes marquee-x {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.9);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+.anim-rise {
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+.anim-fade {
+  animation: fade-in var(--dur-slow) var(--ease-out) both;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+.anim-sweep {
+  animation: sweep-in var(--dur-slower) var(--ease-out) both;
+  animation-delay: var(--anim-delay, 0ms);
+}
+
+.anim-drift {
+  animation: drift 7s var(--ease-in-out) infinite;
+}
+
+/* ------------------------------------------------------- view transitions -- */
+
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: fade-in var(--dur-base) var(--ease-out) reverse both;
+}
+
+::view-transition-new(root) {
+  animation: rise-in var(--dur-base) var(--ease-out) both;
+}
+
+/* Persistent chrome must not cross-fade with the page body. */
+::view-transition-group(site-header),
+::view-transition-group(site-footer) {
+  animation: none;
+}
+
+/* Portraits morph between the codex index and a character page. */
+::view-transition-group(*) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease-out);
+}
+
+/* ----------------------------------------------------------- reduced motion -- */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  [data-reveal][data-reveal-ready] {
+    opacity: 1;
+    transform: none;
+  }
+
+  @view-transition {
+    navigation: none;
+  }
+}

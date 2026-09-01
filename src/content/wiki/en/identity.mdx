@@ -1,0 +1,85 @@
+---
+title: "Identity & progression"
+description: "Race evolution, class promotion and profession advancement — three separate graphs, one shared rule set."
+category: core
+order: 40
+updated: 2026-09-01
+tagline: "Three layers, not one class pick."
+tags: ['race', 'class', 'profession']
+---
+
+Who your character *is* has three layers, and each is a separate Origins layer with its own progression graph:
+
+| Layer | Mode | Question it answers |
+| --- | --- | --- |
+| **Race** | evolution | What you were born as |
+| **Class** | promotion | How you fight |
+| **Profession** | promotion | What you do for a living |
+
+They advance independently. A Dwarf can be a Magic Caster, and a Magic Caster can be a Blacksmith.
+
+## How a graph works
+
+Each graph is a **directed acyclic graph** of nodes and edges: a node is one identity, an edge is a legal path from one to another. Every target identity in a layer lives on that layer's graph, and no identity appears on two graphs at once.
+
+<Steps>
+
+1. You start on a `base` node in each layer.
+
+2. Nodes you are connected to become visible, each listing its requirements.
+
+3. Meet every requirement, then hold the confirm control for that node's `hold_ticks` (bounded 10–200).
+
+4. The change commits on release. Requirements, path and target are all rechecked at that point, and a change that fails the recheck does not happen.
+
+</Steps>
+
+<Callout type="note" title="Why the hold, not a click">
+Identity changes are not casual, and the hold is deliberate friction. A request that was never held out does not count.
+</Callout>
+
+## Requirement types
+
+| Requirement | Consumes | Example |
+| --- | --- | --- |
+| `player_level` | no | `{ "type": "player_level", "amount": 20 }` |
+| `experience_level` | optional | `{ "type": "experience_level", "amount": 12, "consume": true }` |
+| `advancement` | no | `{ "type": "advancement", "target": "minecraft:story/enter_the_nether" }` |
+| `item` | optional | `{ "type": "item", "target": "minecraft:amethyst_shard", "amount": 8, "consume": true }` |
+
+Only `experience_level` and `item` may set `consume`. Player level and advancements are checks, never costs.
+
+## Current state
+
+All three graphs exist, but only the race graph is fully connected today — it carries the Dragon → High Dragon branch. Class and profession currently hold disconnected `base` nodes. That is a content gap rather than a missing feature: write the nodes and edges, and they connect.
+
+## For datapack authors
+
+Definitions live in `data/<namespace>/progression_graphs/<path>.json`:
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "human_base",
+      "target": "isekaiorigins:human",
+      "rank": "base",
+      "position": [0, 0],
+      "hold_ticks": 30,
+      "icon": "isekaiexpansion:textures/item/icons/hdicon_human.png",
+      "name": "optional.translation.key",
+      "description": "optional.translation.key",
+      "requirements": []
+    }
+  ],
+  "edges": [{ "from": "human_base", "to": "future_human_evolution" }]
+}
+```
+
+Node ids are graph-local, stable persistence keys — renaming one orphans saved progress. Coordinates are normalised from `-4` to `4`; the interface supplies its own zoom and pan.
+
+<Callout type="caution" title="Unchoosable identities">
+An identity reachable only through progression must still be listed in its Origins layer, or it will not be accepted as a legal target, and its origin definition must set `"unchoosable": true`. Origins then excludes it from ordinary and random selection and rejects packets that choose it directly, while progression can still hand it to the player normally.
+</Callout>

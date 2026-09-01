@@ -1,0 +1,218 @@
+---
+import type { MarkdownHeading } from 'astro';
+
+import BaseLayout from './BaseLayout.astro';
+import type { BaseLayoutProps } from './props';
+import Breadcrumbs from '../components/docs/Breadcrumbs.astro';
+import DocsSidebar from '../components/docs/DocsSidebar.astro';
+import Pager from '../components/docs/Pager.astro';
+import TableOfContents from '../components/docs/TableOfContents.astro';
+import Icon from '../components/base/Icon.astro';
+import { formatDate, useTranslations } from '../i18n';
+import type { WikiGroup } from '../lib/content';
+
+/**
+ * Three-column reference layout: section nav, article, page outline.
+ *
+ * The rails collapse independently — the outline goes first at 80rem, the
+ * sidebar becomes a horizontal scroller at 62rem — so the article column keeps
+ * a comfortable measure at every width instead of stretching.
+ */
+interface Props extends BaseLayoutProps {
+  heading: string;
+  lead?: string;
+  groups: WikiGroup[];
+  headings: MarkdownHeading[];
+  crumbs: { label: string; href?: string }[];
+  updated?: Date;
+  readingMinutes?: number;
+  tags?: string[];
+  prev?: { label: string; title: string; href: string };
+  next?: { label: string; title: string; href: string };
+}
+
+const {
+  heading,
+  lead,
+  groups,
+  headings,
+  crumbs,
+  updated,
+  readingMinutes,
+  tags = [],
+  prev,
+  next,
+  ...base
+} = Astro.props;
+
+const t = useTranslations(base.lang);
+const pathname = Astro.url.pathname;
+---
+
+<BaseLayout {...base} mainClass="docs">
+  <div class="docs__grid shell shell--wide">
+    <aside class="docs__nav scroll-thin">
+      <DocsSidebar lang={base.lang} groups={groups} current={pathname} />
+    </aside>
+
+    <article class="docs__main">
+      <Breadcrumbs lang={base.lang} items={crumbs} class="docs__crumbs" />
+
+      <header class="docs__head">
+        <h1 class="docs__title">{heading}</h1>
+        {lead && <p class="docs__lead">{lead}</p>}
+
+        <div class="docs__meta">
+          {
+            updated && (
+              <span class="docs__metaItem">
+                <Icon name="calendar" />
+                {t('wiki.updated')} {formatDate(updated, base.lang)}
+              </span>
+            )
+          }
+          {
+            readingMinutes && (
+              <span class="docs__metaItem">
+                <Icon name="book" />
+                {readingMinutes} {t('wiki.readingTime')}
+              </span>
+            )
+          }
+          {tags.map((tag) => <span class="badge">{tag}</span>)}
+        </div>
+      </header>
+
+      <div class="prose docs__body">
+        <slot />
+      </div>
+
+      <Pager prev={prev} next={next} />
+    </article>
+
+    <aside class="docs__toc">
+      <div class="docs__tocInner scroll-thin">
+        <TableOfContents lang={base.lang} headings={headings} />
+      </div>
+    </aside>
+  </div>
+</BaseLayout>
+
+<style>
+  .docs__grid {
+    display: grid;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--toc-width);
+    gap: var(--space-2xl);
+    align-items: start;
+    padding-block: var(--space-2xl) var(--space-3xl);
+  }
+
+  .docs__nav,
+  .docs__toc {
+    position: sticky;
+    inset-block-start: calc(var(--header-height) + var(--space-lg));
+    max-block-size: calc(100svh - var(--header-height) - var(--space-2xl));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .docs__nav {
+    padding-inline-end: var(--space-sm);
+    border-inline-end: 1px solid var(--c-line-faint);
+  }
+
+  .docs__crumbs {
+    margin-block-end: var(--space-lg);
+  }
+
+  .docs__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl);
+    font-weight: var(--weight-bold);
+    line-height: var(--lh-tight);
+    letter-spacing: var(--tracking-tight);
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .docs__lead {
+    margin-block-start: var(--space-md);
+    max-inline-size: 62ch;
+    font-size: var(--fs-md);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  .docs__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-block-start: var(--space-lg);
+    padding-block-end: var(--space-lg);
+    border-block-end: 1px solid var(--c-line);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .docs__metaItem {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+
+  .docs__metaItem :global(.icon) {
+    inline-size: 0.9em;
+    block-size: 0.9em;
+  }
+
+  .docs__body {
+    margin-block-start: var(--space-xl);
+    max-inline-size: none;
+  }
+
+  /* ---------------------------------------------------------- responsive -- */
+
+  @media (max-width: 80rem) {
+    .docs__grid {
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    }
+    .docs__toc {
+      display: none;
+    }
+  }
+
+  @media (max-width: 62rem) {
+    .docs__grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-lg);
+    }
+
+    /* The section nav becomes a horizontal rail above the article. */
+    .docs__nav {
+      position: static;
+      max-block-size: none;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-inline-end: 0;
+      padding-block-end: var(--space-md);
+      border-inline-end: 0;
+      border-block-end: 1px solid var(--c-line);
+    }
+
+    .docs__nav :global(nav) {
+      flex-direction: row;
+      gap: var(--space-xl);
+      min-inline-size: max-content;
+    }
+
+    .docs__nav :global(ul) {
+      flex-direction: row;
+      gap: var(--space-2xs);
+    }
+
+    .docs__nav :global(a) {
+      white-space: nowrap;
+    }
+  }
+</style>

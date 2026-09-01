@@ -1,0 +1,161 @@
+---
+import type { ImageMetadata, MarkdownHeading } from 'astro';
+
+import BaseLayout from './BaseLayout.astro';
+import type { BaseLayoutProps } from './props';
+import Breadcrumbs from '../components/docs/Breadcrumbs.astro';
+import Pager from '../components/docs/Pager.astro';
+import CharacterAppendix from '../components/codex/CharacterAppendix.astro';
+import CharacterSheet from '../components/codex/CharacterSheet.astro';
+import SmartImage from '../components/base/SmartImage.astro';
+import { useTranslations } from '../i18n';
+import type { CodexEntry } from '../lib/content';
+
+/**
+ * Codex entry page.
+ *
+ * Character entries lead with a portrait spread and a structured sheet;
+ * everything else (factions, places, peoples, world lore) leads with a plain
+ * masthead. Both then render the same prose body.
+ */
+interface Props extends BaseLayoutProps {
+  entry: CodexEntry;
+  headings: MarkdownHeading[];
+  crumbs: { label: string; href?: string }[];
+  portrait?: ImageMetadata;
+  prev?: { label: string; title: string; href: string };
+  next?: { label: string; title: string; href: string };
+  sectionLabel: string;
+}
+
+const { entry, headings, crumbs, portrait, prev, next, sectionLabel, ...base } = Astro.props;
+const t = useTranslations(base.lang);
+const { data } = entry;
+---
+
+<BaseLayout {...base} mainClass="codex">
+  <div class="shell shell--wide codex__top" data-accent={data.accent}>
+    <Breadcrumbs lang={base.lang} items={crumbs} />
+  </div>
+
+  {
+    data.character ? (
+      <CharacterSheet
+        lang={base.lang}
+        sheet={data.character}
+        title={data.title}
+        chips={data.chips}
+        portrait={portrait}
+        accent={data.accent}
+      />
+    ) : (
+      <header class="codex__masthead shell shell--wide">
+        <p class="eyebrow">{sectionLabel}</p>
+        <h1 class="codex__title">{data.title}</h1>
+        <p class="codex__summary">{data.summary}</p>
+        {data.chips.length > 0 && (
+          <ul class="codex__chips" role="list">
+            {data.chips.map((chip) => (
+              <li class="badge badge--accent">{chip}</li>
+            ))}
+          </ul>
+        )}
+        {portrait && (
+          <figure class="codex__figure">
+            <SmartImage src={portrait} alt={data.title} width={1200} priority />
+          </figure>
+        )}
+      </header>
+    )
+  }
+
+  <div class="shell shell--wide codex__body">
+    <div class="prose">
+      <slot />
+    </div>
+
+    {
+      data.character && (
+        <CharacterAppendix
+          lang={base.lang}
+          accent={data.accent}
+          traits={data.character.traits}
+          timeline={data.character.timeline}
+          relations={data.character.relations}
+          voice={data.character.voice}
+        />
+      )
+    }
+
+    <p class="codex__source">{t('codex.sourceNote')}</p>
+
+    <Pager prev={prev} next={next} />
+  </div>
+</BaseLayout>
+
+<style>
+  .codex__top {
+    padding-block-start: var(--space-xl);
+  }
+
+  .codex__masthead {
+    padding-block: var(--space-xl) var(--space-2xl);
+  }
+
+  .codex__title {
+    margin-block-start: var(--space-sm);
+    font-family: var(--font-display);
+    font-size: var(--fs-3xl);
+    font-weight: var(--weight-bold);
+    line-height: var(--lh-tight);
+    letter-spacing: var(--tracking-tight);
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .codex__summary {
+    margin-block-start: var(--space-lg);
+    max-inline-size: 60ch;
+    font-size: var(--fs-md);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  .codex__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin-block-start: var(--space-lg);
+    padding: 0;
+  }
+
+  .codex__figure {
+    margin-block-start: var(--space-xl);
+  }
+
+  .codex__figure :global(img) {
+    inline-size: 100%;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+  }
+
+  /*
+   * The body keeps a reading measure but stays flush with the masthead's left
+   * edge rather than centring, so the page reads as one column.
+   */
+  .codex__body {
+    padding-block: var(--space-xl) var(--space-3xl);
+  }
+
+  .codex__body > :global(*) {
+    max-inline-size: 52rem;
+  }
+
+  .codex__source {
+    margin-block-start: var(--space-2xl);
+    padding-block-start: var(--space-md);
+    border-block-start: 1px solid var(--c-line-faint);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+</style>

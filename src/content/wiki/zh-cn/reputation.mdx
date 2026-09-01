@@ -1,0 +1,148 @@
+---
+title: "声望与阵营"
+description: "阵营如何归属、关系如何裁决、什么算偷窃，以及「被通缉」到底意味着什么。"
+category: world
+order: 10
+updated: 2026-09-01
+tagline: "声望按阵营分别记账，而这些阵营彼此并不合拍。"
+tags: ['世界', '阵营', 'NPC']
+---
+
+KTM2 的声望不是一个数字。每个阵营各记各的账、各自判断你是否被通缉、各自决定怎么对你。帮了一边，往往就是在另一边扣分。
+
+## 一个生物的阵营从哪来
+
+生物的阵营只有四个来源，**仅此四个**：
+
+<Steps>
+
+1. 数据包里的**实体阵营规则**，见下方[数据包参考](#数据包参考)。
+
+2. KTM2 自带 NPC 出厂时就带的阵营。
+
+3. 由模组直接指定给某个生物的阵营。
+
+4. 记在生物身上的**结构来源**阵营。
+
+</Steps>
+
+<Callout type="note" title="站在村庄里不等于是村民">
+声望系统不会因为某个生物待在结构里就顺手给它加上地点阵营。一只走进村庄的骷髅不会因此变成村庄成员，所以杀掉它也不会惹到村庄。
+</Callout>
+
+结构来源阵营只属于**结构放置时就一起生成出来的**生物。之后的自然生成、刷怪笼生物、巡逻队、刷怪蛋、指令生成，以及只是走进来的东西，都不会继承。
+
+## 阵营关系
+
+关系在数据包里声明为 `friendly`、`neutral` 或 `hostile`，同时接受 `ally`、`enemy`、`war` 这些别名。
+
+裁决顺序：
+
+<Steps>
+
+1. **剧情事件设下的运行时关系**。它会存进世界存档，并且刻意压在数据包默认值之上，好让剧情能让两个阵营开战或停战。
+
+2. **数据包关系规则**，`priority` 高的优先。
+
+3. **兜底**——同阵营为友好，其余为中立。
+
+</Steps>
+
+同优先级冲突时：**敌对压过友好，友好压过中立。**
+
+### 索敌兜底
+
+索敌用的是同一套显式阵营，外加一条很小的隐式规则：
+
+- KTM2 的 NPC 默认算作 `isekaiexpansion:side/civilization`。
+- **没有任何显式阵营规则**、且属于原版敌对生物或怪物生成组的生物，被当成 `isekaiexpansion:side/monster`——**仅用于索敌**。
+
+只要某个生物有显式规则，关系就由那条规则决定，不会再叠上通用的怪物兜底。
+
+## 偷窃与受保护容器
+
+打开一个箱子算不算偷，由容器自己决定，而不是它站在哪里：
+
+<Steps>
+
+1. **玩家自己放下的容器**属于个人储物，阵营偷窃声望完全不管它。
+
+2. 其余容器按它记录的归属阵营判定。
+
+3. 两者都没有时，位于受支持阵营结构内、没打过标记的容器仍然由地点阵营兜底保护。
+
+</Steps>
+
+战利品填充永远不会把阵营归属写到玩家放置的容器上。你在村庄里放下的箱子不会因此变成村庄的财产。
+
+## 被通缉
+
+阵营在你的声望**低至 −100 或更低**时视你为通缉对象。通缉状态按阵营独立判定，而且是在声望变动**生效之前**先算的。
+
+[命运天平](/zh-cn/wiki/fate-balance/)的气场选项只改变已经通缉你的阵营那一侧的变动量：
+
+| 命运 | 正向声望 | 负向声望 | 高于 −100 的阵营 |
+| --- | --- | --- | --- |
+| `kind_countenance`（和善） | ×1.25 | ×0.80 | 不变 |
+| `fierce_countenance`（凶悍） | ×0.80 | ×1.25 | 不变 |
+
+<Callout type="tip" title="一张讨喜的脸是补救工具">
+倍率只在 −100 以下生效，所以名声好的时候 `kind_countenance` 完全不做事。它是给糟糕的那一晚准备的保险，不是长期的魅力加成。
+</Callout>
+
+一次事件同时影响多个阵营时，每个阵营按自己的通缉状态分别结算。气场修正不会渗到那些本来就没理由不信任你的阵营上。
+
+## 防卫者归功
+
+实体规则可以带 `protector` 角色。持有这个角色的生物在和敌对目标交战时，会被算作它自身阵营的防卫者——也就是说，**击杀一个卫兵正在打的目标，会把防卫者声望记到该卫兵的阵营头上**。帮了守卫队，系统认得出来。
+
+## 数据包参考
+
+### 实体阵营规则
+
+放在 `data/<命名空间>/reputation/entity_factions/*.json`，每个实体群体一个文件，每个文件一条规则。同时命中多个文件的实体会拿到全部文件提供的阵营与角色。
+
+| 键 | 类型 | 必填 | 含义 |
+| --- | --- | --- | --- |
+| `entity_types` | string[] | 是 | 实体类型 ID 或标签。标签以 `#` 开头。 |
+| `factions` | string[] | 否 | 添加给所有匹配项的静态阵营 ID，请使用稳定的带命名空间 ID。 |
+| `dynamic_factions` | string[] | 否 | 由实体状态生成的阵营。支持 `minecraft:villager_profession`。 |
+| `roles` | string[] | 否 | 行为角色，不是阵营 ID。支持 `protector`。 |
+| `include_structure_origin_factions` | boolean | 否 | 允许结构来源阵营，仍然只对随结构一起生成的生物有效。默认 `false`。 |
+
+```json
+{
+  "entity_types": ["minecraft:villager", "#example:guards"],
+  "factions": ["minecraft:village", "example:merchant_guild"],
+  "dynamic_factions": ["minecraft:villager_profession"],
+  "roles": ["protector"],
+  "include_structure_origin_factions": true
+}
+```
+
+`minecraft:villager_profession` 会按村民职业各生成一个阵营，例如 `minecraft:villager_profession/minecraft:librarian`。没写命名空间的值会归一化到 `minecraft`。
+
+### 关系规则
+
+放在 `data/<命名空间>/reputation/faction_relations/*.json`。
+
+| 键 | 类型 | 必填 | 含义 |
+| --- | --- | --- | --- |
+| `source_factions` | string[] | 是 | 行为发起方。 |
+| `target_factions` | string[] | 是 | 目标方。 |
+| `relation` | string | 是 | `friendly`、`neutral` 或 `hostile`。 |
+| `bidirectional` | boolean | 否 | 默认 `true`。 |
+| `priority` | integer | 否 | 宽泛的阵营侧规则与狭窄的具体规则同时命中时，数值高的胜出。默认 `0`。 |
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/human"],
+  "target_factions": ["isekaiexpansion:side/demon"],
+  "relation": "hostile",
+  "priority": 10
+}
+```
+
+### ID 归一化
+
+阵营 ID 读进来时会归一化：去空白、转小写，反斜杠与 `|` 变成 `/`，空格变成 `_`，空 ID 变成 `unknown`。即便如此也请写规范一点——归一化是安全网，不是书写规范。

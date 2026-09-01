@@ -1,0 +1,87 @@
+---
+import '../styles/app.css';
+
+import Head from '../components/layout/Head.astro';
+import SearchDialog from '../components/layout/SearchDialog.astro';
+import SiteFooter from '../components/layout/SiteFooter.astro';
+import SiteHeader from '../components/layout/SiteHeader.astro';
+import { getLocale, localePath, useTranslations } from '../i18n';
+import { buildSeo, formatTitle, websiteJsonLd } from '../lib/seo';
+import type { BaseLayoutProps } from './props';
+
+type Props = BaseLayoutProps;
+
+const {
+  lang,
+  title,
+  description,
+  image,
+  type = 'website',
+  noindex = false,
+  publishedTime,
+  modifiedTime,
+  jsonLd = [],
+  isHome = false,
+  translatedPaths,
+  chrome = 'full',
+  mainClass,
+  bodyClass,
+} = Astro.props;
+
+const t = useTranslations(lang);
+const locale = getLocale(lang);
+const pathname = Astro.url.pathname;
+
+const seo = buildSeo({
+  title: formatTitle(title, t('site.title'), isHome),
+  description,
+  lang,
+  pathname,
+  image,
+  type,
+  noindex,
+  publishedTime,
+  modifiedTime,
+  translatedPaths,
+});
+
+const graphs = [websiteJsonLd(lang, t('site.title'), t('site.tagline')), ...jsonLd];
+const feed = `${localePath(lang, 'blog')}rss.xml`;
+---
+
+<!doctype html>
+<html lang={locale.htmlLang} data-locale={lang}>
+  <head>
+    <Head seo={seo} lang={lang} jsonLd={graphs} feed={feed} />
+    <slot name="head" />
+  </head>
+
+  <body class={bodyClass}>
+    {chrome === 'full' && <a class="skip-link" href="#main">{t('nav.skipToContent')}</a>}
+
+    {
+      chrome === 'full' && (
+        <SiteHeader lang={lang} pathname={pathname} translatedPaths={translatedPaths} />
+      )
+    }
+
+    <main id="main" class={mainClass}>
+      <slot />
+    </main>
+
+    {chrome === 'full' && <SiteFooter lang={lang} />}
+    {chrome === 'full' && <SearchDialog lang={lang} />}
+
+    <script>
+      import { initReveal } from '../scripts/reveal';
+      import { initMediaFade } from '../scripts/media';
+      import { initPointerEffects } from '../scripts/pointer';
+      import { initParallax } from '../scripts/parallax';
+
+      initReveal();
+      initMediaFade();
+      initPointerEffects();
+      initParallax();
+    </script>
+  </body>
+</html>

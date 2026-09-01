@@ -1,0 +1,66 @@
+---
+import type { ImageMetadata } from 'astro';
+import SmartImage from '../base/SmartImage.astro';
+
+/** Responsive image grid for screenshot sets. */
+interface Props {
+  items: { src: ImageMetadata; alt: string; caption?: string }[];
+  /** Minimum column width; smaller values fit more per row. */
+  min?: string;
+  class?: string;
+}
+
+const { items, min = '16rem', class: className } = Astro.props;
+---
+
+<div
+  class:list={['gallery', className]}
+  style={`--min:${min}`}
+  data-reveal-stagger
+>
+  {
+    items.map((item, index) => (
+      <figure class="gallery__item" data-reveal="zoom" style={`--reveal-index:${index}`}>
+        <SmartImage
+          src={item.src}
+          alt={item.alt}
+          width={Math.min(item.src.width, 900)}
+          sizes={`(max-width: 40rem) 100vw, ${min}`}
+          class="gallery__img"
+        />
+        {item.caption && <figcaption>{item.caption}</figcaption>}
+      </figure>
+    ))
+  }
+</div>
+
+<style>
+  .gallery {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(var(--min), 100%), 1fr));
+    margin-block: 1.75em;
+  }
+
+  .gallery__item {
+    margin: 0;
+  }
+
+  .gallery__img {
+    inline-size: 100%;
+    block-size: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    transition: transform var(--dur-slow) var(--ease-out);
+  }
+
+  .gallery__item:hover .gallery__img {
+    transform: scale(1.015);
+  }
+
+  figcaption {
+    margin-block-start: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+</style>

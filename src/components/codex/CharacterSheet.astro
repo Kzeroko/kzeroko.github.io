@@ -1,0 +1,272 @@
+---
+import type { ImageMetadata } from 'astro';
+
+import SmartImage from '../base/SmartImage.astro';
+import { useTranslations, type LocaleCode } from '../../i18n';
+
+/**
+ * Character masthead.
+ *
+ * The portrait is the anchor: it sits in a tall column with a soft aurora
+ * behind it and a scrim underneath, so a transparent-edged render still reads
+ * against either theme. Pointer parallax nudges the plate and the portrait by
+ * different amounts, which gives the spread depth without a canvas.
+ */
+interface Sheet {
+  fullName: string;
+  epithet: string;
+  quote: string;
+  profile: { label: string; value: string }[];
+}
+
+interface Props {
+  lang: LocaleCode;
+  sheet: Sheet;
+  title: string;
+  chips: string[];
+  portrait?: ImageMetadata;
+  accent: string;
+}
+
+const { lang, sheet, title, chips, portrait, accent } = Astro.props;
+const t = useTranslations(lang);
+
+// The display name is the short one; the full name goes underneath.
+const showFullName = sheet.fullName !== title;
+---
+
+<header class="sheet" data-accent={accent} data-parallax>
+  <div class="sheet__glow" aria-hidden="true"></div>
+
+  <div class="shell shell--wide sheet__grid">
+    <div class="sheet__intro">
+      <p class="eyebrow sheet__epithet">{sheet.epithet}</p>
+      <h1 class="sheet__name">{title}</h1>
+      {showFullName && <p class="sheet__fullname">{sheet.fullName}</p>}
+
+      <blockquote class="sheet__quote">
+        <p>{sheet.quote}</p>
+      </blockquote>
+
+      {
+        chips.length > 0 && (
+          <ul class="sheet__chips" role="list">
+            {chips.map((chip) => (
+              <li>{chip}</li>
+            ))}
+          </ul>
+        )
+      }
+
+      {
+        sheet.profile.length > 0 && (
+          <dl class="sheet__profile">
+            {sheet.profile.map((row) => (
+              <div>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )
+      }
+    </div>
+
+    {
+      portrait && (
+        <figure class="sheet__portrait">
+          <div class="sheet__plate" aria-hidden="true" />
+          <SmartImage
+            src={portrait}
+            alt={title}
+            width={720}
+            sizes="(max-width: 60rem) 70vw, 26rem"
+            priority
+            class="sheet__image"
+          />
+        </figure>
+      )
+    }
+  </div>
+
+  <p class="sheet__badge">{t('codex.spoilerFree')}</p>
+</header>
+
+<style>
+  .sheet {
+    position: relative;
+    padding-block: var(--space-xl) var(--space-2xl);
+    isolation: isolate;
+    overflow: clip;
+  }
+
+  .sheet__glow {
+    position: absolute;
+    inset-block-start: -12rem;
+    inset-inline-end: -6rem;
+    inline-size: min(52rem, 90vw);
+    block-size: 40rem;
+    z-index: -1;
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--accent) 26%, transparent),
+      transparent 72%
+    );
+    /* Parallax: the glow drifts furthest, the portrait least. */
+    transform: translate3d(calc(var(--px, 0) * -18px), calc(var(--py, 0) * -14px), 0);
+    transition: transform 500ms var(--ease-out);
+    pointer-events: none;
+  }
+
+  .sheet__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+    gap: var(--space-2xl);
+    align-items: center;
+  }
+
+  /* ------------------------------------------------------------- intro -- */
+
+  .sheet__epithet {
+    color: var(--accent);
+    animation: fade-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .sheet__name {
+    margin-block-start: var(--space-sm);
+    font-family: var(--font-display);
+    font-size: var(--fs-3xl);
+    font-weight: var(--weight-bold);
+    line-height: var(--lh-tight);
+    letter-spacing: var(--tracking-tight);
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .sheet__fullname {
+    margin-block-start: var(--space-2xs);
+    font-size: var(--fs-sm);
+    color: var(--c-text-faint);
+    letter-spacing: var(--tracking-wide);
+  }
+
+  .sheet__quote {
+    margin-block-start: var(--space-lg);
+    padding-inline-start: var(--space-lg);
+    border-inline-start: 2px solid var(--accent);
+    max-inline-size: 46ch;
+    font-size: var(--fs-md);
+    line-height: var(--lh-relaxed);
+    color: var(--c-text-soft);
+    text-wrap: pretty;
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+    animation-delay: 90ms;
+  }
+
+  .sheet__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin-block-start: var(--space-lg);
+    padding: 0;
+  }
+
+  .sheet__chips li {
+    padding: 0.28em 0.75em;
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-wide);
+  }
+
+  .sheet__profile {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+    gap: var(--space-md) var(--space-xl);
+    margin-block-start: var(--space-xl);
+    padding-block-start: var(--space-lg);
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .sheet__profile dt {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .sheet__profile dd {
+    margin: 0.3rem 0 0;
+    font-size: var(--fs-sm);
+    color: var(--c-text);
+    line-height: var(--lh-normal);
+  }
+
+  /* ---------------------------------------------------------- portrait -- */
+
+  .sheet__portrait {
+    position: relative;
+    margin: 0;
+    display: grid;
+    place-items: end center;
+  }
+
+  .sheet__plate {
+    position: absolute;
+    inset-block: 6% -2%;
+    inset-inline: 4%;
+    border-radius: var(--radius-xl);
+    border: 1px solid color-mix(in oklab, var(--accent) 34%, transparent);
+    background: linear-gradient(
+      170deg,
+      color-mix(in oklab, var(--accent) 14%, transparent),
+      transparent 62%
+    );
+    transform: translate3d(calc(var(--px, 0) * -8px), calc(var(--py, 0) * -6px), 0);
+    transition: transform 400ms var(--ease-out);
+  }
+
+  .sheet__image {
+    position: relative;
+    inline-size: 100%;
+    block-size: auto;
+    filter: drop-shadow(0 24px 40px rgb(0 0 0 / 0.35));
+    transform: translate3d(calc(var(--px, 0) * -4px), calc(var(--py, 0) * -3px), 0);
+    transition: transform 300ms var(--ease-out);
+    animation: rise-in var(--dur-slower) var(--ease-out) both;
+  }
+
+  .sheet__badge {
+    position: absolute;
+    inset-block-start: var(--space-md);
+    inset-inline-end: var(--gutter);
+    padding: 0.25em 0.7em;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    color: var(--c-text-faint);
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-wide);
+  }
+
+  /* -------------------------------------------------------- responsive -- */
+
+  @media (max-width: 60rem) {
+    .sheet__grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sheet__portrait {
+      order: -1;
+      max-inline-size: 18rem;
+      margin-inline: auto;
+    }
+
+    .sheet__badge {
+      display: none;
+    }
+  }
+</style>

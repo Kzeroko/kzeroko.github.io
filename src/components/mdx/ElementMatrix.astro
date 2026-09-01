@@ -1,0 +1,177 @@
+---
+import { Image } from 'astro:assets';
+
+import { DAMAGE_LABELS, DEFENCE_ELEMENTS, elementIcon, type DamageType } from '../../data/elements';
+import { splitLocalePath, type LocaleCode } from '../../i18n';
+
+interface Props {
+  /** Defaults to the language of the page being rendered. */
+  lang?: LocaleCode;
+}
+
+const { lang = splitLocalePath(Astro.url.pathname).lang } = Astro.props;
+
+const copy = {
+  en: { strong: 'Takes +25% from', weak: 'Takes −25% from', none: 'Nothing' },
+  'zh-cn': { strong: '受到 +25% 伤害', weak: '受到 −25% 伤害', none: '无' },
+}[lang];
+
+const label = (type: DamageType) => DAMAGE_LABELS[type][lang];
+---
+
+<div class="matrix" data-reveal-stagger>
+  {
+    DEFENCE_ELEMENTS.map((element, index) => {
+      const icon = elementIcon(element.id);
+      return (
+        <article class="matrix__row" data-reveal="rise" style={`--reveal-index:${index}`}>
+          <header class="matrix__head">
+            {icon && (
+              <Image
+                src={icon}
+                alt=""
+                width={32}
+                height={32}
+                class="matrix__icon"
+                loading="lazy"
+                decoding="async"
+              />
+            )}
+            <h3 class="matrix__name">{label(element.id)}</h3>
+          </header>
+
+          <div class="matrix__lists">
+            <div class="matrix__list matrix__list--strong">
+              <span class="matrix__label">{copy.strong}</span>
+              <ul role="list">
+                {element.strong.length === 0 ? (
+                  <li class="matrix__empty">{copy.none}</li>
+                ) : (
+                  element.strong.map((type) => <li>{label(type)}</li>)
+                )}
+              </ul>
+            </div>
+
+            <div class="matrix__list matrix__list--weak">
+              <span class="matrix__label">{copy.weak}</span>
+              <ul role="list">
+                {element.weak.length === 0 ? (
+                  <li class="matrix__empty">{copy.none}</li>
+                ) : (
+                  element.weak.map((type) => <li>{label(type)}</li>)
+                )}
+              </ul>
+            </div>
+          </div>
+
+          {element.note && <p class="matrix__note">{element.note[lang]}</p>}
+        </article>
+      );
+    })
+  }
+</div>
+
+<style>
+  .matrix {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
+    margin-block: 1.75em;
+  }
+
+  .matrix__row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    transition: border-color var(--dur-base) var(--ease-out);
+  }
+
+  .matrix__row:hover {
+    border-color: var(--c-line-strong);
+  }
+
+  .matrix__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .matrix__icon {
+    inline-size: 1.75rem;
+    block-size: 1.75rem;
+    image-rendering: pixelated;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .matrix__name {
+    font-family: var(--font-display);
+    font-size: var(--fs-md);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    margin: 0;
+  }
+
+  .matrix__lists {
+    display: grid;
+    gap: var(--space-sm);
+  }
+
+  .matrix__label {
+    display: block;
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .matrix__list ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-block-start: 0.4rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  .matrix__list li {
+    padding: 0.18em 0.6em;
+    border-radius: var(--radius-full);
+    font-size: var(--fs-xs);
+    font-weight: var(--weight-medium);
+    line-height: 1.5;
+  }
+
+  .matrix__list li::before {
+    display: none;
+  }
+
+  .matrix__list--strong li {
+    background: var(--c-success-soft);
+    color: var(--c-success);
+  }
+
+  .matrix__list--weak li {
+    background: var(--c-danger-soft);
+    color: var(--c-danger);
+  }
+
+  .matrix__empty {
+    background: var(--c-surface-3) !important;
+    color: var(--c-text-faint) !important;
+  }
+
+  .matrix__note {
+    margin: 0;
+    padding-block-start: var(--space-xs);
+    border-block-start: 1px solid var(--c-line-faint);
+    font-size: var(--fs-xs);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+</style>

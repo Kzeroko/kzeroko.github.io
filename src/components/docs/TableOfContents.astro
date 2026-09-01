@@ -1,0 +1,92 @@
+---
+import type { MarkdownHeading } from 'astro';
+
+import { useTranslations, type LocaleCode } from '../../i18n';
+
+/**
+ * Section rail for long pages.
+ *
+ * Only h2 and h3 are listed: deeper levels make the rail longer than the
+ * content it indexes. The active entry is tracked by `toc.ts`.
+ */
+interface Props {
+  lang: LocaleCode;
+  headings: MarkdownHeading[];
+  class?: string;
+}
+
+const { lang, headings, class: className } = Astro.props;
+const t = useTranslations(lang);
+
+const items = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
+---
+
+{
+  items.length > 1 && (
+    <nav class:list={['toc', className]} aria-labelledby="toc-title" data-toc>
+      <h2 class="toc__title" id="toc-title">
+        {t('toc.title')}
+      </h2>
+      <ul role="list">
+        {items.map((heading) => (
+          <li data-depth={heading.depth}>
+            <a href={`#${heading.slug}`}>{heading.text}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}
+
+<style>
+  .toc {
+    font-size: var(--fs-sm);
+  }
+
+  .toc__title {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .toc ul {
+    margin-block-start: var(--space-sm);
+    padding: 0;
+    border-inline-start: 1px solid var(--c-line);
+  }
+
+  .toc li[data-depth='3'] {
+    padding-inline-start: var(--space-md);
+  }
+
+  .toc a {
+    display: block;
+    padding: 0.3rem 0 0.3rem var(--space-md);
+    margin-inline-start: -1px;
+    border-inline-start: 1px solid transparent;
+    color: var(--c-text-muted);
+    line-height: var(--lh-snug);
+    text-wrap: pretty;
+    transition:
+      color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out);
+  }
+
+  .toc a:hover {
+    color: var(--c-text);
+    border-inline-start-color: var(--c-line-strong);
+  }
+
+  .toc a[data-active] {
+    color: var(--c-accent);
+    border-inline-start-color: var(--c-accent);
+    font-weight: var(--weight-medium);
+  }
+</style>
+
+<script>
+  import { initTableOfContents } from '../../scripts/toc';
+  initTableOfContents();
+</script>

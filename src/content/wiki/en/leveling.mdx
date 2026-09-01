@@ -1,0 +1,50 @@
+---
+title: "Levels & experience"
+description: "Four separate level tracks — player, equipment, adventurer rank and NPC affinity — and the curves behind each of them."
+category: core
+order: 30
+updated: 2026-09-01
+tagline: "Four tracks, four different jobs."
+tags: ['progression', 'experience']
+---
+
+KTM2 runs four independent level tracks. They are not variations of the same number: each one gates a different kind of content, and progress on one does not carry over to another.
+
+| Track | Range | What it gates |
+| --- | --- | --- |
+| Player | 1–100 | Skill tree nodes, identity progression, most gear requirements |
+| Equipment | 1–100 | Socket slots locked below their minimum item level |
+| Adventurer rank | 0–8 | Commissions, districts, some skill tree branches |
+| NPC affinity | 0–11 | What a companion is willing to tell you |
+
+## Player level
+
+The curve is deliberately in three phases: a fast opening so early sessions always produce a level, a long linear plateau through the middle game, and a steep final stretch where 91→100 alone costs more than 1→50.
+
+<LevelTable track="player" />
+
+## Equipment level
+
+Every piece of gear levels on its own. The important consequence is that **socket slots unlock with item level**: a socket whose profile sets a minimum item level stays locked until the item reaches it, no matter what gem you are holding.
+
+<LevelTable track="equipment" />
+
+<Callout type="tip" title="Use one weapon, not five">
+The equipment curve is steeper than the player curve at the top end. Spreading experience across an armoury means nothing reaches its late sockets.
+</Callout>
+
+## Adventurer rank
+
+Rank starts at **0** and becomes rank 1 the moment the Adventurer's Guild registers you — the first 1,200 points are effectively your paperwork. From there each rank costs roughly 1.55× the last, so rank 8 is a long-term goal rather than a mid-game milestone.
+
+<LevelTable track="adventurer" />
+
+## NPC affinity
+
+Affinity is tracked per character and moves through four named stages. They describe **how much someone lets you know and share**, not romance, and not damage.
+
+<LevelTable track="affinity" />
+
+<Callout type="note" title="What affinity does and does not do">
+Deeper stages change what a companion tells you, what she will let you help with, and which of her problems she stops hiding. They do not turn her into a better party member statistically, and they do not resolve her personal story on their own.
+</Callout>

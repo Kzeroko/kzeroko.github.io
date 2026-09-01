@@ -1,0 +1,153 @@
+---
+import '../styles/app.css';
+
+import BrandMark from '../components/layout/BrandMark.astro';
+import Icon from '../components/base/Icon.astro';
+import { locales, defaultLocale } from '../i18n';
+import { SITE } from '../data/site';
+
+/**
+ * Language gateway at `/`.
+ *
+ * A real page rather than a bare redirect: crawlers get an indexable root with
+ * hreflang alternates, and readers whose JavaScript never runs still get two
+ * clear choices. Everyone else is forwarded before first paint by the inline
+ * script below, which runs while the parser is still in `<head>`.
+ */
+const title = "Kzeroko's Workshop — KTM2, The Chronicles of Urdas";
+const description =
+  'Minecraft RPG development, world-building and the KTM2 modpack. Available in English and 简体中文.';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={`${SITE.url}/`} />
+    {
+      locales.map((locale) => (
+        <link rel="alternate" hreflang={locale.htmlLang} href={`${SITE.url}/${locale.code}/`} />
+      ))
+    }
+    <link rel="alternate" hreflang="x-default" href={`${SITE.url}/`} />
+    <meta name="theme-color" content={SITE.themeColor.dark} />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={`${SITE.url}/`} />
+    <meta property="og:image" content={`${SITE.url}/og-default.png`} />
+    <meta property="og:type" content="website" />
+
+    <script is:inline define:vars={{ fallback: defaultLocale }}>
+      (() => {
+        // Honour a previous choice, then the browser's languages, then default.
+        let target = fallback;
+        try {
+          const saved = localStorage.getItem('ktm2:lang');
+          if (saved === 'en' || saved === 'zh-cn') target = saved;
+          else {
+            const tags = navigator.languages ?? [navigator.language ?? ''];
+            const preferred = tags.find((tag) => /^(en|zh)/i.test(tag));
+            if (preferred) target = /^zh/i.test(preferred) ? 'zh-cn' : 'en';
+          }
+        } catch {
+          /* Storage blocked; fall through to the language sniff result. */
+        }
+        location.replace(`/${target}/`);
+      })();
+    </script>
+    <noscript>
+      <meta http-equiv="refresh" content={`2;url=/${defaultLocale}/`} />
+    </noscript>
+  </head>
+
+  <body class="gate">
+    <main class="gate__inner">
+      <BrandMark id="gate" size={56} />
+      <h1 class="gate__title">Kzeroko's Workshop</h1>
+      <p class="gate__lead">KTM2 · The Chronicles of Urdas</p>
+
+      <ul class="gate__choices" role="list">
+        {
+          locales.map((locale) => (
+            <li>
+              <a href={`/${locale.code}/`} hreflang={locale.htmlLang} lang={locale.htmlLang}>
+                <span>{locale.label}</span>
+                <Icon name="arrowRight" />
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </main>
+
+    <style>
+      .gate {
+        display: grid;
+        place-items: center;
+        min-block-size: 100svh;
+        text-align: center;
+        background-image:
+          radial-gradient(60rem 30rem at 50% 0%, var(--glow-a), transparent 65%),
+          radial-gradient(50rem 26rem at 20% 90%, var(--glow-b), transparent 70%);
+      }
+
+      .gate__inner {
+        display: grid;
+        justify-items: center;
+        gap: var(--space-sm);
+        padding: var(--space-xl);
+        animation: rise-in var(--dur-slow) var(--ease-out) both;
+      }
+
+      .gate__title {
+        margin-block-start: var(--space-md);
+        font-family: var(--font-display);
+        font-size: var(--fs-2xl);
+        font-weight: var(--weight-bold);
+        letter-spacing: var(--tracking-tight);
+      }
+
+      .gate__lead {
+        font-size: var(--fs-sm);
+        letter-spacing: var(--tracking-caps);
+        text-transform: uppercase;
+        color: var(--c-accent);
+      }
+
+      .gate__choices {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: var(--space-sm);
+        margin-block-start: var(--space-xl);
+        padding: 0;
+      }
+
+      .gate__choices a {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.75em 1.4em;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--c-line-strong);
+        background: var(--c-surface);
+        font-weight: var(--weight-semibold);
+        transition:
+          border-color var(--dur-base) var(--ease-out),
+          color var(--dur-base) var(--ease-out),
+          transform var(--dur-fast) var(--ease-out);
+      }
+
+      .gate__choices a:hover {
+        border-color: var(--c-accent);
+        color: var(--c-accent);
+        transform: translateY(-2px);
+      }
+    </style>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+---
+import Icon from './Icon.astro';
+import type { IconName } from './icons';
+
+interface Props {
+  /** Renders an `<a>` when set, a `<button>` otherwise. */
+  href?: string;
+  variant?: 'primary' | 'ghost' | 'quiet';
+  size?: 'sm' | 'md' | 'lg';
+  icon?: IconName;
+  /** Places the icon after the label instead of before it. */
+  iconEnd?: IconName;
+  type?: 'button' | 'submit';
+  class?: string;
+  /** Adds the external-link affordance and safe `rel`. */
+  external?: boolean;
+  [key: string]: unknown;
+}
+
+const {
+  href,
+  variant = 'ghost',
+  size = 'md',
+  icon,
+  iconEnd,
+  type = 'button',
+  class: className,
+  external = false,
+  ...rest
+} = Astro.props;
+
+const Tag = href ? 'a' : 'button';
+const classes = ['btn', `btn--${variant}`, size !== 'md' && `btn--${size}`, className];
+const linkAttrs = href
+  ? { href, ...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {}) }
+  : { type };
+---
+
+<Tag class:list={classes} {...linkAttrs} {...rest}>
+  {icon && <Icon name={icon} />}
+  <span><slot /></span>
+  {iconEnd && <Icon name={iconEnd} class="btn__end" />}
+  {external && !iconEnd && <Icon name="arrowUpRight" class="btn__end" />}
+</Tag>
+
+<style>
+  /* Arrow nudges forward on hover to signal direction of travel. */
+  .btn :global(.btn__end) {
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+
+  .btn:hover :global(.btn__end) {
+    transform: translateX(0.15em);
+  }
+</style>

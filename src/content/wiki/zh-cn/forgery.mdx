@@ -1,0 +1,155 @@
+---
+title: "锻造"
+description: "没有合成格的铁砧锻造——放上材料、对准砧面，一锤一锤把这一步敲完。"
+category: crafting
+order: 10
+updated: 2026-09-01
+tagline: "需要你亲手做，而不是点一下确认的制作方式。"
+tags: ['制作', '装备', '铁砧']
+---
+
+import idle from '../../../assets/images/ktm2/wiki/forgery/r_forgery_idle.gif';
+import viewBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_view_blueprint.gif';
+import putBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_blueprint.gif';
+import putIngredients from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_ingredients.gif';
+import forging from '../../../assets/images/ktm2/wiki/forgery/r_forgery_forging1.gif';
+import clear from '../../../assets/images/ktm2/wiki/forgery/r_forgery_clear.gif';
+import jadeWaiting from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting.webp';
+import jadeBlueprint from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting_w_blueprint.webp';
+import jadeIngredient from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_ingredient.webp';
+import jadeProgress from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_progress.webp';
+import jadeOrder from '../../../assets/images/ktm2/wiki/forgery/compat/jade_order_matters.webp';
+import jadeNext from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_next_step_1.webp';
+import jadeSuccess from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_success.webp';
+import rei1 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_1.webp';
+import rei2 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_2.webp';
+
+锻造是 KTM2 专属武器、防具、饰品与副手道具的主要来源。除了查看蓝图，**整个流程没有任何图形界面**——把真实的物品放在真实的铁砧上，然后敲它。
+
+<Clip src={idle} alt="空闲状态的锻造铁砧，蓝图槽为空" caption="空闲的锻造铁砧。你对它做的一切都发生在世界里。" />
+
+## 操作
+
+所有操作都是对铁砧的交互，**点哪个面决定数量**。
+
+| 手持 | 顶面 | 其它面 |
+| --- | --- | --- |
+| 材料 | 放入一个 | 放入手上全部 |
+| 锻造锤 | 从最后填入的槽取回一个 | 取回整个槽 |
+| 有效蓝图 | 写入蓝图（不消耗物品） | 同左 |
+| 溶解药水 | 清空锻造状态（消耗药水） | 同左 |
+
+<Callout type="caution" title="只读主手">
+所有交互只读取主手。把正确的物品放在副手不会有任何反应。
+</Callout>
+
+## 流程
+
+<Steps>
+
+1. **先看图纸**。手持有效蓝图，按 <kbd>Shift</kbd> + <kbd>使用键</kbd> 打开配方，<kbd>Esc</kbd> 退出。
+
+2. **把蓝图写入铁砧**。与尚未写入蓝图的铁砧交互。蓝图不会被消耗，铁砧只是拓了一份副本。如果是空白图纸，游戏会直接告诉你。
+
+3. **放入当前步骤的材料**。顺序有影响。按当前步骤的要求把槽位填上。
+
+4. **开始敲**。站在与铁砧同一水平面、约一格半的距离内，准星对准**顶面**；没对准的话游戏会提醒你。每一锤增加的锻造值按锻造锤的稀有度计算。
+
+5. **重复**每一个步骤，直到成品掉出来。
+
+</Steps>
+
+<Clip src={putBlueprint} alt="把蓝图写入铁砧" caption="写入蓝图只是拓一份副本，物品不会被消耗。" />
+
+<Clip src={putIngredients} alt="把材料放到铁砧上" caption="点顶面放一个，点其它面放一整组。" />
+
+<Clip src={viewBlueprint} alt="打开蓝图查看配方" caption="Shift + 使用键就能读图纸，不必先碰铁砧。" />
+
+<Clip src={forging} alt="手持锻造锤敲击铁砧，锻造进度上涨" caption="每一锤的进度取决于锻造锤的稀有度。" />
+
+## 清掉失败的尝试
+
+手持**溶解药水**与铁砧交互。药水会被消耗，铁砧里还没被用掉的材料不会。
+
+<Clip src={clear} alt="倒入溶解药水重置铁砧状态" caption="药水只清空锻造状态，不动你的材料。" />
+
+<Callout type="danger" title="别喝">
+喝下溶解药水是自杀效果。这样死掉时有极小的几率掉落**融化的血肉**。
+</Callout>
+
+破坏铁砧同样能清空状态，但这个铁砧很硬，而且用任何工具挖掘速度都一样，所以这是最慢的办法。
+
+## 模组兼容
+
+**Jade** 会在提示框里显示铁砧当前的状态——是否在等待、写入了哪张蓝图、下一个需要的材料，以及当前步骤的进度。
+
+<Gallery
+  items={[
+    { src: jadeWaiting, alt: '空铁砧上的 Jade 提示', caption: '等待中' },
+    { src: jadeBlueprint, alt: '显示已写入蓝图的 Jade 提示', caption: '已写入蓝图' },
+    { src: jadeIngredient, alt: '显示所需材料的 Jade 提示', caption: '下一个材料' },
+    { src: jadeProgress, alt: '显示锻造进度的 Jade 提示', caption: '进度' },
+    { src: jadeOrder, alt: '提示材料顺序有影响的 Jade 提示', caption: '顺序有影响' },
+    { src: jadeNext, alt: '进入下一步骤的 Jade 提示', caption: '下一步' },
+    { src: jadeSuccess, alt: '锻造完成时的 Jade 提示', caption: '完成' },
+  ]}
+  min="13rem"
+/>
+
+**REI** 会列出锻造配方及其步骤。手上没有蓝图也能查到它需要什么。
+
+<Gallery
+  items={[
+    { src: rei1, alt: 'REI 中显示的锻造配方' },
+    { src: rei2, alt: 'REI 中显示的多步骤锻造配方' },
+  ]}
+  min="18rem"
+/>
+
+## 计划中
+
+- 与 **alloy-forgery** 的依赖与整合。
+- 更多品质的锻造锤。
+- **铁匠技艺**兼容：由铁匠锻造出的装备会获得额外的物品稀有度，既有保底也有更高的上浮几率。
+
+## 配方格式
+
+配方位于 `data/<命名空间>/recipes/ise_forgery/<配方 ID>.json`，类型为 `isekaiexpansion:forgery`。
+
+| 字段 | 含义 |
+| --- | --- |
+| `result` | 最终产出的单个物品。 |
+| `steps` | 有序的锻造步骤。尽量控制在 10 步以内，超出未经测试，可能出问题。 |
+| `forgery_progress` | 完成该步骤所需的锻造值。每把锤子按稀有度贡献不同数值，据此估算。 |
+| `ingredients` | 该步骤所需材料，**最多 9 种**。 |
+| `count` | 该材料的数量，必须在一组以内（≤ 64）。 |
+| `item` | 材料的物品 ID。 |
+| `should_render_ingredients` | 是否在铁砧上渲染已放入的材料模型。 |
+| `display_item` | 作为半成品渲染的物品 ID。不可获得，仅用于表现。第一步通常不需要。 |
+
+```json
+{
+  "type": "isekaiexpansion:forgery",
+  "result": { "item": "minecraft:diamond_sword" },
+  "steps": [
+    {
+      "forgery_progress": 100,
+      "ingredients": [
+        { "count": 2, "item": "minecraft:iron_ingot" },
+        { "count": 1, "item": "minecraft:stick" }
+      ],
+      "should_render_ingredients": true
+    },
+    {
+      "display_item": "minecraft:iron_sword",
+      "forgery_progress": 140,
+      "ingredients": [
+        { "count": 3, "item": "minecraft:diamond" },
+        { "count": 1, "item": "minecraft:iron_ingot" },
+        { "count": 2, "item": "minecraft:slime_ball" }
+      ],
+      "should_render_ingredients": true
+    }
+  ]
+}
+```

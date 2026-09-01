@@ -1,0 +1,148 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import { localeCodes, localePath, useTranslations, type LocaleCode, type UIKey } from '../../../i18n';
+import { ROADMAP, type RoadmapStage } from '../../../data/site';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const STAGES: { id: RoadmapStage; key: UIKey; accent: string }[] = [
+  { id: 'now', key: 'ktm2.roadmap.now', accent: 'teal' },
+  { id: 'next', key: 'ktm2.roadmap.next', accent: 'amber' },
+  { id: 'later', key: 'ktm2.roadmap.later', accent: 'violet' },
+];
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: 'KTM2', href: localePath(lang, 'ktm2') },
+  { label: t('ktm2.roadmap.title') },
+];
+
+const lead = {
+  en: 'What is being built, in the order it is being built. Nothing here has a date attached — this is a solo project, and a date would be a guess dressed up as a promise.',
+  'zh-cn':
+    '正在做的事，按实际推进的顺序排列。这里不写日期——这是个人项目，写日期只是把猜测包装成承诺。',
+}[lang];
+---
+
+<PageLayout
+  lang={lang}
+  title={t('ktm2.roadmap.title')}
+  description={lead}
+  eyebrow="KTM2"
+  heading={t('ktm2.roadmap.title')}
+  lead={lead}
+  crumbs={crumbs}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <div class="shell shell--wide roadmap">
+    {
+      STAGES.map((stage) => {
+        const items = ROADMAP.filter((item) => item.stage === stage.id);
+        if (items.length === 0) return null;
+        return (
+          <section class="stage" data-accent={stage.accent}>
+            <header class="stage__head" data-reveal="fade">
+              <span class="stage__marker" aria-hidden="true" />
+              <h2 class="stage__title">{t(stage.key)}</h2>
+              <span class="stage__count">{items.length}</span>
+            </header>
+
+            <div class="stage__items" data-reveal-stagger>
+              {items.map((item, index) => (
+                <article class="item" data-reveal="rise" style={`--reveal-index:${index}`}>
+                  <h3 class="item__title">{item.title[lang]}</h3>
+                  <p class="item__body">{item.body[lang]}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+      })
+    }
+  </div>
+</PageLayout>
+
+<style>
+  .roadmap {
+    display: grid;
+    gap: var(--space-3xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+  }
+
+  .stage__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-block-end: var(--space-lg);
+    padding-block-end: var(--space-sm);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  .stage__marker {
+    inline-size: 0.55rem;
+    block-size: 0.55rem;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+
+  .stage__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .stage__count {
+    margin-inline-start: auto;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .stage__items {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr));
+  }
+
+  .item {
+    padding: var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    border-block-start: 2px solid var(--accent);
+    background: var(--c-surface);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+
+  .item:hover {
+    transform: translateY(-2px);
+  }
+
+  .item__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .item__body {
+    margin-block-start: var(--space-xs);
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+</style>

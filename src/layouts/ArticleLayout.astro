@@ -1,0 +1,243 @@
+---
+import type { ImageMetadata, MarkdownHeading } from 'astro';
+
+import BaseLayout from './BaseLayout.astro';
+import type { BaseLayoutProps } from './props';
+import Breadcrumbs from '../components/docs/Breadcrumbs.astro';
+import Pager from '../components/docs/Pager.astro';
+import TableOfContents from '../components/docs/TableOfContents.astro';
+import SmartImage from '../components/base/SmartImage.astro';
+import Icon from '../components/base/Icon.astro';
+import { formatDate, formatDateISO, useTranslations } from '../i18n';
+import { blogTagPath } from '../lib/content';
+
+/** Long-form reading layout for devlog posts and standalone prose pages. */
+interface Props extends BaseLayoutProps {
+  heading: string;
+  lead?: string;
+  eyebrow?: string;
+  crumbs: { label: string; href?: string }[];
+  headings?: MarkdownHeading[];
+  hero?: ImageMetadata;
+  heroAlt?: string;
+  pubDate?: Date;
+  updatedDate?: Date;
+  readingMinutes?: number;
+  tags?: string[];
+  prev?: { label: string; title: string; href: string };
+  next?: { label: string; title: string; href: string };
+}
+
+const {
+  heading,
+  lead,
+  eyebrow,
+  crumbs,
+  headings = [],
+  hero,
+  heroAlt,
+  pubDate,
+  updatedDate,
+  readingMinutes,
+  tags = [],
+  prev,
+  next,
+  ...base
+} = Astro.props;
+
+const t = useTranslations(base.lang);
+const showToc = headings.filter((h) => h.depth === 2 || h.depth === 3).length > 1;
+---
+
+<BaseLayout {...base} mainClass="article">
+  <div class="article__wrap shell shell--wide">
+    <article class="article__main">
+      <Breadcrumbs lang={base.lang} items={crumbs} class="article__crumbs" />
+
+      <header class="article__head">
+        {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+        <h1 class="article__title">{heading}</h1>
+        {lead && <p class="article__lead">{lead}</p>}
+
+        <div class="article__meta">
+          {
+            pubDate && (
+              <time datetime={formatDateISO(pubDate)}>
+                <Icon name="calendar" />
+                {formatDate(pubDate, base.lang)}
+              </time>
+            )
+          }
+          {
+            updatedDate && (
+              <span>
+                {t('blog.updated')} {formatDate(updatedDate, base.lang)}
+              </span>
+            )
+          }
+          {
+            readingMinutes && (
+              <span>
+                <Icon name="book" />
+                {readingMinutes} {t('blog.readingTime')}
+              </span>
+            )
+          }
+        </div>
+
+        {
+          tags.length > 0 && (
+            <ul class="article__tags" role="list">
+              {tags.map((tag) => (
+                <li>
+                  <a class="badge" href={blogTagPath(base.lang, tag)}>
+                    #{tag}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </header>
+
+      {
+        hero && (
+          <figure class="article__hero">
+            <SmartImage
+              src={hero}
+              alt={heroAlt ?? ''}
+              width={1400}
+              sizes="(max-width: 60rem) 100vw, 48rem"
+              priority
+            />
+          </figure>
+        )
+      }
+
+      <div class="prose article__body">
+        <slot />
+      </div>
+
+      <Pager prev={prev} next={next} />
+    </article>
+
+    {
+      showToc && (
+        <aside class="article__toc">
+          <div class="article__tocInner scroll-thin">
+            <TableOfContents lang={base.lang} headings={headings} />
+          </div>
+        </aside>
+      )
+    }
+  </div>
+</BaseLayout>
+
+<style>
+  .article__wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--toc-width);
+    gap: var(--space-3xl);
+    align-items: start;
+    justify-content: center;
+    padding-block: var(--space-2xl) var(--space-3xl);
+  }
+
+  .article__main {
+    max-inline-size: 46rem;
+    inline-size: 100%;
+    margin-inline: auto;
+  }
+
+  .article__crumbs {
+    margin-block-end: var(--space-lg);
+  }
+
+  .article__title {
+    margin-block-start: var(--space-sm);
+    font-family: var(--font-display);
+    font-size: var(--fs-3xl);
+    font-weight: var(--weight-bold);
+    line-height: var(--lh-tight);
+    letter-spacing: var(--tracking-tight);
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .article__lead {
+    margin-block-start: var(--space-lg);
+    font-size: var(--fs-md);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+    animation: rise-in var(--dur-slow) var(--ease-out) both;
+    animation-delay: 70ms;
+  }
+
+  .article__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    margin-block-start: var(--space-lg);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .article__meta :is(time, span) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+
+  .article__meta :global(.icon) {
+    inline-size: 0.9em;
+    block-size: 0.9em;
+  }
+
+  .article__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin-block-start: var(--space-md);
+    padding: 0;
+  }
+
+  .article__tags a:hover {
+    border-color: var(--c-accent);
+    color: var(--c-accent);
+  }
+
+  .article__hero {
+    margin-block-start: var(--space-xl);
+  }
+
+  .article__hero :global(img) {
+    inline-size: 100%;
+    block-size: auto;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+  }
+
+  .article__body {
+    margin-block-start: var(--space-xl);
+    padding-block-start: var(--space-xl);
+    border-block-start: 1px solid var(--c-line);
+    max-inline-size: none;
+  }
+
+  .article__toc {
+    position: sticky;
+    inset-block-start: calc(var(--header-height) + var(--space-lg));
+    max-block-size: calc(100svh - var(--header-height) - var(--space-2xl));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  @media (max-width: 76rem) {
+    .article__wrap {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .article__toc {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,336 @@
+---
+import { Image } from 'astro:assets';
+
+import Button from '../base/Button.astro';
+import Icon from '../base/Icon.astro';
+import backdrop from '../../assets/images/ktm2/scenes/scene-shrine.webp';
+import wordmark from '../../assets/images/ktm2/ktm2_icon_txt.webp';
+import { localePath, useTranslations, type LocaleCode } from '../../i18n';
+import { KTM2 } from '../../data/site';
+
+/**
+ * Home hero.
+ *
+ * Three depth planes, all driven by the same `--px/--py` pointer values that
+ * `parallax.ts` writes on the section: the screenshot (slowest), the aurora
+ * wash, and the star field (fastest). The screenshot is scrimmed hard enough
+ * that headline contrast never depends on which part of it is showing.
+ */
+interface Props {
+  lang: LocaleCode;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+
+const facts = [
+  { label: t('ktm2.mcVersion'), value: KTM2.minecraft },
+  { label: t('ktm2.loader'), value: KTM2.loader },
+  { label: t('ktm2.mods'), value: String(KTM2.modCount) },
+];
+---
+
+<section class="hero" data-parallax>
+  <div class="hero__bg" aria-hidden="true">
+    <Image
+      src={backdrop}
+      alt=""
+      width={1920}
+      sizes="100vw"
+      loading="eager"
+      fetchpriority="high"
+      decoding="sync"
+      class="hero__photo"
+    />
+    <div class="hero__scrim"></div>
+    <div class="hero__aurora"></div>
+    <div class="hero__stars"></div>
+  </div>
+
+  <div class="hero__inner shell shell--wide">
+    <p class="hero__eyebrow">
+      <span class="hero__pulse" aria-hidden="true"></span>
+      {t('home.eyebrow')}
+    </p>
+
+    <Image
+      src={wordmark}
+      alt="KTM2 — The Chronicles of Urdas"
+      width={560}
+      densities={[1, 2]}
+      loading="eager"
+      decoding="sync"
+      class="hero__wordmark"
+    />
+
+    <h1 class="hero__title">{t('home.heroTitle')}</h1>
+
+    <p class="hero__lead">{t('home.heroLead')}</p>
+
+    <div class="hero__actions">
+      <Button href={localePath(lang, 'ktm2')} variant="primary" size="lg" iconEnd="arrowRight">
+        {t('home.ctaPrimary')}
+      </Button>
+      <Button href={localePath(lang, 'blog')} variant="ghost" size="lg">
+        {t('home.ctaSecondary')}
+      </Button>
+    </div>
+
+    <dl class="hero__facts">
+      {
+        facts.map((fact) => (
+          <div>
+            <dt>{fact.label}</dt>
+            <dd>{fact.value}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </div>
+
+  <a class="hero__scroll" href="#pillars" aria-label={t('home.scroll')}>
+    <span>{t('home.scroll')}</span>
+    <Icon name="chevronDown" />
+  </a>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    display: grid;
+    align-items: center;
+    min-block-size: min(46rem, 100svh);
+    padding-block: calc(var(--header-height) + var(--space-3xl)) var(--space-4xl);
+    overflow: clip;
+    isolation: isolate;
+    /* The hero owns a dark surface in both themes — it sits on a screenshot. */
+    color: #eef4fb;
+  }
+
+  /* ------------------------------------------------------------ backdrop -- */
+
+  .hero__bg {
+    position: absolute;
+    inset: -6%;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .hero__photo {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+    object-position: 50% 42%;
+    transform: translate3d(calc(var(--px, 0) * -10px), calc(var(--py, 0) * -8px), 0) scale(1.04);
+    transition: transform 700ms var(--ease-out);
+  }
+
+  .hero__scrim {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--hue-navy-900) 78%, transparent) 0%,
+        color-mix(in oklab, var(--hue-navy-900) 58%, transparent) 42%,
+        var(--c-bg) 99%
+      ),
+      linear-gradient(90deg, color-mix(in oklab, var(--hue-navy-900) 62%, transparent), transparent 62%);
+  }
+
+  .hero__aurora {
+    position: absolute;
+    inset: -20%;
+    background:
+      radial-gradient(38rem 26rem at 22% 28%, var(--glow-a), transparent 62%),
+      radial-gradient(34rem 24rem at 74% 18%, var(--glow-b), transparent 66%),
+      radial-gradient(28rem 20rem at 58% 76%, var(--glow-c), transparent 70%);
+    mix-blend-mode: screen;
+    opacity: 0.75;
+    transform: translate3d(calc(var(--px, 0) * -22px), calc(var(--py, 0) * -18px), 0);
+    animation: aurora-shift 26s var(--ease-in-out) infinite;
+    transition: transform 600ms var(--ease-out);
+  }
+
+  /*
+   * Star field: three tiled radial-gradient layers rather than DOM nodes or a
+   * canvas. Costs nothing to animate and scales to any viewport.
+   */
+  .hero__stars {
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 18%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 68% 12%, #dff6ff, transparent),
+      radial-gradient(1px 1px at 34% 46%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 84% 38%, #cfeaff, transparent),
+      radial-gradient(1px 1px at 52% 24%, #fff, transparent),
+      radial-gradient(1px 1px at 22% 62%, #e8fbff, transparent),
+      radial-gradient(1.5px 1.5px at 92% 66%, #fff, transparent);
+    background-size: 44rem 30rem;
+    opacity: 0.55;
+    transform: translate3d(calc(var(--px, 0) * -30px), calc(var(--py, 0) * -24px), 0);
+    animation: twinkle 6s var(--ease-in-out) infinite;
+    transition: transform 500ms var(--ease-out);
+  }
+
+  /* --------------------------------------------------------------- copy -- */
+
+  .hero__inner {
+    max-inline-size: 100%;
+  }
+
+  .hero__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55em;
+    padding: 0.4em 0.9em;
+    border-radius: var(--radius-full);
+    border: 1px solid rgb(255 255 255 / 0.18);
+    background: rgb(10 16 26 / 0.45);
+    backdrop-filter: blur(8px);
+    font-size: var(--fs-xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-wide);
+    color: #d6e6f5;
+    animation: fade-in var(--dur-slow) var(--ease-out) both;
+  }
+
+  .hero__pulse {
+    position: relative;
+    inline-size: 0.45em;
+    block-size: 0.45em;
+    border-radius: 50%;
+    background: var(--hue-teal-300);
+  }
+
+  .hero__pulse::after {
+    content: '';
+    position: absolute;
+    inset: -0.25em;
+    border-radius: 50%;
+    border: 1px solid var(--hue-teal-300);
+    animation: pulse-ring 2.4s var(--ease-out) infinite;
+  }
+
+  .hero__wordmark {
+    inline-size: min(30rem, 78vw);
+    block-size: auto;
+    margin-block-start: var(--space-lg);
+    image-rendering: pixelated;
+    filter: drop-shadow(0 6px 24px rgb(0 0 0 / 0.55));
+    animation: rise-in var(--dur-slower) var(--ease-out) both;
+    animation-delay: 60ms;
+  }
+
+  /* The wordmark carries the brand; the h1 stays for structure and search. */
+  .hero__title {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .hero__lead {
+    margin-block-start: var(--space-xl);
+    max-inline-size: 46ch;
+    font-size: var(--fs-md);
+    line-height: var(--lh-relaxed);
+    color: #c9d8e8;
+    text-wrap: pretty;
+    animation: rise-in var(--dur-slower) var(--ease-out) both;
+    animation-delay: 140ms;
+  }
+
+  .hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-block-start: var(--space-xl);
+    animation: rise-in var(--dur-slower) var(--ease-out) both;
+    animation-delay: 220ms;
+  }
+
+  .hero__actions :global(.btn--ghost) {
+    --btn-border: rgb(255 255 255 / 0.28);
+    --btn-fg: #eef4fb;
+    background: rgb(10 16 26 / 0.35);
+    backdrop-filter: blur(8px);
+  }
+
+  .hero__actions :global(.btn--ghost:hover) {
+    --btn-border: var(--hue-teal-300);
+    color: var(--hue-teal-300);
+  }
+
+  .hero__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xl);
+    margin-block-start: var(--space-2xl);
+    padding-block-start: var(--space-lg);
+    border-block-start: 1px solid rgb(255 255 255 / 0.14);
+    max-inline-size: 34rem;
+    animation: fade-in var(--dur-slower) var(--ease-out) both;
+    animation-delay: 300ms;
+  }
+
+  .hero__facts dt {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: rgb(238 244 251 / 0.55);
+  }
+
+  .hero__facts dd {
+    margin: 0.2rem 0 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-bold);
+    color: #eef4fb;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------- scroll -- */
+
+  .hero__scroll {
+    position: absolute;
+    inset-block-end: var(--space-lg);
+    inset-inline-start: 50%;
+    translate: -50% 0;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: rgb(238 244 251 / 0.6);
+    animation: drift 3.4s var(--ease-in-out) infinite;
+    transition: color var(--dur-base) var(--ease-out);
+  }
+
+  .hero__scroll:hover {
+    color: var(--hue-teal-300);
+  }
+
+  @media (max-width: 48rem) {
+    .hero {
+      min-block-size: auto;
+      padding-block: calc(var(--header-height) + var(--space-2xl)) var(--space-3xl);
+    }
+
+    .hero__scroll {
+      display: none;
+    }
+
+    .hero__facts {
+      gap: var(--space-lg);
+    }
+  }
+</style>

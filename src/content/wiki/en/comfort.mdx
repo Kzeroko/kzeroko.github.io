@@ -1,0 +1,117 @@
+---
+title: "Comfort"
+description: "A 0–100 stat that tracks whether you are actually living well, and pays out in movement speed, mining speed and hunger efficiency."
+category: core
+order: 10
+updated: 2026-09-01
+tagline: "How well you are living, priced in movement, mining and food."
+tags: ['survival', 'food', 'shelter']
+---
+
+import comfortHud from '../../../assets/images/ktm2/wiki/comfort/comfort_demo1.webp';
+import comfortFood from '../../../assets/images/ktm2/wiki/comfort/comfort_demo2.webp';
+
+Comfort is a value from **0 to 100** attached to your character. It moves with your environment, your meals, your sleep and the damage you take, and it pays back in three places: how fast you move, how fast you break blocks, and how quickly you get hungry.
+
+## The three bands
+
+| Band | Range | Movement | Block breaking | Hunger exhaustion |
+| --- | --- | --- | --- | --- |
+| **Painful** | 0–40 | −20% base | ×0.90 | ×1.50 |
+| **Normal** | 41–70 | — | — | — |
+| **Relaxed** | 71–100 | +20% base | ×1.10 | ×0.50 |
+
+The gap between Painful and Relaxed is a 40% swing in movement speed and a 3× difference in how fast you burn through food.
+
+<Figure src={comfortHud} alt="The Comfort meter in the KTM2 HUD, showing the current value and recent meals" caption="Comfort and your recent meals are both readable from the HUD." plate />
+
+## Natural change
+
+While Comfort is above 0 it is re-evaluated **every 1200 ticks (60 seconds)**. Each evaluation removes 1 point, then applies an environment correction clamped to **−5 … +1**.
+
+In the best possible surroundings that +1 cancels the −1 exactly, so Comfort stops falling when you are somewhere good. At worst you lose 6 points a minute.
+
+### What the environment checks
+
+- **Shelter near your spawn point** offsets the loss — this is the "home" case.
+- **Standing in rain** adds a penalty.
+- **Snow without full armour** adds a penalty.
+- **The Nether** adds a penalty.
+
+### When Comfort is frozen
+
+Comfort does not change at all while you are:
+
+- in Creative or Spectator mode;
+- asleep in a bed;
+- under Farmer's Delight `comfort`.
+
+### Nourishment slows the clock
+
+Farmer's Delight `nourishment` multiplies the evaluation interval by **1.5**, so it becomes one evaluation every 90 seconds instead of every 60.
+
+## Food
+
+<Figure src={comfortFood} alt="Held-food preview showing the Comfort value a dish will grant" caption="Held food previews the Comfort it will give before you eat it." plate />
+
+Every food item can carry a signed Comfort value, positive or negative. Two rules decide what it is finally worth to you:
+
+<Steps>
+
+1. **Repetition dulls positive food.** Your last six meals are remembered. A dish gives **100%** of its positive Comfort the first time it appears in that history, then **70%**, then **40%**, then **10%**. Negative Comfort is never reduced by repetition — spoiled stew is always spoiled stew.
+
+2. **Well-made food is worth cooking.** A dish with a `WellMadeFood.Bonus` of 1–3 scales its positive Comfort by `1 + 0.33 × level`, and divides negative Comfort by the same factor.
+
+</Steps>
+
+<Callout type="tip" title="What this means in practice">
+Keep three or four dishes in rotation instead of mass-producing one. The variety bonus is larger than almost any single ingredient upgrade.
+</Callout>
+
+## Damage and sleep
+
+**Taking damage removes Comfort** on a logarithmic curve that accounts for your maximum health, capped at **20 points per hit**. A glancing blow costs little; nearly dying costs a lot.
+
+**Waking from sleep restores up to 30 points**, limited to 70% of what you are missing. Sleeping at 20 Comfort gives you back 30; sleeping at 65 gives you back far less. Sleep is a recovery tool, not a reset button.
+
+## Fate Balance interactions
+
+Two [Fate Balance](/en/wiki/fate-balance/) temperaments change how Comfort behaves for you:
+
+| Fate | Recovery | Loss | Natural decay |
+| --- | --- | --- | --- |
+| `optimistic_nature` | ×1.20 | ×0.80 | ×0.80 |
+| `pessimistic_nature` | ×0.80 | ×1.20 | ×1.25 |
+
+Two appetite fates change your maximum hunger instead, which interacts with the hunger-exhaustion column above:
+
+| Fate | Max hunger | What it means |
+| --- | --- | --- |
+| — | 20 | Standard reserve |
+| `hearty_appetite` | 26 | 30% more reserve before starvation |
+| `birdlike_appetite` | 14 | Fills sooner, 30% less reserve |
+
+<Callout type="note" title="No hunger healing">
+Isekai Core disables vanilla's hunger-based health regeneration entirely, so appetite fates do not secretly change your healing. Recovery comes from food effects, spells and items instead.
+</Callout>
+
+## For datapack authors
+
+Food values are loaded from `data/<namespace>/comfort_level/*.json` as a flat map of item id to signed integer:
+
+```json
+{
+  "minecraft:bread": 3,
+  "example:spoiled_stew": -8
+}
+```
+
+Unknown and non-food items are ignored with a warning. Duplicate item entries are resolved by deterministic identifier order, later ids winning. The resolved registry is synchronised to clients whenever datapack contents reload.
+
+To generate a baseline for every registered food:
+
+```text
+/ise dev dumpFoodComfort
+```
+
+The result is written to `config/isekaiseries/ktm2foodcomfort.json`.

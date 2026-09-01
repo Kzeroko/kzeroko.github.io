@@ -1,0 +1,72 @@
+---
+import type { GetStaticPaths } from 'astro';
+import { render } from 'astro:content';
+
+import CodexLayout from '../../../layouts/CodexLayout.astro';
+import { mdxComponents } from '../../../components/mdx';
+import { localeCodes, localePath, useTranslations, type LocaleCode, type UIKey } from '../../../i18n';
+import { codexPath, entrySlug, getCodexEntries, localisedPaths, type CodexEntry } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (async () => {
+  return localisedPaths('codex', localeCodes);
+}) satisfies GetStaticPaths;
+
+interface Props {
+  entry: CodexEntry;
+}
+
+const { entry } = Astro.props as Props;
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const { Content, headings } = await render(entry);
+
+const SECTION_LABEL: Record<string, UIKey> = {
+  world: 'codex.section.world',
+  character: 'codex.section.characters',
+  faction: 'codex.section.factions',
+  location: 'codex.section.locations',
+  race: 'codex.section.races',
+};
+const sectionLabel = t(SECTION_LABEL[entry.data.kind]!);
+
+// Prev/next stay inside the same kind, so browsing the cast never drops you
+// into a faction entry halfway through.
+const siblings = await getCodexEntries(lang, entry.data.kind);
+const index = siblings.findIndex((item) => entrySlug(item) === entrySlug(entry));
+const previous = index > 0 ? siblings[index - 1] : undefined;
+const following = index >= 0 && index < siblings.length - 1 ? siblings[index + 1] : undefined;
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: t('codex.title'), href: localePath(lang, 'codex') },
+  { label: sectionLabel, href: `${localePath(lang, 'codex')}#${entry.data.kind}` },
+  { label: entry.data.title },
+];
+---
+
+<CodexLayout
+  lang={lang}
+  title={entry.data.title}
+  description={entry.data.summary}
+  entry={entry}
+  headings={headings}
+  crumbs={crumbs}
+  portrait={entry.data.portrait}
+  sectionLabel={sectionLabel}
+  noindex={entry.data.seo?.noindex}
+  prev={previous
+    ? { label: sectionLabel, title: previous.data.title, href: codexPath(lang, previous) }
+    : undefined}
+  next={following
+    ? { label: sectionLabel, title: following.data.title, href: codexPath(lang, following) }
+    : undefined}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <Content components={mdxComponents} />
+</CodexLayout>

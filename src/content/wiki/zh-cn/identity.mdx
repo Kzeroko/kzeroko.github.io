@@ -1,0 +1,85 @@
+---
+title: "身份与进阶"
+description: "种族进化、职业晋升与技艺进阶——三张独立的图，一套共用规则。"
+category: core
+order: 40
+updated: 2026-09-01
+tagline: "三个层，而不是一次性的职业选择。"
+tags: ['种族', '职业', '技艺']
+---
+
+「你是谁」在 KTM2 里分三层，每一层都是独立的 Origins 层，各自带一张进阶图：
+
+| 层 | 模式 | 它回答的问题 |
+| --- | --- | --- |
+| **种族** | 进化 | 你生下来是什么 |
+| **职业** | 晋升 | 你怎么打 |
+| **技艺** | 晋升 | 你靠什么吃饭 |
+
+三层各自推进。矮人族可以是魔法师，魔法师也可以是铁匠。
+
+## 一张图是怎么运作的
+
+每张图都是节点与边构成的**有向无环图**：节点是一个身份，边是一条合法的转换路径。同一层里的目标身份全部收在这一层的图上，不会在两张图里重复出现。
+
+<Steps>
+
+1. 每一层从一个 `base` 节点开始。
+
+2. 与你当前身份相连的节点会显示出来，并各自列出需求。
+
+3. 满足全部需求，然后按住确认控件，按满该节点的 `hold_ticks`（限制在 10–200 之间）。
+
+4. 松手之后才提交。提交时需求、路径与目标身份会重新核对一遍，核对不过就不生效。
+
+</Steps>
+
+<Callout type="note" title="为什么是长按而不是点击">
+身份变更不是随手做的事，长按是刻意加进去的阻力。没有按满的请求一律不算数。
+</Callout>
+
+## 需求类型
+
+| 需求 | 是否消耗 | 示例 |
+| --- | --- | --- |
+| `player_level` | 否 | `{ "type": "player_level", "amount": 20 }` |
+| `experience_level` | 可选 | `{ "type": "experience_level", "amount": 12, "consume": true }` |
+| `advancement` | 否 | `{ "type": "advancement", "target": "minecraft:story/enter_the_nether" }` |
+| `item` | 可选 | `{ "type": "item", "target": "minecraft:amethyst_shard", "amount": 8, "consume": true }` |
+
+只有 `experience_level` 与 `item` 能设 `consume`。玩家等级和进度成就是检查，不是代价。
+
+## 当前进度
+
+三张图都已经存在，但只有种族图是完整连通的——里面有「龙人族 → 上位龙族」这条测试分支。职业与技艺目前只有互不相连的 `base` 节点。这是内容还没补完，不是功能没做：把节点和边写上去，它们就会连起来。
+
+## 给数据包作者
+
+定义放在 `data/<命名空间>/progression_graphs/<路径>.json`：
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "human_base",
+      "target": "isekaiorigins:human",
+      "rank": "base",
+      "position": [0, 0],
+      "hold_ticks": 30,
+      "icon": "isekaiexpansion:textures/item/icons/hdicon_human.png",
+      "name": "optional.translation.key",
+      "description": "optional.translation.key",
+      "requirements": []
+    }
+  ],
+  "edges": [{ "from": "human_base", "to": "future_human_evolution" }]
+}
+```
+
+节点 ID 是图内局部的稳定键，玩家进度按它保存——改名等于把已保存的进度弄丢。坐标是归一化的 `-4` 到 `4`，缩放与平移由界面自己处理。
+
+<Callout type="caution" title="不可直接选择的身份">
+只能通过进阶抵达的身份，仍然必须列在它所属的 Origins 层里，否则不会被认作合法目标；同时它的 origin 定义要设 `"unchoosable": true`。这样 Origins 会把它从常规选择和随机选择中排除，也会拒绝直接指定它的数据包，而进阶流程照常可以把它交给玩家。
+</Callout>

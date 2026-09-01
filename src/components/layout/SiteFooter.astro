@@ -1,0 +1,242 @@
+---
+import BrandMark from './BrandMark.astro';
+import Icon from '../base/Icon.astro';
+import { localePath, useTranslations, type LocaleCode } from '../../i18n';
+import { ISEKAI_MODULES, PRIMARY_NAV, SITE, SOCIALS } from '../../data/site';
+
+interface Props {
+  lang: LocaleCode;
+}
+
+const { lang } = Astro.props;
+const t = useTranslations(lang);
+const year = new Date().getFullYear();
+
+const projectLinks = [
+  { label: 'KTM2', href: localePath(lang, 'ktm2') },
+  { label: t('ktm2.modules.title'), href: localePath(lang, 'ktm2/modules') },
+  { label: t('ktm2.roadmap.title'), href: localePath(lang, 'ktm2/roadmap') },
+  { label: 'IsekaiExpansion', href: ISEKAI_MODULES.find((m) => m.id === 'expansion')!.repo!, external: true },
+  { label: 'KTM2 WorldDict', href: 'https://github.com/Kzeroko/KTM2WorldDict', external: true },
+];
+---
+
+<footer class="footer">
+  <div class="footer__inner shell shell--wide">
+    <div class="footer__brand">
+      <a class="footer__logo" href={localePath(lang)}>
+        <BrandMark id="footer" size={34} />
+        <span>
+          <strong>{t('site.title')}</strong>
+          <span class="footer__tagline">{t('site.tagline')}</span>
+        </span>
+      </a>
+
+      <ul class="footer__socials" role="list">
+        {
+          SOCIALS.map((social) => (
+            <li>
+              <a
+                class="icon-btn"
+                href={social.href}
+                target="_blank"
+                rel="me noopener noreferrer"
+                aria-label={social.label}
+                title={social.label}
+              >
+                <Icon name={social.icon} />
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <nav class="footer__cols" aria-label={t('footer.sitemap')}>
+      <div class="footer__col">
+        <h2>{t('footer.sitemap')}</h2>
+        <ul role="list">
+          {
+            PRIMARY_NAV.map((item) => (
+              <li>
+                <a href={localePath(lang, item.path)}>{item.label[lang]}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <div class="footer__col">
+        <h2>{t('footer.project')}</h2>
+        <ul role="list">
+          {
+            projectLinks.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  target={link.external ? '_blank' : undefined}
+                  rel={link.external ? 'noopener noreferrer' : undefined}
+                >
+                  {link.label}
+                  {link.external && <Icon name="arrowUpRight" class="footer__ext" />}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <div class="footer__col">
+        <h2>{t('footer.elsewhere')}</h2>
+        <ul role="list">
+          <li>
+            <a href={`${localePath(lang, 'blog')}rss.xml`}>
+              {t('blog.rss')}
+              <Icon name="rss" class="footer__ext" />
+            </a>
+          </li>
+          <li>
+            <a href={SITE.repo} target="_blank" rel="noopener noreferrer">
+              {t('footer.sourceCode')}
+              <Icon name="arrowUpRight" class="footer__ext" />
+            </a>
+          </li>
+          <li>
+            <a href="https://afdian.com/a/kzeroko" target="_blank" rel="noopener noreferrer">
+              {t('footer.support')}
+              <Icon name="arrowUpRight" class="footer__ext" />
+            </a>
+          </li>
+        </ul>
+      </div>
+    </nav>
+  </div>
+
+  <div class="footer__legal">
+    <div class="shell shell--wide">
+      <p>© {year} {SITE.author}. {t('footer.rights')}</p>
+      <p class="footer__disclaimer">{t('footer.notAffiliated')}</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .footer {
+    margin-block-start: var(--space-4xl);
+    border-block-start: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    view-transition-name: site-footer;
+  }
+
+  .footer__inner {
+    display: grid;
+    gap: var(--space-2xl);
+    padding-block: var(--space-3xl) var(--space-2xl);
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr);
+  }
+
+  .footer__brand {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    align-items: flex-start;
+  }
+
+  .footer__logo {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    max-inline-size: 26rem;
+  }
+
+  .footer__logo strong {
+    display: block;
+    font-family: var(--font-display);
+    font-size: var(--fs-md);
+    font-weight: var(--weight-bold);
+    color: var(--c-text);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .footer__tagline {
+    display: block;
+    margin-block-start: 0.25rem;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+
+  .footer__socials {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .footer__cols {
+    display: grid;
+    gap: var(--space-xl);
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+
+  .footer__col h2 {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .footer__col ul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-block-start: var(--space-md);
+    padding: 0;
+  }
+
+  .footer__col a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .footer__col a:hover {
+    color: var(--c-accent);
+  }
+
+  .footer__ext {
+    inline-size: 0.85em;
+    block-size: 0.85em;
+    opacity: 0.6;
+  }
+
+  .footer__legal {
+    border-block-start: 1px solid var(--c-line-faint);
+    padding-block: var(--space-lg);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+
+  .footer__legal .shell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    justify-content: space-between;
+  }
+
+  .footer__disclaimer {
+    max-inline-size: 42ch;
+  }
+
+  @media (max-width: 52rem) {
+    .footer__inner {
+      grid-template-columns: 1fr;
+      gap: var(--space-2xl);
+    }
+  }
+</style>

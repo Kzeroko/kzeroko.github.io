@@ -1,0 +1,155 @@
+---
+title: "Forgery"
+description: "Anvil-based smithing with no crafting grid — place ingredients, aim at the anvil, and strike until the step completes."
+category: crafting
+order: 10
+updated: 2026-09-01
+tagline: "Crafting you perform instead of confirm."
+tags: ['crafting', 'gear', 'anvil']
+---
+
+import idle from '../../../assets/images/ktm2/wiki/forgery/r_forgery_idle.gif';
+import viewBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_view_blueprint.gif';
+import putBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_blueprint.gif';
+import putIngredients from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_ingredients.gif';
+import forging from '../../../assets/images/ktm2/wiki/forgery/r_forgery_forging1.gif';
+import clear from '../../../assets/images/ktm2/wiki/forgery/r_forgery_clear.gif';
+import jadeWaiting from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting.webp';
+import jadeBlueprint from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting_w_blueprint.webp';
+import jadeIngredient from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_ingredient.webp';
+import jadeProgress from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_progress.webp';
+import jadeOrder from '../../../assets/images/ktm2/wiki/forgery/compat/jade_order_matters.webp';
+import jadeNext from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_next_step_1.webp';
+import jadeSuccess from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_success.webp';
+import rei1 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_1.webp';
+import rei2 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_2.webp';
+
+Forgery is where KTM2-specific weapons, armour, accessories and off-hand items come from. Apart from reading a blueprint, **the entire process has no GUI** — you place real items on a real anvil and hit them.
+
+<Clip src={idle} alt="A forgery anvil at rest, blueprint slot empty" caption="An idle forgery anvil. Everything you do to it happens in the world." />
+
+## Controls
+
+Everything is an interact on the anvil; **which face you click decides the amount**.
+
+| Holding | Top face | Any other face |
+| --- | --- | --- |
+| Materials | Place one | Place everything you are holding |
+| Forging hammer | Take one back from the last filled slot | Take the whole slot back |
+| Valid blueprint | Write the blueprint (item is not consumed) | Same |
+| Dissolving potion | Clear the forging state (potion is consumed) | Same |
+
+<Callout type="caution" title="Main hand only">
+Every interaction reads your main hand. Holding the right item in your off-hand does nothing.
+</Callout>
+
+## The loop
+
+<Steps>
+
+1. **Read the plan.** Hold a valid blueprint and press <kbd>Shift</kbd> + <kbd>Use</kbd> to open its recipe. <kbd>Esc</kbd> closes it.
+
+2. **Write the blueprint to the anvil.** Interact with an anvil that has no blueprint. The item is not consumed — the anvil takes a copy. An empty sheet will tell you it is blank instead.
+
+3. **Place the step's materials.** Order matters. Fill the slots the current step asks for.
+
+4. **Strike.** Stand level with the anvil, within about one and a half blocks, with your crosshair on the **top face**. If you are not aimed at the top, the game will say so. Each hammer blow adds forging progress according to the hammer's rarity.
+
+5. **Repeat** for each step until the result pops out.
+
+</Steps>
+
+<Clip src={putBlueprint} alt="Writing a blueprint onto the anvil" caption="Writing the blueprint copies it; the item is not consumed." />
+
+<Clip src={putIngredients} alt="Placing ingredients on the anvil" caption="Top face places one, any other face places the stack." />
+
+<Clip src={viewBlueprint} alt="Opening a blueprint to read its recipe" caption="Shift + Use on a blueprint opens the plan without touching the anvil." />
+
+<Clip src={forging} alt="Striking the anvil with a forging hammer as progress fills" caption="Progress per strike scales with the hammer's rarity." />
+
+## Clearing a botched attempt
+
+Hold a **dissolving potion** and interact with the anvil. The potion is consumed; the unused materials sitting in the anvil are not.
+
+<Clip src={clear} alt="Pouring a dissolving potion to reset the anvil state" caption="The potion clears the forging state and leaves your materials alone." />
+
+<Callout type="danger" title="Do not drink it">
+Drinking a dissolving potion is a suicide effect. There is a very small chance of dropping **Melted Flesh** if you die that way.
+</Callout>
+
+Breaking the anvil also clears the state, but it is tough and mines at the same speed with every tool, so this is the slow option.
+
+## Mod compatibility
+
+**Jade** shows the anvil's current state on the tooltip — whether it is waiting, which blueprint it holds, which ingredient is next, and how much progress the current step has.
+
+<Gallery
+  items={[
+    { src: jadeWaiting, alt: 'Jade tooltip on an empty anvil', caption: 'Waiting' },
+    { src: jadeBlueprint, alt: 'Jade tooltip showing the written blueprint', caption: 'Blueprint written' },
+    { src: jadeIngredient, alt: 'Jade tooltip showing the required ingredient', caption: 'Next ingredient' },
+    { src: jadeProgress, alt: 'Jade tooltip showing forging progress', caption: 'Progress' },
+    { src: jadeOrder, alt: 'Jade tooltip warning that ingredient order matters', caption: 'Order matters' },
+    { src: jadeNext, alt: 'Jade tooltip advancing to the next step', caption: 'Next step' },
+    { src: jadeSuccess, alt: 'Jade tooltip on a completed forge', caption: 'Complete' },
+  ]}
+  min="13rem"
+/>
+
+**REI** lists forgery recipes with their steps. You can look up what a blueprint needs without owning it.
+
+<Gallery
+  items={[
+    { src: rei1, alt: 'A forgery recipe shown in REI' },
+    { src: rei2, alt: 'A multi-step forgery recipe shown in REI' },
+  ]}
+  min="18rem"
+/>
+
+## Planned
+
+- Dependency on and integration with **alloy-forgery**.
+- More hammer tiers.
+- **Blacksmith profession** compatibility: gear forged by a blacksmith gains extra item rarity, with a guaranteed floor and improved odds above it.
+
+## Recipe format
+
+Recipes live at `data/<namespace>/recipes/ise_forgery/<id>.json` with type `isekaiexpansion:forgery`.
+
+| Field | Meaning |
+| --- | --- |
+| `result` | The single output item. |
+| `steps` | Ordered forging steps. Keep it to 10 or fewer — more is untested and may misbehave. |
+| `forgery_progress` | Progress required to finish this step. Each hammer contributes according to its rarity, so budget accordingly. |
+| `ingredients` | Materials for this step. **Maximum 9.** |
+| `count` | Amount of that material. Must fit in one stack (≤ 64). |
+| `item` | Material item id. |
+| `should_render_ingredients` | Whether to render placed material models on the anvil. |
+| `display_item` | Item id rendered as the work-in-progress. Not obtainable; presentation only. Usually omitted on the first step. |
+
+```json
+{
+  "type": "isekaiexpansion:forgery",
+  "result": { "item": "minecraft:diamond_sword" },
+  "steps": [
+    {
+      "forgery_progress": 100,
+      "ingredients": [
+        { "count": 2, "item": "minecraft:iron_ingot" },
+        { "count": 1, "item": "minecraft:stick" }
+      ],
+      "should_render_ingredients": true
+    },
+    {
+      "display_item": "minecraft:iron_sword",
+      "forgery_progress": 140,
+      "ingredients": [
+        { "count": 3, "item": "minecraft:diamond" },
+        { "count": 1, "item": "minecraft:iron_ingot" },
+        { "count": 2, "item": "minecraft:slime_ball" }
+      ],
+      "should_render_ingredients": true
+    }
+  ]
+}
+```

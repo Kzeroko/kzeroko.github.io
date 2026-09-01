@@ -1,0 +1,37 @@
+---
+title: "KTM2 moves to 1.20.1"
+description: "After two or three years parked on 1.19.2, KTM2 is stepping forward. The port itself was finished long ago — what took the time was everything around it."
+pubDate: 2026-06-14
+tags: ['KTM2', 'Versions', 'Development']
+hero: ../../../assets/images/ktm2/ktm2_screenshot_2.webp
+heroAlt: "An arcane crystal shrine at night"
+featured: false
+---
+
+For the past two or three years I have been a holdout on 1.19.2.
+
+I was worn down, honestly. Minecraft shipped version after version, each one generating a pile of repeated work for mod developers, and most of that work never turned into anything a player could feel. My judgement at the time was that staying put and spending the effort on content beat chasing the treadmill.
+
+That judgement has changed. Vulkan rendering is landing, the modding ecosystem is moving, and staying on 1.19.2 would mean KTM2 slowly losing the underlying capabilities I actually need.
+
+So **KTM2 is moving to 1.20.1**.
+
+## The port was not the hard part
+
+The technical port has been about 99% done for a while. What ate the time is the overhaul it dragged along with it.
+
+**UI.** Most screens are being redrawn. A lot of the old ones were temporary solutions I threw together in 2023, and there is no longer any reason to keep them.
+
+**Textures.** Palette and pixel density are now consistent. Put the old batches side by side and you could tell at a glance they were made by the same person in several different moods.
+
+**Localisation.** All in-mod text went through a full reorganisation, English and Chinese filed by category, duplicate keys now failing at assembly time. Dull work, but every future addition gets cheaper because of it.
+
+## What I am working on next
+
+**Original structures.** There are no off-the-shelf structure mods in KTM2. Towns, generated structures and dungeons are all built for this pack, then placed onto ReTerraForged terrain by their own generation rules — so the buildings are handmade and the world is still generated.
+
+**Narrative.** The NPC systems, branching dialogue and quest lines are being rebuilt. The goal is for an interaction to be memorable rather than a vending machine for an item.
+
+**Immersive crafting.** I am moving crafting out of the 3×3 grid. [Forgery](/en/wiki/forgery/) and [blueprint research](/en/wiki/blueprints/) are in; metallurgy and alchemy are still on the way.
+
+Thanks to everyone who has been waiting. 1.20.1 is the foundation for a long while now.

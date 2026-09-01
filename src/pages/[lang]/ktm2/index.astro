@@ -1,0 +1,363 @@
+---
+import type { GetStaticPaths } from 'astro';
+import { Image } from 'astro:assets';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import Button from '../../../components/base/Button.astro';
+import Icon from '../../../components/base/Icon.astro';
+import LinkCard from '../../../components/cards/LinkCard.astro';
+import shot1 from '../../../assets/images/ktm2/ktm2_screenshot_1.webp';
+import shot2 from '../../../assets/images/ktm2/ktm2_screenshot_2.webp';
+import { localeCodes, localePath, useTranslations, type LocaleCode } from '../../../i18n';
+import { ISEKAI_MODULES, KTM2, PILLARS, ROADMAP } from '../../../data/site';
+import { getWikiPages, wikiPath } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const wikiPages = await getWikiPages(lang);
+const startHere = wikiPages.slice(0, 6);
+
+const facts = [
+  { label: t('ktm2.status'), value: t('ktm2.status.value'), tone: 'accent' },
+  { label: t('ktm2.mcVersion'), value: KTM2.minecraft },
+  { label: t('ktm2.loader'), value: KTM2.loader },
+  { label: t('ktm2.mods'), value: String(KTM2.modCount) },
+  { label: t('ktm2.worldgen'), value: t('ktm2.worldgenValue') },
+  { label: t('ktm2.packVersion'), value: KTM2.packVersion },
+];
+
+const gallery = [
+  { src: shot1, alt: 'Ruins reclaimed by the Moonshadow forest, lit through the canopy' },
+  { src: shot2, alt: 'An arcane crystal shrine burning cyan against the night' },
+];
+
+const now = ROADMAP.filter((item) => item.stage === 'now');
+
+const crumbs = [{ label: t('nav.home'), href: localePath(lang) }, { label: 'KTM2' }];
+---
+
+<PageLayout
+  lang={lang}
+  title="KTM2"
+  description={t('home.heroLead')}
+  eyebrow={t('ktm2.eyebrow')}
+  heading={`${KTM2.name} — ${t('ktm2.subtitle')}`}
+  lead={t('home.heroLead')}
+  crumbs={crumbs}
+  jsonLd={[
+    breadcrumbJsonLd(
+      crumbs.map((crumb) => ({ name: crumb.label, href: crumb.href ?? Astro.url.pathname }))
+    ),
+  ]}
+>
+  <div slot="masthead" class="ktm2__actions">
+    <Button href={localePath(lang, 'ktm2/modules')} variant="primary" iconEnd="arrowRight">
+      {t('ktm2.modules.title')}
+    </Button>
+    <Button href={localePath(lang, 'wiki')} variant="ghost">{t('wiki.title')}</Button>
+    <Button href={localePath(lang, 'codex')} variant="ghost">{t('codex.title')}</Button>
+  </div>
+
+  {/* -------------------------------------------------------------- facts -- */}
+  <section class="section section--tight">
+    <div class="shell shell--wide">
+      <dl class="facts" data-reveal-stagger>
+        {
+          facts.map((fact, index) => (
+            <div class="facts__item" data-reveal="rise" style={`--reveal-index:${index}`}>
+              <dt>{fact.label}</dt>
+              <dd class={fact.tone === 'accent' ? 'facts__value facts__value--accent' : 'facts__value'}>
+                {fact.tone === 'accent' && <span class="facts__dot" aria-hidden="true" />}
+                {fact.value}
+              </dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ pillars -- */}
+  <section class="section">
+    <div class="shell shell--wide">
+      <header class="section__head" data-reveal="rise">
+        <h2 class="section__title">{t('home.pillars.title')}</h2>
+        <p class="section__lead">{t('home.pillars.lead')}</p>
+      </header>
+
+      <ol class="pillars" role="list" data-reveal-stagger>
+        {
+          PILLARS.map((pillar, index) => (
+            <li class="pillars__item" data-reveal="rise" style={`--reveal-index:${index}`}>
+              <span class="pillars__num" aria-hidden="true">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <div>
+                <h3 class="pillars__title">
+                  <Icon name={pillar.icon} class="pillars__icon" />
+                  {pillar.title[lang]}
+                </h3>
+                <p class="pillars__body">{pillar.body[lang]}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ gallery -- */}
+  <section class="section section--tight">
+    <div class="shell shell--wide">
+      <header class="section__head" data-reveal="fade">
+        <p class="eyebrow">{t('ktm2.gallery')}</p>
+      </header>
+
+      <div class="gallery" data-reveal-stagger>
+        {
+          gallery.map((item, index) => (
+            <figure class="gallery__item" data-reveal="zoom" style={`--reveal-index:${index}`}>
+              <Image
+                src={item.src}
+                alt={item.alt}
+                width={1600}
+                sizes="(max-width: 60rem) 100vw, 45rem"
+                loading="lazy"
+                decoding="async"
+              />
+            </figure>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ modules -- */}
+  <section class="section">
+    <div class="shell shell--wide">
+      <header class="section__head section__head--split" data-reveal="rise">
+        <div>
+          <p class="eyebrow">{t('ktm2.modules.title')}</p>
+          <h2 class="section__title">{t('home.modules.title')}</h2>
+          <p class="section__lead">{t('home.modules.lead')}</p>
+        </div>
+        <Button href={localePath(lang, 'ktm2/modules')} variant="ghost" iconEnd="arrowRight">
+          {t('home.modules.cta')}
+        </Button>
+      </header>
+
+      <div class="grid grid--3" data-reveal-stagger>
+        {
+          ISEKAI_MODULES.map((module, index) => (
+            <div data-reveal="rise" style={`--reveal-index:${index}`}>
+              <LinkCard
+                href={`${localePath(lang, 'ktm2/modules')}#${module.id}`}
+                title={module.name}
+                body={module.tagline[lang]}
+                icon={module.icon}
+                accent={module.accent}
+              />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* --------------------------------------------------------- start here -- */}
+  <section class="section section--tight">
+    <div class="shell shell--wide">
+      <header class="section__head section__head--split" data-reveal="rise">
+        <div>
+          <p class="eyebrow">{t('wiki.title')}</p>
+          <h2 class="section__title">{t('home.wiki.title')}</h2>
+          <p class="section__lead">{t('home.wiki.lead')}</p>
+        </div>
+        <Button href={localePath(lang, 'wiki')} variant="ghost" iconEnd="arrowRight">
+          {t('home.wiki.cta')}
+        </Button>
+      </header>
+
+      <div class="grid grid--3" data-reveal-stagger>
+        {
+          startHere.map((page, index) => (
+            <div data-reveal="rise" style={`--reveal-index:${index}`}>
+              <LinkCard
+                href={wikiPath(lang, page)}
+                title={page.data.title}
+                body={page.data.tagline ?? page.data.description}
+              />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ roadmap -- */}
+  <section class="section">
+    <div class="shell shell--wide">
+      <header class="section__head section__head--split" data-reveal="rise">
+        <div>
+          <p class="eyebrow">{t('ktm2.roadmap.now')}</p>
+          <h2 class="section__title">{t('ktm2.roadmap.title')}</h2>
+        </div>
+        <Button href={localePath(lang, 'ktm2/roadmap')} variant="ghost" iconEnd="arrowRight">
+          {t('ktm2.roadmap.title')}
+        </Button>
+      </header>
+
+      <div class="grid grid--3" data-reveal-stagger>
+        {
+          now.map((item, index) => (
+            <article class="card card--spotlight" data-reveal="rise" style={`--reveal-index:${index}`}>
+              <span class="badge badge--accent badge--dot">{t('ktm2.roadmap.now')}</span>
+              <h3 class="card__title roadmap__title">{item.title[lang]}</h3>
+              <p class="card__body">{item.body[lang]}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+</PageLayout>
+
+<style>
+  .ktm2__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-block-start: var(--space-xl);
+  }
+
+  /* -------------------------------------------------------------- facts -- */
+
+  .facts {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+    padding-block-start: var(--space-lg);
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .facts dt {
+    font-size: var(--fs-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .facts__value {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    margin: 0.3rem 0 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-bold);
+    color: var(--c-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .facts__value--accent {
+    color: var(--c-accent);
+    font-size: var(--fs-md);
+  }
+
+  .facts__dot {
+    inline-size: 0.5em;
+    block-size: 0.5em;
+    border-radius: 50%;
+    background: currentColor;
+    animation: twinkle 2.2s var(--ease-in-out) infinite;
+  }
+
+  /* ------------------------------------------------------------ pillars -- */
+
+  .pillars {
+    display: grid;
+    gap: var(--space-lg);
+    margin: 0;
+    padding: 0;
+  }
+
+  .pillars__item {
+    display: grid;
+    grid-template-columns: 4rem 1fr;
+    gap: var(--space-lg);
+    padding-block-end: var(--space-lg);
+    border-block-end: 1px solid var(--c-line-faint);
+  }
+
+  .pillars__num {
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--c-text-faint);
+    padding-block-start: 0.35em;
+  }
+
+  .pillars__title {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .pillars__icon {
+    color: var(--c-accent);
+  }
+
+  .pillars__body {
+    margin-block-start: var(--space-sm);
+    max-inline-size: 68ch;
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    text-wrap: pretty;
+  }
+
+  @media (max-width: 40rem) {
+    .pillars__item {
+      grid-template-columns: 1fr;
+      gap: var(--space-xs);
+    }
+  }
+
+  /* ------------------------------------------------------------ gallery -- */
+
+  .gallery {
+    display: grid;
+    gap: var(--space-md);
+    grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr));
+  }
+
+  .gallery__item {
+    margin: 0;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+    overflow: hidden;
+  }
+
+  .gallery__item :global(img) {
+    inline-size: 100%;
+    block-size: auto;
+    transition: transform var(--dur-slower) var(--ease-out);
+  }
+
+  .gallery__item:hover :global(img) {
+    transform: scale(1.02);
+  }
+
+  .roadmap__title {
+    margin-block-start: var(--space-sm);
+  }
+</style>

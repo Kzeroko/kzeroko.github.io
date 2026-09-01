@@ -1,0 +1,47 @@
+---
+title: "Blueprint research"
+description: "Turning a finished artifact into a reconstructable plan — discovery, evidence, transcription, and why progress lives on the paper."
+category: crafting
+order: 20
+updated: 2026-09-01
+tagline: "The plan is the item. Progress travels with it."
+tags: ['crafting', 'research', 'blueprints']
+---
+
+Blueprint research is how an unknown [forgery](/en/wiki/forgery/) recipe becomes a known one. You take something finished, take it apart on paper, and fill in what you do not yet understand.
+
+Research progress is stored **on nothing but the blueprint itself** — not on the player, the team, the world or the server save.
+
+<Callout type="tip" title="Why that matters">
+A half-researched blueprint can be dropped, traded, stored in a chest or left inside a block entity without losing its history. Research is a tradeable good rather than a personal unlock, which changes a lot on a multiplayer server.
+</Callout>
+
+## The loop
+
+<Steps>
+
+1. Hold an **empty blueprint** in one hand.
+
+2. Hold a **supported finished artifact** in the other, and use the blueprint. The artifact is consumed and the blank sheet becomes an unidentified draft.
+
+3. Open the draft. Every unresolved knowledge field shows a suitable **evidence item** from your inventory, its insight value, and how much is still needed.
+
+4. Press **Transcribe**. The blueprint and the evidence in your hands are rechecked, the declared amount is consumed, and the gained insight is written into that exact blueprint stack.
+
+5. When every field is complete, the blueprint **reveals** its identity and its forgery recipe.
+
+6. Write the revealed blueprint to a forgery anvil and forge with the normal insert-and-strike flow.
+
+</Steps>
+
+In Creative mode you still perform discovery and transcription, but reference artifacts and evidence are not consumed.
+
+## Behaviour you can rely on
+
+- A mid-forge anvil can open a **read-only** snapshot of its own stored blueprint. The item remains the single source of blueprint data.
+- An unrevealed blueprint exposes **no** recipe to the anvil.
+- Old blueprint stacks carrying `BlueprintRecipeId` migrate to the matching datapack definition as already-revealed plans.
+
+## For datapack authors
+
+Knowledge fields and blueprint definitions live under `data/<namespace>/knowledge` and `data/<namespace>/blueprints`. A revealed blueprint supplies the same recipe identifier the previous implementation used, so existing forgery recipes need no changes.

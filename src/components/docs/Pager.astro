@@ -1,0 +1,117 @@
+---
+import Icon from '../base/Icon.astro';
+
+interface Props {
+  prev?: { label: string; title: string; href: string };
+  next?: { label: string; title: string; href: string };
+  class?: string;
+}
+
+const { prev, next, class: className } = Astro.props;
+---
+
+{
+  (prev || next) && (
+    <nav class:list={['pager', className]}>
+      {prev ? (
+        <a class="pager__link pager__link--prev" href={prev.href}>
+          <Icon name="arrowLeft" class="pager__icon" />
+          <span>
+            <span class="pager__label">{prev.label}</span>
+            <span class="pager__title">{prev.title}</span>
+          </span>
+        </a>
+      ) : (
+        <span />
+      )}
+
+      {next && (
+        <a class="pager__link pager__link--next" href={next.href}>
+          <span>
+            <span class="pager__label">{next.label}</span>
+            <span class="pager__title">{next.title}</span>
+          </span>
+          <Icon name="arrowRight" class="pager__icon" />
+        </a>
+      )}
+    </nav>
+  )
+}
+
+<style>
+  .pager {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+    margin-block-start: var(--space-2xl);
+    padding-block-start: var(--space-lg);
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .pager__link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    transition:
+      border-color var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out);
+  }
+
+  .pager__link:hover {
+    border-color: var(--c-accent);
+    transform: translateY(-2px);
+  }
+
+  .pager__link--next {
+    grid-column: 2;
+    justify-content: flex-end;
+    text-align: end;
+  }
+
+  .pager__icon {
+    flex: none;
+    color: var(--c-text-faint);
+    transition: color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
+  }
+
+  .pager__link:hover .pager__icon {
+    color: var(--c-accent);
+  }
+
+  .pager__link--prev:hover .pager__icon {
+    transform: translateX(-0.15em);
+  }
+
+  .pager__link--next:hover .pager__icon {
+    transform: translateX(0.15em);
+  }
+
+  .pager__label {
+    display: block;
+    font-size: var(--fs-2xs);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--c-text-faint);
+  }
+
+  .pager__title {
+    display: block;
+    margin-block-start: 0.15rem;
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    line-height: var(--lh-snug);
+  }
+
+  @media (max-width: 40rem) {
+    .pager {
+      grid-template-columns: 1fr;
+    }
+    .pager__link--next {
+      grid-column: 1;
+    }
+  }
+</style>

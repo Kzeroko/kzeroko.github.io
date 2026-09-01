@@ -1,0 +1,439 @@
+---
+import type { GetStaticPaths } from 'astro';
+import { Image } from 'astro:assets';
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Hero from '../../components/home/Hero.astro';
+import Button from '../../components/base/Button.astro';
+import Icon from '../../components/base/Icon.astro';
+import LinkCard from '../../components/cards/LinkCard.astro';
+import PortraitCard from '../../components/cards/PortraitCard.astro';
+import PostCard from '../../components/cards/PostCard.astro';
+import showcase from '../../assets/images/ktm2/scenes/scene-temple.webp';
+import { localeCodes, localePath, readingTime, useTranslations, type LocaleCode } from '../../i18n';
+import { ISEKAI_MODULES, PILLARS } from '../../data/site';
+import { getCodexEntries, getRankedBlogPosts, getWikiPages, codexPath, wikiPath } from '../../lib/content';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+
+const [characters, posts, wikiPages] = await Promise.all([
+  getCodexEntries(lang, 'character'),
+  getRankedBlogPosts(lang),
+  getWikiPages(lang),
+]);
+
+const featuredCast = characters.slice(0, 4);
+const latestPosts = posts.slice(0, 3);
+const featuredWiki = wikiPages.filter((page) => page.data.category === 'core').slice(0, 5);
+---
+
+<BaseLayout
+  lang={lang}
+  title={t('site.tagline')}
+  description={t('home.heroLead')}
+  isHome
+>
+  <Hero lang={lang} />
+
+  {/* ------------------------------------------------------------ pillars -- */}
+  <section class="section" id="pillars">
+    <div class="shell shell--wide">
+      <header class="section__head" data-reveal="rise">
+        <p class="eyebrow">{t('nav.ktm2')}</p>
+        <h2 class="section__title">{t('home.pillars.title')}</h2>
+        <p class="section__lead">{t('home.pillars.lead')}</p>
+      </header>
+
+      <div class="grid grid--2" data-reveal-stagger>
+        {
+          PILLARS.map((pillar, index) => (
+            <article class="pillar card card--spotlight" data-reveal="rise" style={`--reveal-index:${index}`}>
+              <span class="pillar__icon" aria-hidden="true">
+                <Icon name={pillar.icon} />
+              </span>
+              <h3 class="card__title">{pillar.title[lang]}</h3>
+              <p class="card__body">{pillar.body[lang]}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* ---------------------------------------------------------- showcase -- */}
+  <section class="section section--tight">
+    <div class="shell shell--wide">
+      <div class="showcase" data-reveal="zoom">
+        <div class="showcase__media">
+          <Image
+            src={showcase}
+            alt="A ruined temple overgrown by the Moonshadow forest, lit by arcane crystal"
+            width={1600}
+            sizes="(max-width: 60rem) 100vw, 60rem"
+            loading="lazy"
+            decoding="async"
+            class="showcase__img"
+          />
+        </div>
+
+        <div class="showcase__body">
+          <p class="eyebrow">{t('ktm2.eyebrow')}</p>
+          <h2 class="showcase__title">{`KenToMahou 2 — ${t('ktm2.subtitle')}`}</h2>
+          <p class="showcase__text">{t('home.heroLead')}</p>
+          <Button href={localePath(lang, 'ktm2')} variant="primary" iconEnd="arrowRight">
+            {t('home.ctaPrimary')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {/* ----------------------------------------------------------- modules -- */}
+  <section class="section">
+    <div class="shell shell--wide">
+      <header class="section__head section__head--split" data-reveal="rise">
+        <div>
+          <p class="eyebrow">{t('ktm2.modules.title')}</p>
+          <h2 class="section__title">{t('home.modules.title')}</h2>
+          <p class="section__lead">{t('home.modules.lead')}</p>
+        </div>
+        <Button href={localePath(lang, 'ktm2/modules')} variant="ghost" iconEnd="arrowRight">
+          {t('home.modules.cta')}
+        </Button>
+      </header>
+
+      <div class="grid grid--3" data-reveal-stagger>
+        {
+          ISEKAI_MODULES.map((module, index) => (
+            <div data-reveal="rise" style={`--reveal-index:${index}`}>
+              <LinkCard
+                href={`${localePath(lang, 'ktm2/modules')}#${module.id}`}
+                title={module.name}
+                body={module.tagline[lang]}
+                icon={module.icon}
+                accent={module.accent}
+              />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  {/* -------------------------------------------------------------- cast -- */}
+  {
+    featuredCast.length > 0 && (
+      <section class="section section--tight">
+        <div class="shell shell--wide">
+          <header class="section__head section__head--split" data-reveal="rise">
+            <div>
+              <p class="eyebrow">{t('codex.section.characters')}</p>
+              <h2 class="section__title">{t('home.cast.title')}</h2>
+              <p class="section__lead">{t('home.cast.lead')}</p>
+            </div>
+            <Button href={localePath(lang, 'codex')} variant="ghost" iconEnd="arrowRight">
+              {t('home.cast.cta')}
+            </Button>
+          </header>
+
+          <div class="grid grid--4" data-reveal-stagger>
+            {featuredCast.map((entry, index) => (
+              <div data-reveal="zoom" style={`--reveal-index:${index}`}>
+                <PortraitCard
+                  href={codexPath(lang, entry)}
+                  name={entry.data.title}
+                  epithet={entry.data.character?.epithet ?? ''}
+                  portrait={entry.data.portrait}
+                  accent={entry.data.accent}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  {/* ------------------------------------------------------- wiki + blog -- */}
+  <section class="section">
+    <div class="shell shell--wide split">
+      <div data-reveal="rise">
+        <header class="section__head">
+          <p class="eyebrow">{t('wiki.title')}</p>
+          <h2 class="section__title">{t('home.wiki.title')}</h2>
+          <p class="section__lead">{t('home.wiki.lead')}</p>
+        </header>
+
+        <ul class="topics" role="list">
+          {
+            featuredWiki.map((page) => (
+              <li>
+                <a href={wikiPath(lang, page)}>
+                  <span>
+                    <strong>{page.data.title}</strong>
+                    <span class="topics__desc">{page.data.tagline ?? page.data.description}</span>
+                  </span>
+                  <Icon name="arrowRight" />
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+
+        <Button href={localePath(lang, 'wiki')} variant="ghost" iconEnd="arrowRight" class="topics__cta">
+          {t('home.wiki.cta')}
+        </Button>
+      </div>
+
+      <div data-reveal="rise" data-reveal-delay>
+        <header class="section__head section__head--split">
+          <div>
+            <p class="eyebrow">{t('blog.title')}</p>
+            <h2 class="section__title">{t('home.posts.title')}</h2>
+            <p class="section__lead">{t('home.posts.lead')}</p>
+          </div>
+        </header>
+
+        {
+          latestPosts.length > 0 ? (
+            <div class="posts" data-reveal-stagger>
+              {latestPosts.map((post, index) => (
+                <div data-reveal="rise" style={`--reveal-index:${index}`}>
+                  <PostCard lang={lang} post={post} readingMinutes={readingTime(post.body ?? '', lang)} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p class="text-muted">{t('blog.empty')}</p>
+          )
+        }
+
+        <Button href={localePath(lang, 'blog')} variant="ghost" iconEnd="arrowRight" class="topics__cta">
+          {t('home.posts.cta')}
+        </Button>
+      </div>
+    </div>
+  </section>
+
+  {/* ------------------------------------------------------------ notice -- */}
+  <section class="section section--tight">
+    <div class="shell shell--wide">
+      <aside class="notice panel" data-reveal="fade">
+        <Icon name="shield" class="notice__icon" />
+        <div>
+          <h2 class="notice__title">{t('home.notice.title')}</h2>
+          <p class="notice__body">{t('home.notice.body')}</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* ------------------------------------------------------------ pillars -- */
+
+  .pillar {
+    --card-pad: var(--space-xl);
+  }
+
+  .pillar__icon {
+    display: grid;
+    place-items: center;
+    inline-size: 2.75rem;
+    block-size: 2.75rem;
+    margin-block-end: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--c-accent-soft);
+    color: var(--c-accent);
+    transition: transform var(--dur-base) var(--ease-spring);
+  }
+
+  .pillar:hover .pillar__icon {
+    transform: translateY(-3px) rotate(-5deg);
+  }
+
+  .pillar__icon :global(.icon) {
+    inline-size: 1.35rem;
+    block-size: 1.35rem;
+  }
+
+  /* ----------------------------------------------------------- showcase -- */
+
+  .showcase {
+    position: relative;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--c-line);
+    overflow: hidden;
+    background: var(--c-surface);
+    isolation: isolate;
+  }
+
+  .showcase__media {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+  }
+
+  .showcase__img {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+    object-position: 50% 45%;
+  }
+
+  .showcase__body {
+    position: relative;
+    max-inline-size: 34rem;
+    padding: clamp(2rem, 5vw, 4rem);
+    background: linear-gradient(
+      100deg,
+      color-mix(in oklab, var(--hue-navy-900) 88%, transparent) 0%,
+      color-mix(in oklab, var(--hue-navy-900) 74%, transparent) 62%,
+      transparent 100%
+    );
+    color: #eef4fb;
+  }
+
+  .showcase__title {
+    margin-block-start: var(--space-sm);
+    font-family: var(--font-display);
+    font-size: var(--fs-xl);
+    font-weight: var(--weight-bold);
+    line-height: var(--lh-snug);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .showcase__text {
+    margin-block: var(--space-md) var(--space-xl);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+    color: #c1d2e3;
+    text-wrap: pretty;
+  }
+
+  @media (max-width: 52rem) {
+    .showcase__body {
+      max-inline-size: none;
+      background: linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--hue-navy-900) 60%, transparent) 0%,
+        color-mix(in oklab, var(--hue-navy-900) 90%, transparent) 55%
+      );
+      padding-block-start: 12rem;
+    }
+  }
+
+  /* --------------------------------------------------------- split area -- */
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: var(--space-3xl);
+    align-items: start;
+  }
+
+  @media (max-width: 62rem) {
+    .split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .topics {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+  }
+
+  .topics a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-md) var(--space-md) 0;
+    border-block-end: 1px solid var(--c-line-faint);
+    transition: padding-inline-start var(--dur-base) var(--ease-out);
+  }
+
+  .topics a:hover {
+    padding-inline-start: var(--space-sm);
+  }
+
+  .topics strong {
+    display: block;
+    font-family: var(--font-display);
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .topics__desc {
+    display: block;
+    margin-block-start: 0.2rem;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-normal);
+  }
+
+  .topics a :global(.icon) {
+    flex: none;
+    color: var(--c-text-faint);
+    opacity: 0;
+    transform: translateX(-0.35rem);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out),
+      color var(--dur-base) var(--ease-out);
+  }
+
+  .topics a:hover :global(.icon) {
+    opacity: 1;
+    transform: none;
+    color: var(--c-accent);
+  }
+
+  .topics__cta {
+    margin-block-start: var(--space-xl);
+  }
+
+  .posts {
+    display: grid;
+    gap: var(--space-md);
+  }
+
+  /* ------------------------------------------------------------- notice -- */
+
+  .notice {
+    display: flex;
+    gap: var(--space-lg);
+    align-items: flex-start;
+    border-inline-start: 3px solid var(--c-warm);
+  }
+
+  .notice__icon {
+    flex: none;
+    margin-block-start: 0.1em;
+    color: var(--c-warm);
+  }
+
+  .notice__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-base);
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+  }
+
+  .notice__body {
+    margin-block-start: 0.4em;
+    font-size: var(--fs-sm);
+    color: var(--c-text-muted);
+    line-height: var(--lh-relaxed);
+    max-inline-size: 70ch;
+  }
+</style>

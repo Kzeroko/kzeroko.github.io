@@ -1,0 +1,340 @@
+/*
+ * Long-form typography for MDX bodies.
+ *
+ * Everything is scoped under `.prose` so authored Markdown never needs class
+ * names. Rhythm is expressed as margin-block-start on siblings, which keeps
+ * the first and last child flush with their container.
+ */
+
+.prose {
+  font-size: var(--fs-base);
+  line-height: var(--lh-relaxed);
+  color: var(--c-text-soft);
+  max-inline-size: var(--width-prose);
+}
+
+.prose--wide {
+  max-inline-size: none;
+}
+
+.prose > * + * {
+  margin-block-start: 1.15em;
+}
+
+/* ------------------------------------------------------------- headings -- */
+
+.prose :is(h2, h3, h4, h5, h6) {
+  font-family: var(--font-display);
+  color: var(--c-text);
+  letter-spacing: var(--tracking-snug);
+  line-height: var(--lh-snug);
+  scroll-margin-block-start: calc(var(--header-height) + var(--space-lg));
+}
+
+.prose h2 {
+  font-size: var(--fs-xl);
+  font-weight: var(--weight-bold);
+  margin-block-start: 2.2em;
+  padding-block-end: 0.35em;
+  border-block-end: 1px solid var(--c-line-faint);
+}
+
+.prose h3 {
+  font-size: var(--fs-lg);
+  font-weight: var(--weight-semibold);
+  margin-block-start: 1.9em;
+}
+
+.prose h4 {
+  font-size: var(--fs-md);
+  font-weight: var(--weight-semibold);
+  margin-block-start: 1.6em;
+}
+
+.prose h5,
+.prose h6 {
+  font-size: var(--fs-base);
+  font-weight: var(--weight-semibold);
+  margin-block-start: 1.5em;
+  color: var(--c-text-muted);
+}
+
+.prose :is(h2, h3, h4) > .heading-anchor {
+  position: absolute;
+  margin-inline-start: -1.15em;
+  inline-size: 1em;
+  color: var(--c-text-faint);
+  opacity: 0;
+  text-decoration: none;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast);
+}
+
+.prose :is(h2, h3, h4) {
+  position: relative;
+}
+
+.prose :is(h2, h3, h4):hover > .heading-anchor,
+.prose .heading-anchor:focus-visible {
+  opacity: 1;
+}
+
+.prose .heading-anchor:hover {
+  color: var(--c-accent);
+}
+
+@media (max-width: 60rem) {
+  .prose .heading-anchor {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- inline -- */
+
+.prose a:not(.btn):not(.heading-anchor) {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 32%, transparent);
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+}
+
+.prose a:not(.btn):not(.heading-anchor):hover {
+  text-decoration-color: currentColor;
+}
+
+.prose strong {
+  color: var(--c-text);
+  font-weight: var(--weight-semibold);
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose abbr[title] {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+.prose kbd {
+  display: inline-block;
+  padding: 0.15em 0.45em;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--c-line-strong);
+  border-block-end-width: 2px;
+  background: var(--c-surface-3);
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: 1.4;
+}
+
+.prose :not(pre) > code {
+  padding: 0.15em 0.38em;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--c-line-faint);
+  background: var(--c-surface-3);
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  overflow-wrap: break-word;
+}
+
+/* ----------------------------------------------------------------- lists -- */
+
+.prose :is(ul, ol) {
+  padding-inline-start: 1.5em;
+}
+
+.prose li + li {
+  margin-block-start: 0.4em;
+}
+
+.prose li > :is(ul, ol) {
+  margin-block-start: 0.4em;
+}
+
+.prose ul {
+  list-style: none;
+  padding-inline-start: 1.35em;
+}
+
+.prose ul > li {
+  position: relative;
+}
+
+.prose ul > li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -1em;
+  inset-block-start: 0.68em;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  opacity: 0.75;
+}
+
+.prose ol {
+  list-style: decimal;
+}
+
+.prose ol::marker,
+.prose ol > li::marker {
+  color: var(--c-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.prose dl {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 0.35em 1.25em;
+}
+
+.prose dt {
+  font-weight: var(--weight-semibold);
+  color: var(--c-text);
+}
+
+/* ------------------------------------------------------------- blockquote -- */
+
+.prose blockquote {
+  padding: var(--space-xs) 0 var(--space-xs) var(--space-lg);
+  border-inline-start: 2px solid var(--c-accent);
+  color: var(--c-text-muted);
+  font-style: normal;
+}
+
+.prose blockquote > * + * {
+  margin-block-start: 0.75em;
+}
+
+/* ------------------------------------------------------------------ code -- */
+
+.prose pre {
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface-inset) !important;
+  overflow-x: auto;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.prose pre code {
+  font-family: var(--font-mono);
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Shiki emits both themes; swap variables with the site theme. */
+:root[data-theme='dark'] .astro-code,
+:root[data-theme='dark'] .astro-code span {
+  color: var(--shiki-dark) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .astro-code,
+  :root:not([data-theme='light']) .astro-code span {
+    color: var(--shiki-dark) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+}
+
+/* ----------------------------------------------------------------- table -- */
+
+.prose .table-scroll {
+  margin-block-start: 1.5em;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+}
+
+.prose table {
+  inline-size: 100%;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  text-align: start;
+}
+
+.prose thead {
+  background: var(--c-surface-3);
+}
+
+.prose :is(th, td) {
+  padding: 0.65em 1em;
+  text-align: start;
+  vertical-align: top;
+  border-block-end: 1px solid var(--c-line-faint);
+}
+
+.prose th {
+  color: var(--c-text);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  letter-spacing: var(--tracking-snug);
+}
+
+.prose tbody tr:last-child :is(th, td) {
+  border-block-end: 0;
+}
+
+.prose tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.prose tbody tr:hover {
+  background: var(--c-surface-2);
+}
+
+.prose td code {
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ media/misc -- */
+
+.prose :is(img, video) {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--c-line);
+}
+
+.prose figure {
+  margin-block: 1.75em;
+}
+
+.prose figcaption {
+  margin-block-start: var(--space-sm);
+  font-size: var(--fs-xs);
+  color: var(--c-text-faint);
+  text-align: center;
+}
+
+.prose hr {
+  margin-block: 2.5em;
+  border: 0;
+  block-size: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-line), transparent);
+}
+
+.prose .footnotes {
+  margin-block-start: 3em;
+  padding-block-start: var(--space-lg);
+  border-block-start: 1px solid var(--c-line);
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+}
+
+.prose sup a {
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}

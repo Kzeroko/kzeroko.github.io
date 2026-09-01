@@ -1,0 +1,152 @@
+---
+import Icon from '../base/Icon.astro';
+import type { IconName } from '../base/icons';
+
+/**
+ * Aside used inside wiki and devlog bodies.
+ *
+ * `spoiler` is collapsed by default — the codex is spoiler-free by policy, and
+ * anything that has to hint at the main story must be opt-in.
+ */
+type Tone = 'note' | 'tip' | 'caution' | 'danger' | 'spoiler';
+
+interface Props {
+  type?: Tone;
+  title?: string;
+  class?: string;
+}
+
+const { type = 'note', title, class: className } = Astro.props;
+
+const ICONS: Record<Tone, IconName> = {
+  note: 'book',
+  tip: 'spark',
+  caution: 'flame',
+  danger: 'shield',
+  spoiler: 'scroll',
+};
+---
+
+{
+  type === 'spoiler' ? (
+    <details class:list={['callout', 'callout--spoiler', className]}>
+      <summary>
+        <Icon name={ICONS.spoiler} class="callout__icon" />
+        <span>{title}</span>
+        <Icon name="chevronDown" class="callout__chevron" />
+      </summary>
+      <div class="callout__body">
+        <slot />
+      </div>
+    </details>
+  ) : (
+    <aside class:list={['callout', `callout--${type}`, className]}>
+      <Icon name={ICONS[type]} class="callout__icon" />
+      <div class="callout__content">
+        {title && <p class="callout__title">{title}</p>}
+        <div class="callout__body">
+          <slot />
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+<style>
+  .callout {
+    --tone: var(--c-accent);
+    --tone-soft: var(--c-accent-soft);
+    display: flex;
+    gap: var(--space-md);
+    margin-block: 1.75em;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    border: 1px solid color-mix(in oklab, var(--tone) 30%, transparent);
+    border-inline-start-width: 3px;
+    background: var(--tone-soft);
+  }
+
+  .callout--tip {
+    --tone: var(--c-success);
+    --tone-soft: var(--c-success-soft);
+  }
+
+  .callout--caution {
+    --tone: var(--c-caution);
+    --tone-soft: var(--c-caution-soft);
+  }
+
+  .callout--danger {
+    --tone: var(--c-danger);
+    --tone-soft: var(--c-danger-soft);
+  }
+
+  .callout--spoiler {
+    --tone: var(--c-arcane);
+    --tone-soft: var(--c-arcane-soft);
+    display: block;
+    padding: 0;
+  }
+
+  .callout__icon {
+    flex: none;
+    margin-block-start: 0.15em;
+    color: var(--tone);
+  }
+
+  .callout__content {
+    min-inline-size: 0;
+  }
+
+  .callout__title {
+    margin: 0 0 0.35em;
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .callout__body {
+    color: var(--c-text-soft);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-relaxed);
+  }
+
+  .callout__body > :global(* + *) {
+    margin-block-start: 0.75em;
+  }
+
+  .callout__body > :global(:first-child) {
+    margin-block-start: 0;
+  }
+
+  /* ------------------------------------------------------------ spoiler -- */
+
+  .callout--spoiler summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+    cursor: pointer;
+    font-weight: var(--weight-semibold);
+    color: var(--c-text);
+    list-style: none;
+  }
+
+  .callout--spoiler summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .callout__chevron {
+    margin-inline-start: auto;
+    color: var(--tone);
+    transition: transform var(--dur-base) var(--ease-out);
+  }
+
+  .callout--spoiler[open] .callout__chevron {
+    transform: rotate(180deg);
+  }
+
+  .callout--spoiler .callout__body {
+    padding: 0 var(--space-lg) var(--space-lg);
+  }
+</style>

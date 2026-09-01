@@ -1,0 +1,84 @@
+---
+import Icon from '../base/Icon.astro';
+import { locales, switchLocalePath, useTranslations, type LocaleCode } from '../../i18n';
+
+/**
+ * With exactly two languages a dropdown is overkill: the control is a link to
+ * the other language at the same path. `hreflang` and the full label in the
+ * accessible name keep it meaningful to screen readers and crawlers.
+ */
+interface Props {
+  lang: LocaleCode;
+  pathname: string;
+  class?: string;
+  /** Renders the full language name instead of the short badge. */
+  expanded?: boolean;
+  /** Explicit destination per language, for pages without a 1:1 counterpart. */
+  translatedPaths?: Partial<Record<LocaleCode, string>>;
+  /** Forwarded to the root so a parent's scoped styles can reach it. */
+  [key: string]: unknown;
+}
+
+const {
+  lang,
+  pathname,
+  class: className,
+  expanded = false,
+  translatedPaths,
+  ...rest
+} = Astro.props;
+const t = useTranslations(lang);
+
+const target = locales.find((locale) => locale.code !== lang) ?? locales[0]!;
+const href = translatedPaths?.[target.code] ?? switchLocalePath(pathname, target.code);
+---
+
+<a
+  class:list={['locale', expanded && 'locale--expanded', className]}
+  href={href}
+  hreflang={target.htmlLang}
+  lang={target.htmlLang}
+  aria-label={`${t('action.language')}: ${target.label}`}
+  data-astro-prefetch="hover"
+  {...rest}
+>
+  <Icon name="globe" />
+  <span>{expanded ? target.label : target.short}</span>
+</a>
+
+<style>
+  .locale {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.42em 0.75em;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--c-line);
+    background: var(--c-surface-2);
+    color: var(--c-text-muted);
+    font-size: var(--fs-xs);
+    font-weight: var(--weight-semibold);
+    line-height: 1;
+    white-space: nowrap;
+    transition:
+      color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-base) var(--ease-out),
+      background-color var(--dur-base) var(--ease-out);
+  }
+
+  .locale :global(.icon) {
+    inline-size: 0.95rem;
+    block-size: 0.95rem;
+  }
+
+  .locale:hover {
+    color: var(--c-accent);
+    border-color: var(--c-accent);
+    background: var(--c-accent-soft);
+  }
+
+  .locale--expanded {
+    padding: 0.55em 1em;
+    font-size: var(--fs-sm);
+  }
+</style>

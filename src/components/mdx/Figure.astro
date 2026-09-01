@@ -1,0 +1,64 @@
+---
+import type { ImageMetadata } from 'astro';
+import SmartImage from '../base/SmartImage.astro';
+
+/**
+ * Captioned image for use inside MDX. Accepts an imported `ImageMetadata`, so
+ * dimensions and formats are resolved at build time.
+ */
+interface Props {
+  src: ImageMetadata;
+  alt: string;
+  caption?: string;
+  /** Constrains the rendered width; useful for portrait UI screenshots. */
+  width?: number;
+  /** Renders on a panel background — better for transparent PNG sprites. */
+  plate?: boolean;
+  class?: string;
+}
+
+const { src, alt, caption, width, plate = false, class: className } = Astro.props;
+---
+
+<figure class:list={['figure', plate && 'figure--plate', className]}>
+  <SmartImage
+    src={src}
+    alt={alt}
+    width={width ?? Math.min(src.width, 1280)}
+    sizes="(max-width: 48rem) 100vw, 42rem"
+    class="figure__img"
+  />
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<style>
+  .figure {
+    margin-block: 1.75em;
+  }
+
+  /*
+   * No forced width: Astro's constrained layout already caps the rendered size
+   * at the source width, so small UI captures stay at their native scale
+   * instead of being upscaled to the column.
+   */
+  .figure__img {
+    display: block;
+    margin-inline: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--c-line);
+  }
+
+  .figure--plate .figure__img {
+    padding: var(--space-md);
+    background: var(--c-surface-2);
+    image-rendering: pixelated;
+  }
+
+  figcaption {
+    margin-block-start: var(--space-sm);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+    text-align: center;
+    text-wrap: pretty;
+  }
+</style>

@@ -1,0 +1,123 @@
+---
+title: "命运天平"
+description: "建角色时分配的祝福与负担预算，以及每一对内置选项到底改变了什么。"
+category: core
+order: 20
+updated: 2026-09-01
+tagline: "每一份优势，都有人替它付账。"
+tags: ['建角', '特质']
+---
+
+命运天平是你在还没开始玩之前就要花掉的特质系统。它是一份**点数预算**：祝福花点数，负担返点数，不平衡的方案提交不了。
+
+在厄达斯没有白拿的好处，要想的是你愿意付哪一种代价。
+
+## 编辑器怎么运作
+
+<Steps>
+
+1. 选项按**分类**分组，每个分类有自己的排序权重。
+2. 每个选项都有**极性**（祝福或负担）、**点数**，以及**严重度**（轻微、标准等）。
+3. 选项之间可以**互斥**、归入**排他组**，或设有**前置要求**。
+4. 调整过程中允许暂时冲突或超支，这是故意的。只有**合法**的方案才能提交。
+5. 提交时整份方案会重新算一遍，算不过就提交不了。
+
+</Steps>
+
+<Callout type="note" title="预设是起点，不是捷径">
+应用预设只是替换你手上的草稿，既不跳过确认，也不跳过校验。
+</Callout>
+
+## 内置选项对
+
+大多数选项挂的是普通的属性修正器。少数几项由对应的系统自己去读，因此不会出现在属性面板上，要等那个系统下一次结算才看得到效果。
+
+### 食量
+
+| 选项 | 最大饱食 | 效果 |
+| --- | --- | --- |
+| `hearty_appetite`（大胃） | 26 | 饿死之前多 30% 储备 |
+| `birdlike_appetite`（小鸟胃） | 14 | 更快吃饱，储备少 30% |
+
+Isekai Core 关掉了基于饱食度的自然回血，所以食量选项只改变储备，不影响恢复速度。
+
+### 性格
+
+由[舒适度](/zh-cn/wiki/comfort/)系统在计算获取、损失与衰减时读取。
+
+| 选项 | 舒适度获取 | 舒适度损失 | 自然衰减 |
+| --- | --- | --- | --- |
+| `optimistic_nature`（乐观） | ×1.20 | ×0.80 | ×0.80 |
+| `pessimistic_nature`（悲观） | ×0.80 | ×1.20 | ×1.25 |
+
+### 气场
+
+按阵营分别判定，**只在该阵营的声望已经低到通缉线时生效**。一张讨喜的脸帮不了本来就喜欢你的人。
+
+| 选项 | 效果 |
+| --- | --- |
+| `kind_countenance`（和善） | 在声望低谷时缓和阵营反应 |
+| `fierce_countenance`（凶悍） | 让反应更严厉 |
+
+阵营声望如何计算见[声望](/zh-cn/wiki/reputation/)。
+
+### 社交
+
+NPC 对话的门槛由两条互相独立的社交属性判定：
+
+| 属性 | 衡量的东西 | 选项对 | 幅度 |
+| --- | --- | --- | --- |
+| `isekaiexpansion:eloquence`（口才） | 言语说服与辩论 | `silver_tongue` / `tongue_tied` | ±8 |
+| `isekaiexpansion:charm`（魅力） | 存在感、亲和力、第一印象 | `captivating_presence` / `unassuming_presence` | ±8 |
+
+两者分开判定。把卫兵说动和让店主对你有好感是两种能力，一套配装完全可以只擅长其中一种。
+
+## 给附属模组作者
+
+命运天平的定义是**通用端内容**：同一份定义既要支撑客户端的草稿预览，也要支撑服务端的校验，所以可用性判定必须在两个逻辑端上都安全。
+
+在 `fabric.mod.json` 中声明专用入口点：
+
+```json
+{
+  "entrypoints": {
+    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
+  }
+}
+```
+
+```java
+public final class ExampleFateBalance implements FateBalanceEntrypoint {
+    private static final Identifier CATEGORY = new Identifier("example", "fate_balance/traveler");
+    private static final Identifier BLESSING = new Identifier("example", "sure_footed");
+    private static final Identifier BURDEN = new Identifier("example", "restless_sleep");
+
+    @Override
+    public void register(FateBalanceRegistrar registrar) {
+        registrar.registerCategory(new FateBalanceCategory(
+                CATEGORY, "screen.example.fate_balance.category.traveler", 20));
+
+        registrar.registerChoice(FateBalanceChoice.builder(BLESSING, FateBalancePolarity.BLESSING, 2)
+                .category(CATEGORY)
+                .severity(FateBalanceSeverity.STANDARD)
+                .tags("travel", "movement")
+                .build());
+
+        registrar.registerChoice(FateBalanceChoice.builder(BURDEN, FateBalancePolarity.BURDEN, 1)
+                .category(CATEGORY)
+                .severity(FateBalanceSeverity.MINOR)
+                .conflictsWith(BLESSING)
+                .build());
+    }
+}
+```
+
+翻译键默认取 `fate_balance.<命名空间>.<路径>` 与 `….description`，可用 `nameKey`、`descriptionKey` 覆盖。自定义图标使用 16×16 的源材质。
+
+### 让选项产生效果
+
+定义本身**不带任何回调**。订阅 `FateBalanceEvents.PROFILE_CHANGED`，根据事件给出的「前一组」与「当前组」不可变标识符集合去对账。监听器在同步组件更新之后运行，必须保证幂等。
+
+只读的玩法判定用 `FateBalanceApi.isSelected(player, choiceId)`。受信任的服务端系统可以调用 `FateBalanceApi.commit`，复用与选择界面完全相同的校验、持久化、同步与事件链路。
+
+跨选项规则通过 `registerRule` 注册；规则返回本地化的 `FateBalanceProblem`，**不得修改玩家状态**。
