@@ -1,0 +1,123 @@
+---
+title: "Gem runtime"
+description: "Snapshot loading, item state, socket operations, proc routing and the public requirement query."
+category: systems
+order: 40
+updated: 2026-09-18
+---
+
+Gem definitions are shared snapshots; rolls, sockets and curses are item state. Most implementation types live under `internal.gem`. The public query surface is `api.gem.GemRequirementAPI`; the similarly named `internal.gem.api` package contains implementation enums, not public facades.
+
+## What it does
+
+The subsystem owns definition loading and sync, random/fixed attribute application, insertion and extraction, element/skill procs and curse effects. [Gem data](/en/wiki/gem-data/) is the complete pack-author schema; [Gems and sockets](/en/wiki/gems-and-sockets/) owns gameplay instructions.
+
+`GemDefinitions` resolves fixed, element and skill definitions by item before recognizing a `FusibleGemItem` as random. Loader validation prevents a fixed/element/skill item being registered in more than one of those families.
+
+## Runtime model
+
+### Definitions and item state
+
+`GemDataLoader` builds and validates all families before `GemDataManager.applyReload` replaces the volatile snapshot and clears the profile cache. Profiles sort by descending priority and ascending ID; first match wins, with an empty default profile otherwise. Join and successful data-pack reload send the complete snapshot through `SyncGemDataPacket`.
+
+Random attributes are selected by weight without replacement, after sorting candidates by attribute ID. Each selected entry picks one operation and a uniformly sampled value, then rounds it. Initialization only runs when the random attribute list is absent. Stored values survive reload; readers recheck current definition membership and socket constraints.
+
+The following is **save data**, not a data-pack authoring format. Equipment holds socket/meta/curse compounds; gem stacks hold attribute, requirement and difficulty data.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `ise_sockets` | `array<object>` | `absent` | Ordered socket compounds; mutating normalization fits the active profile count. |
+| `ise_sockets[].kind` | `string` | `profile kind` | ATTRIBUTE, FIXED, ELEMENT or SKILL. Missing/invalid reading falls back to the profile; saved valid kinds survive normalization. |
+| `ise_sockets[].gem` | `object` | `absent` | Serialized count 1 ItemStack, including its NBT. Missing means empty; vanilla stack serialization owns its inner fields. |
+| `ise_sockets[].state` | `object` | `{}` | Mutable per-socket flags and cooldown. |
+| `ise_sockets[].state.locked` | `boolean` | `false` | Persistent seal, ORed with the current profile's item-level lock. |
+| `ise_sockets[].state.cracked` | `boolean` | `false` | Disables insertion, modifiers and procs. Repair removes this key. |
+| `ise_sockets[].state.proc_cd_until` | `integer` | `0` | NBT long: absolute world time in ticks, clamped non-negative. Shared by the slot's proc/manual skill. |
+| `ise_socket_meta` | `object` | `{}` | Equipment-wide metadata. |
+| `ise_socket_meta.insert_fatigue` | `integer` | `0` | Insertion strain, clamped to current settings max. |
+| `ise_gem_attributes` | `array<object>` | `absent` | Rolled random attributes or stored scaled fixed values. Existing random list, even empty, prevents initialization. |
+| `ise_gem_attributes[].attribute_id` | `identifier` | required for a usable line | Attribute ID; missing/invalid/removed definitions are skipped during application. |
+| `ise_gem_attributes[].operation` | `string` | `ADDITION` | Unknown or blank operation falls back to ADDITION, then is checked against the current definition. |
+| `ise_gem_attributes[].value` | `number` | `0` | Applied value; current definition must still allow the attribute/operation. |
+| `ise_gem_attributes[].base_value` | `number` | `value` | Unscaled value retained so reapplying difficulty does not compound multipliers. |
+| `ise_gem_attributes[].entry_index` | `integer` | `absent` | Written for scaled fixed entries; application currently uses list position. |
+| `ise_gem_target_requirement` | `identifier` | `absent` | Random-gem restriction ID; absent allows any target, malformed or unresolved blocks matching. |
+| `ise_gem_difficulty_scaling` | `object` | `absent` | Persisted loot/difficulty context; invalid difficulty or non-positive area level yields no usable context. |
+| `ise_gem_difficulty_scaling.scaled` | `boolean` | `true when written` | Marker written by scaling; context reader does not gate on it. |
+| `ise_gem_difficulty_scaling.difficulty` | `string` | required for a usable context | Canonical dungeon difficulty; blank parses as common. |
+| `ise_gem_difficulty_scaling.area_level` | `integer` | `0` | Positive area level is required for scaling. |
+| `ise_gem_difficulty_scaling.loot_table` | `identifier` | `empty string` | Optional source loot-table ID retained with the context. |
+| `ise_curse` | `object` | `absent` | One bound curse per equipment stack. |
+| `ise_curse.id` | `identifier` | required for a usable curse | Malformed or missing definition produces no effects. |
+| `ise_curse.mult` | `number` | `1` | Stored float strength; reader floors at 1. |
+
+`getOrCreateSockets` is mutating: it adds missing kind/state data, preserves saved valid kind overrides and keeps only the current profile's slot count. A profile reduced to no slots removes the socket list. It does not return displaced gems. Read-only eligibility uses a virtual view and does not perform that normalization.
+
+Difficulty reapplication uses `base_value`, preserving context through rerolls. Random line rerolls also reroll the equipment restriction; value-only rerolls keep the requirement. Fixed stored values are accepted only while their attribute/operation remains in the current definition; otherwise readers fall back to defined fixed modifiers when no valid stored lines remain.
+
+### Server interactions
+
+`GemFusion` and `GemConsumableExecutor` handle server-side left clicks. `GemInteractOpener` collects eligible indices and opens selection whenever at least one exists. It reserves the entire cursor source stack, clears the cursor and sends copies for display. If opening fails it restores the source.
+
+`GemInteractServerSession` retains the target Slot and reserved source. Applying reads the current target and revalidates the operation. A valid failed insertion finishes the session but does not decrement the gem. A successful insertion stores a count 1 copy and decrements the source by 1, including creative mode. Closing returns the remaining source once. Cutter durability and consumable consumption separately exempt creative players.
+
+### Attributes, procs and curses
+
+Attribute modifiers use deterministic UUIDs from attribute, operation, socket index, entry index and equipment slot. ItemStack and Trinkets bridges combine gem and curse modifiers. Locked/cracked sockets do not apply gem modifiers; random requirements are rechecked against the host.
+
+Combat routing uses attacker hands for hit and kill procs, and defender armour plus both hands for `ON_HURT`. This proc scan does not include trinkets. Without an attacker, hurt routing disables element damage but still visits skill procs. Skill procs require a server player; element procs can use a living owner. Curse status/damage collection separately includes armour, hands and trinkets.
+
+Element procs check cooldown/chance, roll damage, set their positive cooldown and call `SpellDamageUtil`. Skill procs apply skill-level chance/cooldown scaling, check and pay energy, call `SkillPowerUtil.triggerSkill`, then save cooldown. They do not wait for a success acknowledgement from the triggered skill.
+
+Manual selection searches `MAINHAND → OFFHAND → HEAD → CHEST → LEGS → FEET`, then ascending socket index. The first compatible `TRIGGERABLE` gem is selected before cooldown and energy checks. If it is unavailable, activation does not continue to a later gem. Manual activation uses cooldown scaling but does not roll chance.
+
+## Contracts
+
+- **Side and ownership:** mutate real ItemStacks on their owning game/server thread through the interaction paths. These helpers do not lock mutable stacks or make arbitrary asynchronous calls safe. Snapshot/requirement queries can use the synchronised client catalogue for display; the server remains authoritative.
+- **Compatibility is kind-specific:** random/fixed use domains and overlapping damage categories, element uses school and overlapping categories, skill uses allowed skill IDs. Random insertion checks every stored line and the target restriction.
+- **Locks and cracks differ:** both disable insertion and activation. Locks also block extraction; cracks do not. Repair requires the item-level threshold but can clear a cracked sealed slot.
+- **Cooldown is slot state:** `proc_cd_until` is absolute world time. Removing a gem leaves the state compound and its cooldown in place. Do not treat it as a remaining-duration timer or clear it by copying a new gem into the slot.
+- **Reload scope:** gem validation is atomic within this loader. Changing definitions can change existing equipment behaviour without rewriting NBT. Shrinking profiles is potentially destructive on normalization.
+- **Action extension:** `GemConsumableActions.register` overwrites the function under an ID. Its built-in eligibility switch still rejects an unknown action path; add validation, eligibility and selection handling with the executor. An ordered branch is not a rollback transaction.
+- **Network boundary:** the packet encodes the full definition snapshot, including formulas and action NBT. Keep writer/reader changes paired; formula names and expressions have 64/512-character wire limits.
+
+`GemProcCooldownNbt` removes only proc cooldowns from comparison copies so cooldown updates do not look like equipment changes. Fabric item animation and Punchy hand-state hooks use it. The Punchy comparison also ignores durability and crossbow charge fields; it never edits the real stack.
+
+## Extending it
+
+For another system checking a random gem restriction, import `net.kzeroko.isekaiexpansion.api.gem.GemRequirementAPI`:
+
+```java
+boolean canUseGem(ItemStack gem, ItemStack equipment) {
+    return GemRequirementAPI.matchesTarget(gem, equipment);
+}
+```
+
+This checks the restriction only, not socket kind, lock, occupancy or item level. Use internal `GemAttribute.canInsertAt` within this mod when the complete insertion predicate is needed.
+
+| Method | Result |
+| --- | --- |
+| `hasRequirement(gem)` | Whether a syntactically valid saved requirement ID exists; does not prove the definition is loaded. |
+| `getRequirementId(gem)` | Parsed ID, or null for absent, malformed or empty input. |
+| `matchesTarget(gem, target)` | False for empty gem; true without a saved restriction; false for malformed/unresolved saved IDs; otherwise evaluates every configured constraint. |
+| `getRequirementDescription(gem)` | Translatable Text from the ID, or null without a valid ID. |
+
+These methods read the current catalogue and do not mutate items. Wait for initial resource loading before treating a referenced definition as available; client queries need the server snapshot. This facade directly reads the internal manager/state helpers.
+
+For new data behaviour, update the loader, typed definitions, sync writer/reader and both language tables together. Add a triggerable skill to `IsekaiPowerRegistry` before referencing it from gem data; data cannot register a Java skill implementation.
+
+## Verifying
+
+1. Reload a valid override with a connected client; compare server insertion eligibility and client tooltip. Introduce an invalid registered ID and confirm the previous gem snapshot remains active.
+2. Exercise insertion at strain 0, 1 and 2: bundled probabilities are 85%, 91% and 95%. Force success/failure with controlled randomness in the relevant helper, and distinguish valid failure from invalid target.
+3. Close selection without applying; apply a failed insertion; retry a completed session. Check cursor reservation returns exactly once and success consumes exactly 1 gem.
+4. Try locked, level-locked, cracked and occupied sockets for insertion, extraction, repair, seal toggling and kind changes. Check both direct and screen paths.
+5. Move restricted equipment out of its allowed NBT/tag conditions; the random modifiers must stop applying. Remove the restriction definition and confirm it does not become unrestricted.
+6. Test hit/kill/hurt routing, manual priority when the first gem is cooling down, energy shortage, saved cooldown after extraction, and cooldown-only hand animations.
+7. Reroll random lines and values with a saved difficulty context. Check unscaled base values prevent repeated multiplication. Back up occupied items before testing profile shrinkage.
+8. Equip curses in hands, armour and trinkets; verify attribute effects, status merging and additive incoming-damage bonuses. These are in-game checks to perform, not results claimed by the documentation build.
+
+## Related
+
+[Gem data](/en/wiki/gem-data/), [Gems and sockets](/en/wiki/gems-and-sockets/) and [Equipment skills](/en/wiki/equipment-skills/).
+

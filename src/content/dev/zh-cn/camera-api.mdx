@@ -1,0 +1,142 @@
+---
+title: "镜头场景 API"
+description: "播放客户端镜头动画，选择锚点与播放选项，并理解过渡期间的控制归属。"
+category: client
+order: 72
+updated: 2026-09-24
+---
+
+`CameraSceneAPI` 是仅供客户端使用的门面，用于播放已载入动画注册表的镜头动画。它控制一项本地镜头播放；包含角色、世界事件与字幕的服务器时间轴使用独立的[过场场景格式](/zh-cn/wiki/cinematic-scene-data/)。
+
+## 入口
+
+门面为 `net.kzeroko.isekaiexpansion.api.client.camera.CameraSceneAPI`，委托给 `client.camera.CameraSceneController`。独立服务器初始化中不应导入或调用客户端入口。
+
+客户端资源重载时，从 `assets/<namespace>/camera_animations/*.json` 填充注册表。动画必须包含名为 `camera` 的骨骼，并具有位置或旋转关键帧。注册 ID 来自动画名称，不一定与资源文件名相同。
+
+## 常见用法
+
+### 播放已加载动画
+
+以下使用动画自身的循环模式播放内置镜头动画：
+
+```java
+boolean accepted = CameraSceneAPI.play(
+        new Identifier("isekaiexpansion", "boss_intro"),
+        CameraScenePlayOptions.gecko()
+);
+```
+
+返回 `false` 表示动画 ID 未加载，当前播放保持不变。返回 `true` 表示请求已接受；入场淡入淡出可能仍在等待，此时 `activeId()` 可返回 null。
+
+### 将镜头固定到世界锚点
+
+```java
+var options = CameraScenePlayOptions.cinematic()
+        .withAnchor(CameraAnchor.world(new Vec3d(100, 70, 200), 180.0F), false)
+        .withYawAlign(YawAlign.ANCHOR);
+boolean accepted = CameraSceneAPI.play(
+        new Identifier("isekaiexpansion", "boss_intro"), options
+);
+```
+
+这里的位置是精确世界坐标，180 度为朝北的参考偏航。`followAnchor = false` 在请求播放时捕获锚点。跟随实体会更新位置，但用于对齐的偏航仍是启动时捕获的数值。
+
+### 停止自己持有的播放
+
+```java
+var expected = new Identifier("isekaiexpansion", "boss_intro");
+if (expected.equals(CameraSceneAPI.activeId())) {
+    CameraSceneAPI.stop();
+}
+```
+
+此 ID 检查只针对活跃动画，不能识别等待中的入场淡入淡出，也不能区分播放同一 ID 的不同调用方，更不提供会话令牌。调用方明确知道待启动请求属于自己时，可以用 `stop()` 取消它。
+
+## 方法一览
+
+| 门面方法 | 侧别 | 结果 |
+| --- | --- | --- |
+| `play(Identifier, CameraScenePlayOptions)` | 客户端 | 返回已注册动画是否被接受 |
+| `stop()` | 客户端 | 取消待启动请求，或停止活跃播放；过场离场可能异步完成 |
+| `activeId()` | 客户端 | 当前动画 ID；没有活跃实例时为 null，不用于查询待启动状态 |
+
+### 播放选项
+
+`CameraScenePlayOptions` 是记录类型。预设工厂提供下表组合；构造时不会钳制字段，也不会替换空锚点或模式。
+
+| 预设 | 模式 | 混合入场 / 离场刻数 | 锁定移动 | 锁定全部输入 | Escape 跳过 | 隐藏 HUD |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cinematic()` | `ONCE` | 10 / 10 | true | true | false | true |
+| `dialogue()` | `HOLD` | 5 / 0 | true | false | false | false |
+| `loop()` | `LOOP` | 10 / 0 | true | true | false | true |
+| `instant()` | `ONCE` | 0 / 0 | true | false | true | false |
+| `gecko()` | `GECKO` | 10 / 10 | true | true | false | true |
+
+全部预设使用 `CameraAnchor.camera()`、`followAnchor = false` 与 `YawAlign.PLAYER`。每秒 20 刻时，10 刻为 0.5 秒，5 刻为 0.25 秒。
+
+| 记录字段 | 约定 |
+| --- | --- |
+| `mode` | `ONCE` 到动画长度时停止；`LOOP` 循环采样时间；`HOLD` 限制到最后一帧；`GECKO` 采用动画自身模式 |
+| `blendInTicks` / `blendOutTicks` | 混合时长；计算混合时，低于 0 的值按 0 处理。过场预设还使用正时长触发屏幕淡入淡出。 |
+| `lockMovement` | 镜头播放期间清除移动、跳跃和潜行输入，不是服务器动作锁 |
+| `lockAllInput` | 使用共享过场输入锁，并在 tick 时关闭已打开界面 |
+| `allowEscSkip` | 在该输入锁活跃时控制 Escape；只设置此标志而不加锁，不会独立安装 Escape 处理 |
+| `hideHud` | 启动时隐藏 HUD，并保存先前设置以便恢复 |
+| `anchor` | 位置与旋转提供者，不能为空 |
+| `followAnchor` | 每次采样重新解析锚点；false 使用捕获的原点 |
+| `yawAlign` | `NONE`、`PLAYER` 或 `ANCHOR`；请求时捕获对齐方向 |
+
+`withMode`、`withAnchor` 与 `withYawAlign` 返回新记录。`isCinematic()` 表示 `lockAllInput` 与 `hideHud` 同时为 true，不由工厂名称或动画类型决定。
+
+### 锚点与方向
+
+| 锚点工厂 | 原点 |
+| --- | --- |
+| `CameraAnchor.camera()` | 当前客户端镜头位置与旋转 |
+| `CameraAnchor.world(Vec3d, float)` | 精确世界位置与偏航 |
+| `CameraAnchor.block(BlockPos, float)` | 方块中心与偏航 |
+| `CameraAnchor.entity(int, boolean)` | 插值后的实体位置，可选择加上眼高。世界或实体缺失时回退到当前镜头。 |
+| `CameraAnchor.fixed(CameraOrigin)` | 传入的固定原点 |
+
+使用 `PLAYER` 或 `ANCHOR` 对齐时，位置偏移按捕获偏航减 180 度旋转。基础俯仰变为 0，基础偏航为捕获的对齐方向，再加上动画旋转。使用 `NONE` 时不旋转偏移，并采用原点的俯仰与偏航。最终翻滚来自动画，不叠加锚点翻滚。
+
+跟随式对话锚点是内部特化类型，拥有独立构图控制。其序列化结果是固定位置、俯仰与偏航快照，不会传输动态构图控制器。
+
+### 内部服务器传输
+
+`util.network.CameraSceneSyncUtil` 是仓库内部服务器辅助类，不是公共门面。`play`/`stop` 面向服务器玩家；`playToTracking`/`stopToTracking` 遍历追踪某实体的玩家；`playToWorld`/`stopToWorld` 遍历服务器世界中的玩家。服务器不检查客户端动画注册表，也不接收播放成功回执。
+
+播放包携带动画 ID、模式序号、混合刻数、锁定与跳过及 HUD 标志、偏航对齐序号、跟随标志和锚点描述。未知模式与偏航序号分别回退为 `ONCE`、`NONE`。锚点标签为 0 镜头、1 实体、2 世界、3 方块、4 固定；未知标签按镜头解码。固定锚点传输俯仰与偏航，不传输翻滚。接收方将门面调用转交给 Minecraft 客户端执行器。
+
+## 线程与生命周期
+
+应在 Minecraft 客户端线程调用门面，并确保镜头与世界可用。门面不会自行排队、不校验线程归属，也不建立服务器会话。动画与选项被捕获后，注册表重载只影响之后的查询，不替换活跃实例持有的动画对象。
+
+启动播放会保存视角与 HUD，并切换到后置第三人称。过场入场淡入淡出会推迟活跃实例的创建；不同于完整场景播放，此纯镜头路径在淡入淡出之后从年龄 0 开始动画。客户端结束 tick 推进年龄；`ONCE` 达到动画秒数乘 20 后向上取整的刻数时请求停止。
+
+停止待启动请求会清除淡入淡出，并立即恢复状态。停止有正离场时长的活跃过场时，先开始离场淡入淡出，并保留活跃实例直到回调；普通停止立即恢复。过渡采样冻结部分刻插值，并使用捕获的锚点。
+
+完整过场播放提供镜头姿态时具有优先权。其客户端播放活跃期间，混合权重也优先使用完整过场。两套系统共用镜头、HUD、视角与输入状态，没有通用控制权令牌，因此应协调纯镜头请求、完整时间轴与对话会话。
+
+纯镜头初始化器注册资源加载、tick、网络与断开连接时的方块淡化重置。它本身不会在断开连接时清除全部纯镜头播放。集成应测试自己的收尾路径，不要假设完整过场管理器的断线清理也适用于此独立控制器。
+
+## 易错点
+
+| 现象 | 原因或检查项 |
+| --- | --- |
+| `play` 返回 false | 注册表缺少动画、缺少 camera 骨骼，或没有位置及旋转帧 |
+| 请求已接受，但 `activeId()` 为 null | 入场淡入淡出仍在等待 |
+| 跟随实体时没有持续对齐它转动后的偏航 | 对齐偏航只捕获一次 |
+| `instant()` 未让 Escape 停止播放 | 它允许跳过，但没有取得负责分派 Escape 的全部输入锁 |
+| 第二个请求在过渡期间丢失状态 | 启动与停止共用待执行淡入淡出回调，没有会话安全的替换约定 |
+| 重载修复了后续播放，却未改变当前姿态 | 活跃播放保留原动画对象 |
+
+验证缺失 ID、各预设、锚点跟随变化、入场与离场取消、资源重载和世界断开连接。还应测试与服务器过场、对话聚焦混用的情形；客户端编译成功本身不能证明状态恢复或视觉过渡正确。
+
+## 相关页面
+
+- [过场场景运行时](/zh-cn/dev/cinematic-scenes/) — 共享服务端时间线、触发器与演员所有权。
+- [镜头动画资源](/zh-cn/dev/camera-animations/) — 骨骼、单位、关键帧与注册检查。
+
+[过场场景数据](/zh-cn/wiki/cinematic-scene-data/)介绍完整时间轴。[对话运行时](/zh-cn/dev/npc-dialogue/)介绍 NPC 对话控制归属，[变形客户端集成](/zh-cn/dev/morph-client/)介绍下层变形镜头调整。

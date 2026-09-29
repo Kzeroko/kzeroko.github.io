@@ -1,0 +1,296 @@
+---
+title: "宝石数据"
+description: "定义随机词条、插槽、难度缩放、诅咒与耗材，并了解校验及重载规则。"
+category: data
+order: 60
+updated: 2026-09-18
+---
+
+宝石资源决定能抽到哪些加成，以及能镶嵌到哪些装备上。服务端将所有宝石类别作为一个快照加载；任意资源无效时，保留原快照。
+
+## 文件放在哪里
+
+除全局设置外，下列路径均相对于 `data/<namespace>/`，任意命名空间均可提供定义。全局设置只读取 `data/isekaiexpansion/gem_system/settings.json`。
+
+```text
+gem_system/settings.json
+gem_attributes/random_roll/*.json
+gem_attributes/fixed_attributes/*.json
+gem_attributes/element_attributes/*.json
+gem_attributes/skill_attributes/*.json
+socket_profiles/*.json
+curses/*.json
+gem_consumables/*.json
+```
+
+每个文件包含一个对象。高优先级数据包覆盖相同命名空间及路径的资源；不同路径的定义仍会检查 ID、属性及物品归属是否重复。全局设置取最高优先级资源，不逐字段合并。插槽配置 ID 是 `socket_profiles/` 下的相对路径加命名空间，并去掉 `.json`。
+
+## 最小示例
+
+保存为 `data/example/socket_profiles/iron_sword.json`。它为铁剑提供一个已解锁的属性插槽，并覆盖自带近战配置。显式优先级避免示例被现有配置遮蔽；解析器本身不要求填写。
+
+```json
+{
+  "priority": 120,
+  "match": {
+    "items": [
+      "minecraft:iron_sword"
+    ]
+  },
+  "sockets": [
+    {
+      "kind": "ATTRIBUTE",
+      "min_item_level": 0
+    }
+  ]
+}
+```
+
+## 字段
+
+使用真正的 JSON 数字与布尔值。缺少必填字段或数值转换失败会导致重载失败。除“校验”列出的已移除字段外，未知字段会被忽略。错误容器类型的回退行为在表中明确列出。
+
+### 全局设置
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `random_roll_count` | `array<object>` | `[{count:1,weight:80},{count:2,weight:17},{count:3,weight:3}]` | 按权重抽取词条数量。缺失、非数组、空数组或所有权重为零时使用默认表。 |
+| `random_roll_count[].count` | `integer` | `1` | 正整数；实际词条数不超过可抽取的不同属性数量。 |
+| `random_roll_count[].weight` | `integer` | `0` | 非负；零权重条目会被移除。 |
+| `random_requirement_roll` | `object` | `{}` | 控制随机宝石是否获得装备限制。 |
+| `random_requirement_roll.base_chance` | `number` | `0.42` | 有限概率 0–1；没有难度上下文或对应覆盖值时使用。 |
+| `random_requirement_roll.dungeon_difficulty_chances` | `object` | `{}` | 难度到概率的映射，有限值 0–1。键为 common、uncommon、rare、epic、legendary、unique。 |
+| `random_requirement_pool` | `array<object>` | `[]` | 装备限制候选。空数组表示不会抽到限制。 |
+| `random_requirement_pool[].id` | `identifier` | 必填 | 唯一限制 ID；存入宝石，并用于生成翻译键。 |
+| `random_requirement_pool[].weight` | `integer` | `1` | 非负默认权重；此值或至少一个难度覆盖权重必须大于零。 |
+| `random_requirement_pool[].dungeon_difficulty_weights` | `object` | `{}` | 使用相同难度键；覆盖默认权重，值必须是精确的非负整数。 |
+| `random_requirement_pool[].match` | `object` | 必填 | 至少包含一种限制；所有非空限制组必须同时满足。 |
+| `random_requirement_pool[].match.items` | `array<item id>` | `[]` | 物品须在列表中；只校验 ID 语法，不要求对应物品已注册。 |
+| `random_requirement_pool[].match.all_tags` | `array<tag id>` | `[]` | 须符合全部标签；可省略开头的 #。 |
+| `random_requirement_pool[].match.any_tags` | `array<tag id>` | `[]` | 至少符合一个所列标签。 |
+| `random_requirement_pool[].match.weapon_types` | `array<string>` | `[]` | 须符合一个解析出的武器类型；完整列表见下文。 |
+| `random_requirement_pool[].match.nbt` | `array<object>` | `[]` | 须符合全部 NBT 条件。 |
+| `random_requirement_pool[].match.nbt[].path` | `string` | 必填 | 非空的复合标签键路径，以点分隔；不支持空路径段或列表索引。 |
+| `random_requirement_pool[].match.nbt[].regex` | `string` | 必填 | 有效且非空的正则表达式，最长 512 字符。匹配整个值字符串；输入超过 4096 字符时不匹配。 |
+| `insert` | `object` | `{}` | 镶嵌设置；非对象时使用默认值。 |
+| `insert.base_success` | `number` | `0.85` | 有限值 0–1，不得大于 success_cap。 |
+| `insert.success_cap` | `number` | `0.95` | 有限值 0–1，表示镶嵌概率上限。 |
+| `insert.crack_chance_on_fail` | `number` | `0.2` | 有限概率 0–1，仅在镶嵌失败后判定裂损。 |
+| `insert.fatigue` | `object` | `{}` | 整件装备共享的镶嵌调谐负荷；非对象时使用默认值。 |
+| `insert.fatigue.max` | `integer` | `10` | 非负的调谐负荷储存上限。 |
+| `insert.fatigue.on_fail_add` | `integer` | `1` | 有效镶嵌尝试失败时增加的调谐负荷，不得为负。 |
+| `insert.fatigue.on_success_change` | `integer` | `-2` | 成功时的调谐负荷变化，不得为正；结果限制在 0–max。 |
+| `insert.fatigue.success_bonus_curve` | `object` | `{}` | 非对象时使用默认值。 |
+| `insert.fatigue.success_bonus_curve.type` | `enum(LINEAR)` | `LINEAR` | 忽略首尾空格和大小写；其他曲线会导致重载失败。 |
+| `insert.fatigue.success_bonus_curve.per_fatigue` | `number` | `0.06` | 每点调谐负荷增加的概率，须为有限非负值。 |
+
+### 随机属性与固定属性
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `attribute` | `identifier` | 必填 | 随机属性定义：已注册的属性 ID；不可与其他随机定义重复。 |
+| `domain` | `enum(BASE, OFFENSE, DEFENSE, UTILITY, RESOURCE)` | 必填 | 随机与固定属性的分类。 |
+| `weight` | `number` | `1` | 仅随机定义：有限且大于零的抽取权重。 |
+| `damage_categories` | `array<enum(MELEE, RANGE, MAGIC)>` | `[]` | 随机、固定及元素定义：缺失、null 或空数组表示全部伤害类别。 |
+| `operations` | `array<object>` | 必填 | 随机定义：非空操作列表；操作名不可重复。 |
+| `operations[].name` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | 必填 | 属性操作；忽略首尾空格和大小写。 |
+| `operations[].min` | `number` | 必填 | 随机值的有限下限。 |
+| `operations[].max` | `number` | 必填 | 有限上限，不小于 min。 |
+| `operations[].format` | `object` | `{decimals:2}` | 舍入格式见下文；也可直接填写整数。 |
+| `operations[].difficulty_scaling` | `object` | `{}` | 倍率公式见下文；也接受公式字符串。 |
+| `id` | `identifier` | 必填 | 固定、元素、技能、诅咒与耗材定义的 ID；在各自定义类别内唯一。 |
+| `item` | `item id` | 必填 | 固定、元素、技能及耗材定义的已注册物品；同类不可重复，固定／元素／技能宝石也不可跨类别共用物品。 |
+| `modifiers` | `array<object>` | 必填 | 固定定义：非空的属性修饰列表。 |
+| `modifiers[].attribute` | `identifier` | 必填 | 已注册属性；在此固定宝石内不可重复。 |
+| `modifiers[].operations` | `array<object>` | 必填 | 非空列表；同一属性的操作名不可重复。 |
+| `modifiers[].operations[].name` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | 必填 | 与随机属性使用相同的操作名。 |
+| `modifiers[].operations[].value` | `number` | 必填 | 有限固定值，按 format 舍入。 |
+| `modifiers[].operations[].format` | `object` | `{decimals:2}` | 使用相同舍入格式。 |
+| `modifiers[].operations[].difficulty_scaling` | `object` | `{}` | 使用相同难度缩放格式。 |
+
+### 数值格式与难度缩放
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `format.decimals` | `integer` | `2` | 0–6 位小数；实际数值会被舍入，并非只改变显示。 |
+| `difficulty_scaling.formula` | `string` | `absent` | 默认倍率公式。 |
+| `difficulty_scaling.default` | `string` | `absent` | 覆盖 formula，作为默认公式。 |
+| `difficulty_scaling.formulas` | `object` | `{}` | 难度分组名到公式字符串的映射；覆盖前面的默认键。 |
+| `difficulty_scaling.<band>` | `string` | `absent` | 顶层公式键覆盖 formulas；运行时分组为 common、default、dangerous、mythic。 |
+| `difficulty_scaling.min_multiplier` | `number` | `0` | 有限非负倍率下限；min 为别名。 |
+| `difficulty_scaling.min` | `number` | `0` | 仅在 min_multiplier 缺失时使用。 |
+| `difficulty_scaling.max_multiplier` | `number` | `1.7976931348623157E308` | 有限倍率上限，不小于下限；max 为别名。 |
+| `difficulty_scaling.max` | `number` | `1.7976931348623157E308` | 仅在 max_multiplier 缺失时使用。 |
+
+### 元素与技能宝石
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `school` | `identifier` | 必填 | 仅元素宝石：已注册法术学派；接受完整 ID 或不区分大小写的学派路径。 |
+| `trigger` | `enum(MELEE_HIT, RANGED_HIT, MAGIC_HIT, ON_HURT, ON_KILL, TRIGGERABLE)` | 必填 | 元素与技能定义。TRIGGERABLE 仅限技能宝石，且 proc.chance 必须为 1。 |
+| `proc` | `object` | 必填 | 触发概率与每个插槽独立的冷却。 |
+| `proc.chance` | `number` | 必填 | 有限概率 0–1。 |
+| `proc.cooldown_ticks` | `integer` | 必填 | 非负刻数；20 刻 = 1 秒。 |
+| `damage` | `object` | 必填 | 仅元素宝石：均匀抽取的伤害范围。 |
+| `damage.min` | `number` | 必填 | 有限非负下限。 |
+| `damage.max` | `number` | 必填 | 有限上限，不小于 damage.min。 |
+| `damage.format` | `object` | `{decimals:2}` | 使用相同舍入格式。 |
+| `skill` | `identifier` | 必填 | 仅技能宝石：已经注册的可触发技能。 |
+| `cost` | `object` | `{}` | 仅技能宝石；缺失或非对象表示不消耗能量。 |
+| `cost.energy` | `integer` | `0` | 非负的星界能量消耗。 |
+| `scaling` | `object` | `absent` | 技能等级缩放；缺失或非对象时关闭。 |
+| `scaling.chance_add` | `number` | `0` | 每级技能增加的有限概率，结果限制在 0–1；手动触发不使用概率。 |
+| `scaling.cooldown_mult` | `number` | `0` | 每级技能的有限非负冷却减幅：round(基础冷却 × max(0, 1 − 数值 × 等级))。 |
+
+### 插槽配置
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `priority` | `integer` | `0` | 数值越高越先匹配；相同优先级按包含命名空间的配置 ID 升序排列。 |
+| `match` | `object` | `{}` | 所有非空条件组以 AND 组合；缺失或非对象时匹配全部物品。 |
+| `match.items` | `array<item id>` | `[]` | 仅允许所列物品。 |
+| `match.all_tags` | `array<tag id>` | `[]` | 须符合全部标签。 |
+| `match.any_tags` | `array<tag id>` | `[]` | 须符合至少一个标签。 |
+| `match.deny_items` | `array<item id>` | `[]` | 先排除所列物品，再检查允许条件。 |
+| `match.deny_tags` | `array<tag id>` | `[]` | 符合任意所列标签即排除。 |
+| `sockets` | `array<object>` | `[]` | 按顺序定义插槽；缺失或非数组时没有插槽。 |
+| `sockets[].kind` | `enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)` | 必填 | 接受的宝石类别；物品状态可覆盖此类别。 |
+| `sockets[].domains` | `array<enum(BASE, OFFENSE, DEFENSE, UTILITY, RESOURCE)>` | `[]` | 随机／固定属性限制；缺失、null 或空数组表示全部。 |
+| `sockets[].damage_categories` | `array<enum(MELEE, RANGE, MAGIC)>` | `[]` | 随机／固定／元素定义须至少有一个类别交集；空数组表示全部。 |
+| `sockets[].schools` | `array<identifier>` | `[]` | 元素限制；缺失、null 或空数组允许全部已注册学派。 |
+| `sockets[].allowed_skills` | `array<identifier>` | `[]` | 技能限制；空数组允许全部。填写的 ID 必须对应已注册可触发技能。 |
+| `sockets[].min_item_level` | `integer` | 必填 | 解锁插槽所需的装备等级，不得为负。 |
+
+### 诅咒
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `multiplier` | `object` | 必填 | 绑定诅咒时抽取的强度范围。 |
+| `multiplier.min` | `number` | 必填 | 有限值，严格大于 1。 |
+| `multiplier.max` | `number` | 必填 | 有限值，不小于 multiplier.min。 |
+| `downsides` | `array<object>` | 必填 | 非空的负面效果列表。 |
+| `downsides[].type` | `enum(attribute, status_effect, damage_taken_mult)` | 必填 | 不区分大小写的负面效果类型；请使用无首尾空格的标准写法。 |
+| `downsides[].data` | `object` | `{}` | 各类型字段见下文。缺失或非对象变为空对象，缺少必填字段时校验失败。 |
+| `downsides[].data.attribute` | `identifier` | 必填，适用于 attribute | 已注册属性。 |
+| `downsides[].data.operation` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | 必填，适用于 attribute | 属性操作。 |
+| `downsides[].data.value` | `number` | 必填，适用于 attribute / damage_taken_mult | 属性值须为有限负数；承伤加成须为有限正数。两者都乘以储存的诅咒强度。 |
+| `downsides[].data.name` | `string` | `ise_curse_downside` | 属性修饰符名称。 |
+| `downsides[].data.effect` | `identifier` | 必填，适用于 status_effect | 已注册状态效果。 |
+| `downsides[].data.duration` | `integer` | `40` | 正整数持续刻数；缩放前默认为 40 刻（2 秒）。 |
+| `downsides[].data.amplifier` | `integer` | `0` | 非负、从零开始的效果等级；不随诅咒强度放大。 |
+| `downsides[].data.ambient` | `boolean` | `false` | 环境效果显示标记。 |
+| `downsides[].data.show_particles` | `boolean` | `true` | 显示效果粒子。 |
+| `downsides[].data.show_icon` | `boolean` | `true` | 显示效果图标。 |
+
+### 耗材
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `target` | `enum(EQUIPMENT, GEM, ANY)` | 必填 | EQUIPMENT 要求有插槽且不是宝石；GEM 要求是已识别宝石；ANY 接受任意非空物品堆。 |
+| `success_chance` | `number` | `1` | 有限概率 0–1。 |
+| `consume_rule` | `enum(ALWAYS, ON_SUCCESS, NEVER)` | `ON_SUCCESS` | 有效尝试后的消耗规则；创造模式不消耗。 |
+| `on_success` | `array<object>` | `[]` | 判定成功时按顺序执行；缺失或非数组表示为空。 |
+| `on_fail` | `array<object>` | `[]` | 判定失败时按顺序执行；至少一个分支须包含动作。 |
+| `on_success[].type / on_fail[].type` | `identifier` | 必填 | 下表中已注册的动作 ID。 |
+| `on_success[].data / on_fail[].data` | `object` | `{}` | 动作专用数据；缺失或非对象变为空对象。 |
+| `data.index` | `integer` | `action-dependent` | 从零开始的插槽索引；选择界面会覆盖它。取出默认选择最后一个可取出的已填插槽；重掷默认按顺序处理。状态、类别和修复动作需要索引。 |
+| `data.count` | `integer` | `2147483647` | reroll_socketed_random_gems：正整数数量上限。界面选择时，缺省值为 1。 |
+| `data.break_chance` | `number` | `0` | remove_socketed_gem：有限的碎裂概率 0–1；extract_safe 强制为 0。 |
+| `data.locked` | `boolean` | `unchanged` | set_socket_state：明确设置封印；与 toggle_locked 至少填写一个。两者都有时，此值覆盖切换结果。 |
+| `data.toggle_locked` | `boolean` | `false` | set_socket_state：切换空且达到等级要求的插槽封印。 |
+| `data.cracked` | `boolean` | `unchanged` | set_socket_state：与必需的封印选项一起修改裂损标记；repair_crack 可直接移除裂损。 |
+| `data.kind` | `enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)` | `absent` | reroll_socket_kind：指定替换类别，优先于 pool；不能与当前类别相同。 |
+| `data.pool` | `array<enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)>` | `all kinds` | reroll_socket_kind：填写时至少有 2 种不同类别；抽取前移除当前类别。 |
+| `data.id` | `identifier` | `random configured curse` | apply_curse：已配置的诅咒 ID；目标必须没有诅咒。 |
+| `data.amount` | `integer` | `1` | reduce_insert_fatigue：正整数减量，剩余调谐负荷最低为 0。 |
+
+### 枚举与公式
+
+武器限制接受 `none`, `sword`, `rapier`, `greatsword`, `glaive`, `dagger`, `lance`, `scythe`, `axe`, `halberd`, `spear`, `mace`, `hammer`, `wand`, `staff`, `katana`, `chakram`, `gauntlet`, `boomerang`, `bow`, `crossbow`, `gun`, `magigun`。忽略大小写及首尾空格；未知名称导致重载失败。
+
+公式计算倍率，再对 `base × multiplier` 应用舍入格式。`areaLv` 与 `level` 都是区域等级；`base` 与 `value` 都是未缩放属性值。公式分组与装备限制映射的难度键不同：
+
+| 地牢难度 | 公式分组 |
+| --- | --- |
+| `common`、`uncommon` | `common` |
+| `rare`、`epic` | `default` |
+| `legendary` | `dangerous` |
+| `unique` | `mythic` |
+
+没有对应分组时回退到 `default`。缺少公式、结果非有限或求值出错时，倍率为 1；求值错误在使用时记录，不在重载阶段报错。公式由依赖 exp4j 求值。公式键与表达式的网络传输上限分别为 64 和 512 字符；即使加载时未检查，也应遵守。缩放只作用于随机与固定属性，不作用于元素或技能宝石。
+
+### 耗材动作
+
+下列 ID 均使用 `isekaiexpansion:` 命名空间；动作字段放在 `data` 内。
+
+| 动作 | 效果 |
+| --- | --- |
+| `isekaiexpansion:reroll_random_lines` | 重洗随机属性、数值及装备限制。 |
+| `isekaiexpansion:reroll_random_values` | 保留属性、操作及装备限制，重洗数值。 |
+| `isekaiexpansion:reroll_socketed_random_gems` | 重洗插槽中的随机宝石；排除锁定或裂纹插槽。 |
+| `isekaiexpansion:remove_socketed_gem` | 按 break_chance 判定碎裂并取出；锁定会阻止取出，裂纹不会。 |
+| `isekaiexpansion:extract_safe` | 以零碎裂概率取出。 |
+| `isekaiexpansion:set_socket_state` | 达到等级要求后修改空插槽的封印。 |
+| `isekaiexpansion:reroll_socket_kind` | 将空、未锁定、无裂纹的插槽改成其他类别。 |
+| `isekaiexpansion:apply_curse` | 为没有诅咒的目标绑定诅咒。 |
+| `isekaiexpansion:cleanse_curse` | 移除已有诅咒数据。 |
+| `isekaiexpansion:repair_crack` | 修复已达到等级要求的裂纹插槽；允许处于封印状态。 |
+| `isekaiexpansion:reduce_insert_fatigue` | 降低装备已有的调谐负荷。 |
+
+判定与消耗前，先检查两个分支是否存在可用动作。选中的分支按顺序执行；后续动作无效时，已经完成的修改不回滚。判定成功但没有有效动作时，不消耗物品。判定失败且规则为 `ALWAYS` 时，即使失败分支为空也可能消耗。空目标永远不可用。新增代码动作时，仅注册动作并不会增加适用性规则。
+
+诅咒属性值与状态持续时间乘以储存的倍率。承伤变为 `damage × (1 + sum(value × curse multiplier))`；效果等级不缩放。多个诅咒提供相同状态效果时，持续时间与等级取最大值，ambient 按 OR 合并，粒子与图标可见性按 AND 合并。
+
+## 完整示例
+
+保存为 `data/example/gem_attributes/random_roll/attack_damage.json` 前，先替换或移除其他使用相同属性的随机定义。它采用自带随机文件的结构；不同文件名不能绕过属性 ID 的唯一性检查。
+
+```json
+{
+  "attribute": "minecraft:generic.attack_damage",
+  "domain": "OFFENSE",
+  "weight": 1,
+  "damage_categories": [
+    "MELEE"
+  ],
+  "operations": [
+    {
+      "name": "ADDITION",
+      "min": 1,
+      "max": 2,
+      "format": {
+        "decimals": 2
+      },
+      "difficulty_scaling": {
+        "formula": "1 + areaLv * 0.02",
+        "min_multiplier": 1,
+        "max_multiplier": 2
+      }
+    }
+  ]
+}
+```
+
+## 校验
+
+- **格式错误、空文件或非对象文件：** 记录资源错误并拒绝新快照；要求非空的数组不得留空。
+- **未知注册 ID：** 宝石物品、属性、学派、效果与可触发技能会导致重载失败。插槽和装备限制的物品／标签筛选只校验语法；可选模组不存在时保持为不匹配条件。
+- **重复定义：** 重复随机属性 ID、同类定义 ID、同类物品 ID，以及固定／元素／技能类别间共用物品都会导致重载失败。相同优先级的配置合法，按 ID 排序。
+- **范围无效：** 有限值、概率及正数检查会拒绝数据，不会自动钳制。部分整数字段使用数值转换，应明确填写整数。难度权重映射还拒绝小数及仅大小写不同的重复键。
+- **已移除字段：** `insert.cost_curve` 被拒绝，改用 `insert.crack_chance_on_fail`；元素 `extras` 被拒绝，改用明确的元素字段。
+- **条件兼容：** 解析宝石字段前检查 Fabric 的 `fabric:load_conditions`。条件失败时排除文件；设置文件条件失败则使用默认值。条件语法属于 Fabric，通过条件后仍严格校验注册 ID。
+
+未知动作字段通常忽略；`set_socket_state` 会将不认识的键复制到存档状态。可选动作字段类型错误时，可能绕过读取器并回退而非报错。JSON 动作数据转换为 NBT：布尔值变为 byte，整数范围内的整数变为 int，其他数值变为 double，null 变为空字符串。数组应使用相同元素类型。
+
+限制的翻译键为 `gem_requirement.<namespace>.<path>`，路径斜杠替换为点。删除限制定义后，已有宝石储存的该 ID 将无法匹配装备，不会自动解除限制。
+
+## 重载
+
+服务端资源重载时加载宝石资源。玩家加入时收到当前快照；数据包重载成功后广播给已连接客户端。替换时清空物品到插槽配置的缓存。宝石自身校验失败会保留原快照，但不代表其他重载监听器也具有统一事务。
+
+物品 NBT 单独保存。重载不会重洗已有随机数值，却可能改变兼容性、固定定义数值及物品使用的配置。减少插槽数量后，下次修改操作规范化物品时可能丢弃多余的存档插槽；修改前应检查已有镶嵌装备。
+
+## 相关页面
+
+[宝石与插槽](/zh-cn/wiki/gems-and-sockets/)介绍玩家操作。[宝石运行时](/zh-cn/dev/gem-system/)说明物品 NBT、集成与验证。
+

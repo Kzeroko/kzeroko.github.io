@@ -1,0 +1,119 @@
+---
+title: "对话工坊"
+description: "双语 NPC 对话的节点编辑器：拖线连节点，双语文本就地填写，批量生成，导入导出资源包。"
+category: assets
+order: 125
+updated: 2026-09-26
+---
+
+对话工坊是 Blabber 对话的节点编辑器，用的是站点自己的主题。一个状态就是一个节点，一个选项就是一根连到目标状态的线，中英文直接写在节点上。对话文档保持当前的 Blabber 格式，工坊只在外面另存路径、节点位置和双语文本。
+
+## 你要做的东西
+
+打开[对话工坊](https://kentomahou.com/zh-cn/tools/dialogue-studio/)。英文路径是 `/en/tools/dialogue-studio/`，中文路径是 `/zh-cn/tools/dialogue-studio/`。工具源码归站点仓库，游戏资源归本仓库。
+
+所有编辑都在工作区里进行：一个工作区就是存在浏览器 IndexedDB 里的一份数据。可以同时留好几个工作区，来回切换不会丢东西，任何一个都能下载成工作区备份。工作区格式是 `isekai-dialogue-workspace`，版本 `1`：
+
+| 字段 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `format` | string | 必填 | 固定为 `isekai-dialogue-workspace`。 |
+| `version` | integer | 必填 | 固定为 `1`，其它值直接拒绝。 |
+| `name` | string | 无 | 工作区名称；把备份作为新工作区打开时会恢复。 |
+| `documents` | array | 必填 | 最多 5,000 条。 |
+| `documents[].path` | string | 必填 | 相对于 `blabber_dialogues/` 的资源路径，小写，以 `.json` 结尾，不能有 `.` 或 `..` 片段。路径重复直接拒绝。 |
+| `documents[].dialogue` | object | 必填 | Blabber 对话文档，原样保存。 |
+| `documents[].layout` | object | 无 | 节点位置：状态名 → `[x, y]`。只给编辑器用，不会作为游戏资源导出。格式不对时丢掉这一项，不会拒绝整个工作区。 |
+| `translations.en_us` | object | 必填 | 键 → 英文文本。值必须是字符串，`""` 表示还没写。 |
+| `translations.zh_cn` | object | 必填 | 键 → 中文文本，规则相同。 |
+
+文本在任何阶段都可以先空着。导出资源时，所有被引用的键两种语言都会输出，没写或只有空白的输出为 `""`。只有结构错误会拦住导出。
+
+## 前置要求
+
+工具直接在浏览器里跑，不需要服务、API 密钥，也不需要额外的 npm 依赖。浏览器禁用了存储时，工作区只留在内存里，状态栏会提示；这种情况下关页面前先下载备份。
+
+| 限制 | 数值 | 超出时 |
+| --- | --- | --- |
+| 每个工作区的对话数 | 5,000 | 生成和导入报错中止。 |
+| 每个对话的状态数 | 2,000 | 记为结构错误。 |
+| 单个导入文件 | 64 MB | 拒绝该文件。 |
+| ZIP 内文件数 | 20,000 | 拒绝该 ZIP。 |
+| ZIP 解压后大小 | 256 MB | 拒绝该 ZIP。不读取 ZIP64。 |
+| 撤销记录 | 200 步 | 最早的步骤丢弃。撤销记录只在内存里，刷新页面就清空。 |
+
+导入的文件必须是带 `states` 对象的 JSON，而且算出来的路径符合上面的路径规则，才会作为对话导入；其它文件列为跳过，并写明原因。有结构问题的对话照样导入，问题面板和文件树会一直标着，直到修好。
+
+## 步骤
+
+1. 把对话导进来。**导入**接受对话 JSON、`en_us.json` / `zh_cn.json`、工作区备份和 ZIP；**整个文件夹**用来选一个文件夹。也可以把文件或文件夹直接拖进工坊。位于 `blabber_dialogues/` 文件夹下的文件保留它后面的路径，所以模组的 `src/main/resources/data/isekaiexpansion/blabber/blabber_dialogues` 可以整个拖进来。遇到已存在的路径时，可以选**替换**或**保留现有**。工作区备份可以作为新工作区打开，也可以合并进当前工作区。
+2. 或者在**批量生成**里生成一整组。选模板（日常对话、分支对话、NPC 交易、条件选项，或以当前对话为模板）、范围——`unique`、`common`、`simple`、`combat`、`citizen`、`villager` 或 `allegiance`——然后勾选入口、关系阶段、交互阶段和性别。每改一项，面板都会实际跑一遍生成器，显示文件数、前几个路径和被跳过的组合。情景变体为 `0–5`，与运行时查找一致。已存在的路径按你的选择跳过或中止。模板里的 `$key` 会换成该资源的键名前缀。
+3. 搭节点图。从选项右侧的 ●（端口）拖到某个节点上就是连线；拖到空白处松手，会在那里弹出节点库，新建的节点自动连上。双击画布添加节点，右键查看更多操作。节点库里有对话、结束、确认三种状态，外加预设好行为的状态：`isekaiexpansion:open_npc_trade`、`blabber:open_trade`、`isekaiexpansion:give_item`、`isekaiexpansion:emoji`、`blabber:redirect`、`blabber:command`、`isekaiexpansion:open_guild_bounties`。新文本的键名挂在该对话的前缀下：台词是 `<prefix>.<state>`，选项是 `<prefix>.<state>.reply_<n>`；前缀是 `dialogue.isekaiexpansion.` 加上把 `/` 换成 `.` 的路径。
+4. 在**属性**页编辑节点。可以改 ID、类型和是否为起点；台词和每个选项的中英文上下对照着写；设置每个选项的跳转目标和条件；用表单添加、排序、填写行为；也可以直接改节点 JSON。表单不认识的自定义字段会原样保留。当前显示语言没写时，节点上显示另一种语言的文本，并标上「中」或「EN」，而不是直接露出键名。
+5. 删除、复制、粘贴都可以放心用。删掉一个节点，原本连向它的选项会断开，端口变红并记为错误，直到重新连上；删掉的是起点时，起点移到剩下的第一个节点。粘贴时 ID 冲突会自动改名（`line` → `line_2`），粘贴进来的节点之间的连线保持不变，指向目标对话里已有状态的连线也保留，其余的断开。原对话自己的键会复制成目标前缀下的新键，文本一并带过去；共用的键（比如通用的「继续」）继续共用。
+6. 在**文本**视图里批量写字。可以按状态（未完成、缺英文、缺中文、已完成）和范围（整个工作区、当前文件夹、当前对话）筛选，并对筛出的键查找替换。**复制给 AI** 会把筛出的未完成文本连同引用位置复制到剪贴板；填好后用**粘贴文本**合并回来。空值不会覆盖已经写好的文本。
+7. 在**问题**页检查结构，在**试玩**页把对话走一遍。试玩会列出条件和行为，但不执行。
+8. 导出。**资源包**导出整个工作区；**所选文件**和文件夹菜单只导出其中一部分。单个对话可以从文件菜单或属性页导出为 JSON。导出菜单里还有语言文件、翻译待办和工作区备份。
+9. 审核资源包，把对话文件复制到 `src/main/resources/data/isekaiexpansion/blabber/blabber_dialogues/`，把语言片段合并进 `language_assemble/categories/dialogues`，然后运行 `./gradlew.bat assembleLanguageFiles`。
+
+移动或重命名对话（包括整个文件夹）时，可以顺带把跟着旧路径起名的键一起改掉，已写的文本也带过去；改完后没人再用的旧键会删除。复制对话时，副本默认使用自己的键。
+
+批量生成里的日常、恋爱与指令预设会填好入口、关系阶段和交互阶段。恋爱预设包含羁绊交流和誓约之戒的回应。预设只负责对话内容，求婚资格与配偶绑定仍由游戏判定，见 [NPC 好感与恋爱](/zh-cn/wiki/leveling/)。
+
+## 声明它
+
+运行时按资源路径选择对话；生成文件不会注册新的菜单入口。游戏格式见[对话数据](/zh-cn/wiki/dialogue-data/)，按种族区分的所属玩家入口见[隶属运行时](/zh-cn/dev/npc-allegiance/)。
+
+校验器会拒绝：缺失起始节点、未连接或指向不存在节点的选项、未知节点类型、单数 `action`、格式错误的行为容器、缺少 `emoji` ID 的 `isekaiexpansion:emoji` 行为，以及走不到结束节点的可达节点。到不了的节点和起始节点上的行为会给出提醒。自定义行为编解码器仍要在游戏里重载验证。
+
+资源包里有：
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/isekaiexpansion/blabber/blabber_dialogues/<path>` | 每个对话，原样输出。 |
+| `language_assemble/categories/dialogues/en_us.json` | 所有被引用的键，英文。合并片段。 |
+| `language_assemble/categories/dialogues/zh_cn.json` | 所有被引用的键，中文。合并片段。 |
+| `translation-todo.json` | 仍缺某种语言的键。不是游戏资源。 |
+| `manifest.json` | 资源包格式、文件列表和语言。 |
+| `studio/workspace.json` | 这个工作区，含节点布局，用来在工坊里原样打开资源包。不是游戏资源。 |
+| `README.txt` | 双语的安装说明。 |
+
+`translation-todo.json` 只列出未完成的键；语言文件同时包含已写好的键。工作区备份会保留没有被任何对话引用的字典条目，资源导出只包含被引用的键。
+
+| 字段 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `format` | string | `isekai-dialogue-translation-todo` | 标识这份交接文件。 |
+| `version` | integer | `1` | 当前交接格式版本。 |
+| `entries` | array | 始终存在，可为空 | 尚未完成的键。 |
+| `entries[].key` | string | 始终存在 | 编写时要原样保留的键名。 |
+| `entries[].missing` | array | `en_us`、`zh_cn` 或两者 | 文本缺失或只有空白的语言。 |
+| `entries[].sources` | array | 非空 | 该键在各文档中的全部引用位置。 |
+| `entries[].sources[].path` | string | 始终存在 | 对话资源的相对路径。 |
+| `entries[].sources[].pointer` | string | 始终存在 | 指向含该键文本组件的 JSON Pointer。 |
+
+**复制给 AI** 生成的简报，**粘贴文本**和**导入**都能读回来：
+
+| 字段 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `format` | string | `isekai-dialogue-text-brief` | 标识这份简报。 |
+| `version` | integer | `1` | 当前简报格式版本。 |
+| `instructions` | string | 始终存在 | 给填写者或 AI 的写作要求。 |
+| `entries` | array | 始终存在 | 当前筛选下每个未完成的键一条。 |
+| `entries[].key` | string | 始终存在 | 要原样保留的键名。 |
+| `entries[].en_us` | string | 未写时为 `""` | 英文文本。 |
+| `entries[].zh_cn` | string | 未写时为 `""` | 中文文本。 |
+| `entries[].used_in` | array | 非空 | 该键每处引用的 `<path>#<JSON Pointer>`。 |
+
+作者和 AI 只填语言的值，键名、路径、行为和条件保持不动。两种语言可以分开交回来，剩下的空值留着以后再写。
+
+## 检查清单
+
+- 清理浏览器数据或换设备前，先下载备份。工作区只存在当前这个浏览器里。
+- 编写和交接阶段文本空着没关系；发布游戏内容前，核对双语文本和准确的资源路径。
+- 先把问题页清空，再在游戏里把每个分支都走一遍，包括自定义行为和条件不满足的情况。
+- 最终导出前，用**工作区 → 清理**去掉未使用的文本键和到不了的节点。
+- 在站点仓库运行 `npm.cmd run test:dialogue`、`npm.cmd run check` 和 `npm.cmd run build:fast`。
+
+## 相关
+
+- [对话数据](/zh-cn/wiki/dialogue-data/) — 运行时字段与路径。
+- [NPC 对话运行时](/zh-cn/dev/npc-dialogue/) — 服务端准入与事务。

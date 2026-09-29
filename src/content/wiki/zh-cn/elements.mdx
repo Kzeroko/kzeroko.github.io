@@ -1,59 +1,88 @@
 ---
-title: "元素克制"
-description: "防御元素与伤害类型如何互相作用，包括多元素叠加规则与完整的克制表。"
+title: "元素与伤害关系"
+description: "查阅生物的弱点与抗性，并计算多个元素共同影响时的伤害倍率。"
 category: combat
 order: 20
-updated: 2026-09-01
-tagline: "在护甲计算之前就已经决定的 ±25%。"
-tags: ['战斗', '伤害', '元素']
+updated: 2026-09-19
 ---
 
-KTM2 里每一个生物都带一种或多种**防御元素**。伤害进来时会和每一种元素比对一次，结果在护甲减免之前乘到伤害上。
+生物的元素决定它受到哪些伤害类别时会增伤或减伤。关系以受击者为准，因此目标对火的弱点并不意味着攻击者也存在反向弱点。
 
-## 倍率
+## 如何阅读关系
 
-| 关系 | 倍率 |
+命中弱点时，伤害乘以 1.25；命中抗性时，伤害乘以 0.75。未分配元素的生物不会受到此规则修正。关系适用于具有元素数据的生物，不会自动应用到每个施放元素法术的玩家身上。
+
+表格使用精确伤害键，以区分普通火焰与火元素法术、普通闪电与雷元素法术，以及普通近战与近战法术学派。法术伤害优先按已注册学派分类。表中的治愈学派指归属于该学派的**伤害**，不会把正常治疗变成攻击。
+
+## 完整关系表
+
+| 目标元素 | 弱点：受到更多伤害 | 抗性：受到更少伤害 |
+| --- | --- | --- |
+| 普通 | `spell_astral` | — |
+| 龙 | `dragon` | 除本行弱点外的所有类别 |
+| 碎片 | `spell_soul`, `explosion` | `trident`, `cactus`, `melee`, `spell_earth` |
+| 奥秘 | `spell_arcane`, `spell_astral` | `magic`, `spell_physical_melee` |
+| 火 | `spell_water`, `spell_frost` | `spell_fire`, `fire`, `spell_wind`, `explosion` |
+| 水 | `spell_frost`, `lightning`, `spell_lightning` | `fire`, `spell_fire`, `spell_water`, `melee` |
+| 冰 | `melee`, `execution`, `fire`, `spell_fire`, `lightning`, `spell_lightning` | `spell_frost`, `spell_wind`, `spell_water` |
+| 风 | `fire`, `spell_fire` | `cactus`, `spell_lightning`, `lightning` |
+| 土 | `explosion`, `spell_earth` | `trident`, `cactus`, `melee`, `generic`, `spell_wind`, `lightning`, `spell_lightning` |
+| 雷 | `spell_earth`, `spell_wind` | `wither`, `dragon`, `spell_soul` |
+| 灵魂 | `spell_light`, `spell_dark`, `spell_healing` | `spell_soul`, `execution`, `melee`, `cactus`, `generic`, `spell_astral` |
+| 星界 | `spell_soul` | `spell_light`, `spell_dark`, `spell_arcane` |
+| 光 | `spell_dark`, `wither` | 除本行弱点外的所有类别 |
+| 暗 | `spell_light`, `spell_healing` | 除本行弱点外的所有类别 |
+
+龙、光与暗会抵抗其弱点之外的全部分类键，包括表中未单独列出的键。这里列出的是异界扩展的注册内容；其他模组可以扩展共享关系表。
+
+### 伤害键说明
+
+| 伤害键 | 显示名 |
 | --- | --- |
-| 该元素所惧怕的伤害类型 | **+25%** |
-| 该元素所抵抗的伤害类型 | **−25%** |
-| 其余 | ±0% |
+| `cactus` | 荆棘 |
+| `dragon` | 龙息 |
+| `execution` | 处决 |
+| `explosion` | 爆炸 |
+| `fire` | 火焰 |
+| `generic` | 通常 |
+| `lightning` | 闪电 |
+| `magic` | 魔法 |
+| `melee` | 近战 |
+| `spell_arcane` | 奥秘 |
+| `spell_astral` | 星界 |
+| `spell_dark` | 暗属性 |
+| `spell_earth` | 土元素 |
+| `spell_fire` | 火元素 |
+| `spell_frost` | 冰元素 |
+| `spell_healing` | 治愈 |
+| `spell_light` | 光属性 |
+| `spell_lightning` | 雷元素 |
+| `spell_physical_melee` | 近战 |
+| `spell_soul` | 灵魂 |
+| `spell_water` | 水元素 |
+| `spell_wind` | 风元素 |
+| `trident` | 三叉戟 |
+| `wither` | 凋零 |
 
-### 多元素叠加
+`dragon` 指龙息伤害；`cactus` 也包括甜浆果丛。`fire` 使用火焰伤害标签，`explosion` 使用爆炸标签，`lightning` 则匹配闪电束伤害或闪电标签。未匹配的非法术来源回退到 `generic`。未列出的法术学派使用由学派生成的独立键，仍可能被“除弱点外全部抵抗”的行抵抗。
 
-生物同时带多种元素、而你的伤害类型对其中超过两种有效时，从第三层开始每多一层再加 **10%**。
+## 多元素叠加
 
-<Callout type="note" title="举例">
-一只同时带火、雷、地属性的生物，被一种对三者都有效的伤害类型命中：
+统计目标各个不同元素中命中的弱点数量 `E` 与抗性数量 `R`。`E > 0` 时，弱点倍率为 `1.25 + (E - 1) × 0.10`，否则为 1。`R > 0` 时，抗性倍率为 `max(0, 0.75 - (R - 1) × 0.10)`，否则为 1。将两者相乘。
 
-`125% + (2 × 10%) = 145%`
+| 命中情况 | 元素倍率 |
+| --- | --- |
+| 1 个弱点，0 个抗性 | 1.25 |
+| 2 个弱点，0 个抗性 | 1.35 |
+| 0 个弱点，2 个抗性 | 0.65 |
+| 1 个弱点，1 个抗性 | 0.9375 |
 
-惩罚一侧完全镜像：
+例如，火元素法术命中同时具有火与冰元素的生物时，会命中火元素的抗性和冰元素的弱点。合计倍率为 `0.75 × 1.25 = 0.9375`。这只是元素阶段；护甲、属性、天赋及其他规则仍会改变最终伤害。
 
-`75% − (2 × 10%) = 55%`
-</Callout>
+元素名称与使用集合存储的关系注册表已对照本地 IsekaiCore 源码检验，对应项目配置的 `0.4.0-build60`。关系内容和倍率公式由异界扩展实现。
 
-面对三属性敌人，用对和用错伤害类型差出大约 **2.6 倍**。这就是为什么这个包里不存在「一把最强武器」。
+## 相关页面
 
-## 伤害类型与防御元素
-
-不是每一种伤害类型都能被生物「穿在身上」。能作为防御的元素有十三种，另有若干只以伤害形式存在：
-
-**防御元素**——普通、龙、碎片、奥术、火、水、冰霜、风、地、灵魂、星界、光、暗
-
-**仅伤害类型**——雷、爆炸、灼烧、近战、处决、治疗、凋零、荆棘、三叉戟
-
-治疗出现在伤害类型里不是笔误：面对灵魂与暗属性，治疗就是武器。
-
-## 克制表
-
-<ElementMatrix />
-
-<Callout type="caution" title="尚未定稿">
-表上没列出的组合按普通伤害处理。这张表仍在调整，之后会有变动。
-</Callout>
-
-## 围绕它配装
-
-- **元素易伤**（见[属性与状态](/zh-cn/wiki/attributes-and-effects/)）让你可以**制造**弱点，而不是等弱点出现。先挂 `ignite`，再用风属性打。
-- 嵌套的法术强度属性（`aether_power` → `dys_aether` → `elemental_power`）让混合流派能一次覆盖多个学派，不必为每个学派单独堆一条属性。
-- 元素宝石（见[宝石与镶嵌](/zh-cn/wiki/gems-and-sockets/)）会附加一个来自指定魔法学派的触发伤害，这是补上武器本身缺失学派最便宜的办法。
+- [属性与状态效果](/zh-cn/wiki/attributes-and-effects/)
+- [法术数据](/zh-cn/wiki/spell-data/)
+- [伤害数字](/zh-cn/dev/damage-numbers/)

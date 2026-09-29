@@ -1,0 +1,107 @@
+---
+import type { GetStaticPaths } from 'astro';
+
+import PageLayout from '../../../layouts/PageLayout.astro';
+import LinkCard from '../../../components/cards/LinkCard.astro';
+import { formatDate, localeCodes, localePath, useTranslations, type LocaleCode, type UIKey } from '../../../i18n';
+import { devPath, getDevGroups } from '../../../lib/content';
+import { breadcrumbJsonLd } from '../../../lib/seo';
+
+export const getStaticPaths = (() => {
+  return localeCodes.map((lang) => ({ params: { lang } }));
+}) satisfies GetStaticPaths;
+
+const lang = Astro.params.lang as LocaleCode;
+const t = useTranslations(lang);
+const groups = await getDevGroups(lang);
+
+const crumbs = [
+  { label: t('nav.home'), href: localePath(lang) },
+  { label: t('dev.title') },
+];
+
+const ACCENTS: Record<string, string> = {
+  start: 'teal',
+  api: 'azure',
+  systems: 'violet',
+  client: 'rose',
+  assets: 'amber',
+};
+---
+
+<PageLayout
+  lang={lang}
+  title={t('dev.title')}
+  description={t('dev.lead')}
+  eyebrow={t('nav.ktm2')}
+  heading={t('dev.title')}
+  lead={t('dev.lead')}
+  crumbs={crumbs}
+  jsonLd={[breadcrumbJsonLd(crumbs.map((c) => ({ name: c.label, href: c.href ?? Astro.url.pathname })))]}
+>
+  <div class="shell shell--wide devindex">
+    <LinkCard
+      href={localePath(lang, 'tools/dialogue-studio/')}
+      title={lang === 'zh-cn' ? '对话工坊' : 'Dialogue Studio'}
+      body={lang === 'zh-cn' ? 'NPC 对话的节点编辑器：拖线连节点，双语文本就地填写，批量生成、导入导出。' : 'Node editor for NPC dialogue: wire nodes together, write both languages in place, generate, import and export in bulk.'}
+      eyebrow={lang === 'zh-cn' ? '开发工具' : 'AUTHORING TOOL'}
+      accent="violet"
+      chips={['Blabber', 'IsekaiExpansion']}
+    />
+    {
+      groups.map((group) => (
+        <section class="devindex__group">
+          <header class="devindex__head" data-reveal="fade">
+            <h2 class="devindex__title">{t(`dev.category.${group.category}` as UIKey)}</h2>
+            <span class="devindex__count">{group.entries.length}</span>
+          </header>
+
+          <div class="grid grid--3" data-reveal-stagger>
+            {group.entries.map((entry, index) => (
+              <div data-reveal="rise" style={`--reveal-index:${index}`}>
+                <LinkCard
+                  href={devPath(lang, entry)}
+                  title={entry.data.title}
+                  body={entry.data.tagline ?? entry.data.description}
+                  eyebrow={formatDate(entry.data.updated, lang)}
+                  accent={ACCENTS[group.category] ?? 'teal'}
+                  chips={entry.data.tags.slice(0, 3)}
+                />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))
+    }
+  </div>
+</PageLayout>
+
+<style>
+  .devindex {
+    display: grid;
+    gap: var(--space-3xl);
+    padding-block: var(--space-xl) var(--space-4xl);
+  }
+
+  .devindex__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin-block-end: var(--space-lg);
+    padding-block-end: var(--space-sm);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  .devindex__title {
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-snug);
+  }
+
+  .devindex__count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--c-text-faint);
+  }
+</style>

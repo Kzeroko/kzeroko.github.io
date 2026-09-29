@@ -1,0 +1,202 @@
+---
+title: "城市 API"
+description: "注册持久化城市、标记区域、路线和每日元数据，并解析 NPC 的城市绑定。"
+category: api
+order: 30
+updated: 2026-09-19
+---
+
+城市数据归属于服务端世界。`CityAPI` 独立保存城市边界、局部区域和路线，不依赖 NPC 是否加载；NPC 自身只保留城市、住所及可选路线的引用。
+
+## 入口
+
+使用 `net.kzeroko.isekaiexpansion.api.city.CityAPI`。参数和返回值中的记录类型位于 `internal.city`，由此门面公开使用；`CityStorage` 与 `CityStructureRegistry` 仍是内部实现。`internal.event.events.CityEvents.CHANGED` 也是内部集成入口，并非独立的公共门面。
+
+此 API 负责注册与查询。绑定路线不会启动移动、选择日程或设置 NPC 的家位置；门面本身也没有城市数据包加载器或客户端同步机制。
+
+## 常见用法
+
+### 注册城市、住所和路线
+
+示例使用城市的简化构造器：优先级为 `0`，无来源结构，阵营自动生成。先注册城市，再注册子数据；城市不存在时，子数据注册返回 `false`。
+
+```java
+static void registerDistrict(ServerWorld world) {
+    Identifier id = new Identifier("example", "harbour");
+    BlockPos anchor = new BlockPos(0, 64, 0);
+    CityAPI.registerCity(world, new CityDefinition(
+            id, anchor, new BlockBox(0, 0, 0, 31, 127, 31)));
+    CityAPI.registerSubstructure(world, id, new CitySubstructureDefinition(
+            "inn", CitySubstructureKind.RESIDENCE, anchor,
+            new BlockBox(0, 64, 0, 7, 70, 7)));
+    CityAPI.registerRoute(world, id, new CityRouteDefinition(
+            "round", List.of(anchor, anchor.east(8)), true));
+}
+```
+
+### 绑定已有 NPC
+
+`bindNpc` 在 NPC 当前服务端世界中检查区域与可选路线是否存在。NPC 为空、位于客户端或引用数据缺失时返回 `false`。它不要求区域类型为 `RESIDENCE`，不检查包含关系，也不切换 AI 模式。
+
+```java
+static boolean assignResidence(BaseNpcEntity npc) {
+    CitySubstructureKey key = new CitySubstructureKey(
+            new Identifier("example", "harbour"), "inn");
+    return CityAPI.bindNpc(npc, key, "round");
+}
+```
+
+不绑定路线时传入 `null`。非 null 的空白或非法路线 ID 会在校验时抛出异常。直接构造 `NpcCityBinding` 则会将空白的可选路线视为缺省，两者的校验并不完全相同。删除城市、区域或路线不会清除实体上的绑定；后续查询会对失效引用返回空值。
+
+### 更新每日状态
+
+下例的 `Visits` 是集成方自定义的整数，缺失时读取为 `0`，并非内置城市字段。回调接收实际存储的复合标签；不要保留此引用，也不要在回调结束后继续修改。
+
+```java
+static boolean recordVisit(ServerWorld world, CitySubstructureKey key) {
+    return CityAPI.updateDailyMetadata(world, key,
+            data -> data.putInt("Visits", data.getInt("Visits") + 1));
+}
+```
+
+每日分段采用 `Math.floorDiv(world.getTime(), 24000)`，依据累计世界时间，而非 `getTimeOfDay()`。读取返回副本或新的空复合标签；过期记录只有在下次成功更新时才替换，读取本身不清除存档。即使回调没有修改内容，也会返回 `true`、标记脏数据并发出事件。回调抛出异常可能留下部分修改，却没有执行最后的脏标记和事件；更新不具备事务回滚。
+
+## 方法一览
+
+所有世界参数均为 `ServerWorld`。通常的必填参数为空时由空值检查报错；非法局部 ID 抛出 `IllegalArgumentException`。空 Optional 或列表表示数据不存在，不会生成占位定义。
+
+| 方法（参数） | 返回类型 | 行为 |
+| --- | --- | --- |
+| `initBuiltinProfiles()` | `void` | 缺失时注册内置映射。 |
+| `registerStructureProfile(structureId, profile)` | `boolean` | 来源结构 ID 首次注册生效；已存在则返回 false。 |
+| `getStructureProfile(structureId)` | `Optional<CityStructureProfile>` | 查询进程内的结构映射。 |
+| `onStructurePlaced(world, structureId, bounds)` | `boolean` | 应用已注册映射；映射缺失或单例城市已存在时返回 false。 |
+| `registerCity(world, definition)` | `boolean` | 创建或替换城市定义，保留已有子数据；定义相等时返回 false。 |
+| `registerStructureCity(world, cityId, sourceStructureId, anchorPos, bounds, factionId, priority)` | `boolean` | 构造 CityDefinition 后交给 registerCity。 |
+| `removeCity(world, cityId)` | `boolean` | 删除城市及其区域、路线和每日数据；不存在则返回 false。 |
+| `getCity(world, cityId)` | `Optional<CityDefinition>` | 查询当前世界的城市定义。 |
+| `getCitiesAt(world, pos)` | `List<CityDefinition>` | 按优先顺序返回包含该位置的所有城市。 |
+| `getCityAt(world, pos)` | `Optional<CityDefinition>` | 返回 getCitiesAt 的首个结果。 |
+| `getCityFactionId(world, cityId)` | `Optional<String>` | 城市存在时返回其解析后的阵营。 |
+| `registerSubstructure(world, cityId, definition)` | `boolean` | 按局部 ID 新增或替换；城市不存在或定义相等时返回 false。 |
+| `removeSubstructure(world, key)` | `boolean` | 同时删除该区域的每日数据；不存在则返回 false。 |
+| `getSubstructure(world, key)` | `Optional<CitySubstructureDefinition>` | 按城市与局部 ID 查询。 |
+| `getSubstructures(world, cityId)` | `List<CitySubstructureDefinition>` | 返回按插入顺序排列的列表副本，缺失时为空。 |
+| `getPoiSubstructures(world, cityId, npcPoiTypeId)` | `List<SubstructureInfo>` | 筛选类型为 POI 且 npcPoiTypeId 完全相等的区域；不查询 POI 注册表。 |
+| `getSubstructureAt(world, pos)` | `Optional<SubstructureInfo>` | 从首个具有匹配区域的城市中选取区域。 |
+| `registerRoute(world, cityId, definition)` | `boolean` | 按局部 ID 新增或替换；城市不存在或定义相等时返回 false。 |
+| `removeRoute(world, cityId, routeId)` | `boolean` | 规范化 routeId 后删除路线；不存在则返回 false。 |
+| `getRoute(world, cityId, routeId)` | `Optional<CityRouteDefinition>` | 规范化 routeId 后查询路线。 |
+| `getDailyMetadata(world, key)` | `NbtCompound` | 返回当前时间段的数据副本，缺失时返回新的空复合标签。 |
+| `updateDailyMetadata(world, key, updater)` | `boolean` | 修改当前数据；城市或区域不存在时返回 false。 |
+| `bindNpc(npc, residence, routeId)` | `boolean` | 在 NPC 所在服务端世界验证引用后设置绑定。 |
+| `getNpcResidence(npc)` | `Optional<SubstructureInfo>` | 解析当前绑定；NPC 为空、位于客户端、无绑定或引用失效时为空。 |
+| `getNpcRoute(npc)` | `Optional<CityRouteDefinition>` | 在 NPC 当前世界中解析可选的绑定路线。 |
+
+`SubstructureInfo` 包含 `key` 与 `definition`。城市与局部区域的组合键为 `CitySubstructureKey(cityId, substructureId)`；城市 ID 必填，局部 ID 会被规范化。
+
+### 定义约定
+
+| 记录 / 字段 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `CityDefinition.id` | `Identifier` | 必填 | 非空城市 ID，在一个世界内唯一。 |
+| `CityDefinition.sourceStructureId` | `Identifier` | 简化构造器为 `null` | 可选的来源结构。 |
+| `CityDefinition.anchorPos` | `BlockPos` | 必填 | 复制为不可变位置。 |
+| `CityDefinition.bounds` | `BlockBox` | 必填 | 包含边界的三维范围，直接保留引用。 |
+| `CityDefinition.factionId` | `String` | null 或空白时生成 | `isekaiexpansion:city/<namespace>/<path>`；非空白输入原样保留。 |
+| `CityDefinition.priority` | `int` | 简化构造器为 `0` | 任意有符号整数，越大越优先。 |
+| `CitySubstructureDefinition.id` | `String` | 必填 | 规范化的局部 ID。 |
+| `CitySubstructureDefinition.kind` | `CitySubstructureKind` | null 时为 `GENERIC` | `GENERIC`、`RESIDENCE`、`VENUE`、`WORKPLACE`、`POI`、`PATH_NODE`。 |
+| `CitySubstructureDefinition.anchorPos` | `BlockPos` | 必填 | 复制为不可变位置。 |
+| `CitySubstructureDefinition.bounds` | `BlockBox` | 必填 | 直接保留引用，不检查是否位于城市内。 |
+| `CitySubstructureDefinition.npcPoiTypeId` | `Identifier` | 简化构造器为 `null` | 即使类型为 `POI` 也可省略；查询只比较 ID。 |
+| `CityRouteDefinition.id` | `String` | 必填 | 规范化的局部 ID。 |
+| `CityRouteDefinition.nodes` | `List<BlockPos>` | 必填 | 非空列表，列表及元素不可为 null；复制为不可变位置组成的不可变列表。 |
+| `CityRouteDefinition.loops` | `boolean` | 显式参数 | 保存供调用方使用的循环策略，不自动沿路线移动。 |
+| `CityStructureProfile.cityId` | `Identifier` | 必填 | 固定的目标城市 ID。 |
+| `CityStructureProfile.factionId` | `String` | null 或空白时生成 | 与 CityDefinition 使用相同的阵营生成规则。 |
+| `CityStructureProfile.priority` | `int` | 简化构造器为 `0` | 传递给城市定义。 |
+| `CityStructureProfile.singleton` | `boolean` | 简化构造器为 `true` | 当前世界已存在该城市时跳过放置注册。 |
+
+局部 ID 去除首尾空白后按 `Locale.ROOT` 转为小写，长度为 1–96 个字符，只允许 `a-z`、`0-9`、`_`、`-`、`.` 和 `/`。它不是带命名空间的标识符；城市 ID 则使用普通 `Identifier`。
+
+城市最多索引 `16384` 个区块（`MAX_CITY_INDEXED_CHUNKS`），按包含边界的 X/Z 区块范围计算。超限注册会在替换数据前抛出异常，Y 方向高度不影响此数量。查询先通过区块索引筛选，再检查完整三维包含关系；排序依次为优先级降序、边界体积升序、城市 ID 字典序。
+
+区域查询沿用城市顺序，在首个存在匹配区域的城市中，按体积和局部 ID 选取最小区域；不会跨所有重叠城市寻找全局最小区域。路线不校验障碍、包含关系或 `PATH_NODE` 标记。
+
+注册后不要修改传入的 `BlockBox`：定义保留其引用，未经重新注册的修改可能使边界与区块索引不一致。替换城市定义会保留区域、路线和每日记录。删除区域会删除其每日记录；删除路线不会修复 NPC 绑定。
+
+### 结构放置
+
+结构映射在进程内共享，同一来源 ID 以首次注册为准。`initBuiltinProfiles` 注册来源结构与城市 ID `isekaiexpansion:lucentrystel_outpost`，使用优先级 `0`、自动生成阵营及单例 `true`。只注册映射不会创建城市。
+
+`StructureStart.place` 的返回注入点在当前区块等于结构边界最大 X/Z 区块时调用 `onStructurePlaced`，传入完整结构边界，并以最小 X/Y/Z 角点作为锚点。实际触发条件是这个坐标判断，不是另行扫描以确认所有区块都已放置。
+
+设为 `singleton: false` 后，重复放置仍写入映射中同一个城市 ID 并更新其定义，不会为每个生成结构创建不同 ID。
+
+### 存档状态
+
+每个维度分别保存 `data/isekaiexpansion/city/cities_v1.dat`。下表描述存档 NBT，不是供作者编写的 JSON 格式。`Substructures`、`Routes` 和 `Daily` 均嵌套在各城市中。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Cities` | `list<compound>` | 空 | 根城市列表；缺失或类型错误时不加载城市。 |
+| `Cities[].Id` | `string` | 必填 | 有效的命名空间城市 ID；无效城市会被跳过。 |
+| `Cities[].SourceStructure` | `string` | 无 | 可选标识符；格式错误或缺失时为 null。 |
+| `Cities[].Anchor` | `long` | 必填 | 打包的 BlockPos；读取时接受数值 NBT。 |
+| `Cities[].Bounds` | `compound` | 必填 | 使用下表边界字段；无效边界导致城市被跳过。 |
+| `Cities[].Faction` | `string` | 自动生成 | 空白或缺失时使用 `isekaiexpansion:city/<namespace>/<path>`。 |
+| `Cities[].Priority` | `int` | 0 | 有符号重叠优先级；数值越大越优先。 |
+| `Cities[].Substructures` | `list<compound>` | 空 | 区域记录，逐条校验。 |
+| `Substructures[].Id` | `string` | 必填 | 规范化的局部 ID；无效记录跳过。 |
+| `Substructures[].Kind` | `string` | 必填 | 必须是精确的大写枚举；未知或缺失时跳过区域。 |
+| `Substructures[].Anchor` | `long` | 必填 | 打包的 BlockPos；接受数值 NBT。 |
+| `Substructures[].Bounds` | `compound` | 必填 | 与城市使用相同的必填边界字段。 |
+| `Substructures[].PoiType` | `string` | 无 | 可选标识符；缺失或格式错误时为 null。 |
+| `Cities[].Routes` | `list<compound>` | 空 | 有序节点路线记录。 |
+| `Routes[].Id` | `string` | 必填 | 规范化的局部 ID。 |
+| `Routes[].Nodes` | `long[]` | 必填 | 非空的打包 BlockPos 长整型数组；缺失、类型错误或为空时跳过路线。 |
+| `Routes[].Loops` | `boolean` | false | 保存循环标记；本身不会启动导航。 |
+| `Cities[].Daily` | `list<compound>` | 空 | 每日元数据记录。 |
+| `Daily[].Id` | `string` | 必填 | 必须是已存在区域的有效局部 ID，否则跳过。 |
+| `Daily[].Day` | `long` | 必填 | 数值时间段 floorDiv(world.getTime(), 24000)。 |
+| `Daily[].Data` | `compound` | 必填 | 由集成方定义的数据，加载和保存时复制；类型错误则跳过。 |
+| `Bounds.MinX` | `int` | 必填 | 边界最小X坐标；所有坐标均须为数值。 |
+| `Bounds.MinY` | `int` | 必填 | 边界最小Y坐标；所有坐标均须为数值。 |
+| `Bounds.MinZ` | `int` | 必填 | 边界最小Z坐标；所有坐标均须为数值。 |
+| `Bounds.MaxX` | `int` | 必填 | 边界最大X坐标；所有坐标均须为数值。 |
+| `Bounds.MaxY` | `int` | 必填 | 边界最大Y坐标；所有坐标均须为数值。 |
+| `Bounds.MaxZ` | `int` | 必填 | 边界最大Z坐标；所有坐标均须为数值。 |
+
+无效记录逐条跳过，超出区块数量上限的城市也会跳过，不保留原始数据供修复。重复城市 ID 以最后一条有效记录替换整个先前城市状态；同一子数据映射内的重复局部 ID 也以后面的有效记录为准。缺失的子列表视为空；引用不存在区域的每日记录会被丢弃。没有城市专用的旧版格式读取器。
+
+NPC 独立的 `CityBinding` 复合标签包含 `City`、`Residence` 和可选 `Route`；具体读取规则见 [NPC 基础](/zh-cn/dev/npc/)。城市目录不会复制到实体中。
+
+## 事件
+
+在模组内部集成时订阅 `CityEvents.CHANGED`。载荷为 `Change(world, type, cityId, substructureKey, routeId)`。事件在存储修改成功后同步调用，不可取消，也不捕获监听器异常。
+
+| 类型 | 附加载荷 | 触发条件 |
+| --- | --- | --- |
+| `CITY_UPSERTED` | 两个可选键均无 | 城市注册改变定义。 |
+| `CITY_REMOVED` | 两个可选键均无 | 删除已有城市。 |
+| `SUBSTRUCTURE_UPSERTED` | `substructureKey` | 区域注册改变定义。 |
+| `SUBSTRUCTURE_REMOVED` | `substructureKey` | 删除已有区域。 |
+| `ROUTE_UPSERTED` | `routeId` | 路线注册改变定义。 |
+| `ROUTE_REMOVED` | `routeId` | 删除已有路线。 |
+| `DAILY_METADATA_UPDATED` | `substructureKey` | 更新回调正常完成，每次均触发。 |
+
+注册结构映射、绑定 NPC 以及定义未变化的注册都不会发出事件。监听器异常会在数据已修改后继续向外抛出。读取存档也不发出修改事件。
+
+## 线程与生命周期
+
+在初始化阶段注册结构映射。世界查询和修改要求相应服务端世界已加载，并直接在调用线程执行；门面不会自动将工作调度到服务端线程。这些操作应在服务端线程运行。映射注册表使用并发容器，不代表城市存储或 NPC 修改也具备线程安全性。
+
+绑定 NPC 通过声望桥接加入已存在城市的阵营。位置上下文收集所有包含该位置的城市阵营，而非只取最高优先级城市。查询使用当前世界；绑定本身不携带维度，也不会在 NPC 换世界时移动城市。
+
+验证集成时，注册重叠城市，检查垂直与水平边界，替换城市后确认子数据保留，再删除具有每日数据的区域。分别测试跨日后的只读查询与更新，重载世界，并确认失效绑定返回空值。检查事件数量时，应分别测试定义未变化的注册和不修改内容的更新回调。
+
+## 相关页面
+
+- [NPC 基础](/zh-cn/dev/npc/)
+- [声望运行时](/zh-cn/dev/reputation-runtime/)

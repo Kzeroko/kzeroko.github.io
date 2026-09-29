@@ -1,0 +1,92 @@
+---
+title: "声望运行时"
+description: "服务端事件钩子、持久化归属、关系覆盖与报告快照。"
+category: systems
+order: 20
+updated: 2026-09-18
+---
+
+声望属于 `internal.reputation` 下的服务端内部系统，目前没有公开的 `ReputationAPI`。它组合实体归属、关系覆盖、事件计分及报告投影；玩家可见数值见[声望与阵营](/zh-cn/wiki/reputation/)。
+
+## 它做什么
+
+`FactionContextResolver.entityFactions` 综合 `ReputationFactionProvider`、`BaseNpcFactionBridge` 与匹配的数据规则。地点归属是独立操作：城市来自 `CityAPI.getCitiesAt`；村庄结构贡献全局村庄阵营及以起始区块区分的本地村庄阵营。实体不会自动继承当前位置的归属。
+
+`targetingFactions` 仅为没有提供者、基础 NPC 身份或匹配规则的实体补充隐式怪物阵营。`FactionTargetingService` 区分 HOSTILE、NON_HOSTILE 与 UNSPECIFIED。普通玩家及缺少阵营集合时为 UNSPECIFIED；身份为 null 时为 NON_HOSTILE。主动寻找 NPC 目标要求明确敌对，而通用选敌否决仅拒绝 NON_HOSTILE。
+
+## 运行时模型
+
+`FactionReputationService` 接收已应用伤害、击杀、战利品填充及容器槽位取物事件。伤害归因依次支持攻击者玩家、直接来源玩家及弹射物的玩家拥有者。取物钩子在 `ScreenHandler.onSlotClick` 前复制物品堆，返回后比较；物品身份改变时，原物品堆全部计为移除。这是界面动作钩子，不是覆盖所有库存变更的事务观察器。
+
+服务先筛选适用阵营，逐阵营应用通缉状态下的命运修正，再按最终变化分组，依次更新状态、原版流言与弹窗，最后刷新报告。直接调用 `FactionReputationState.add` 会绕过这些联动。
+
+声望与运行时关系通过 `IsekaiPersistData` 使用主世界持久状态管理器，键为模组命名空间下的 `faction/reputation_v1` 与 `faction/relations_v1`。声望按玩家 UUID 及规范化阵营 ID 保存，不依赖玩家当前维度。
+
+### 存档数据
+
+两种状态格式都写入版本 1。缺少版本按 0 读取；高于 1 时记录警告并返回空状态。格式错误的列表项被跳过。重复阵营或关系记录采用后出现的值。读取声望时限制在 −1000–1000。
+
+| NBT 键 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `version` | `int` | 读取时为 `0` | 状态格式版本；写入为 1。两种文件共用此字段。 |
+| `players` | `list<compound>` | 空 | 声望文件中的玩家记录。 |
+| `players[].player` | `UUID` | 每项必需 | 缺失或 UUID 类型错误时跳过该项。 |
+| `players[].factions` | `list<compound>` | 每项必需 | 缺少列表时跳过玩家记录。 |
+| `players[].factions[].faction` | `string` | 必需 | 规范化阵营 ID；读取时注册对应定义。 |
+| `players[].factions[].value` | `int` | 必需 | 保存的声望，读取时限制范围。 |
+| `overrides` | `list<compound>` | 空 | 关系文件中的有向覆盖。 |
+| `overrides[].source` | `string` | 必需 | 规范化来源阵营。 |
+| `overrides[].target` | `string` | 必需 | 规范化目标阵营。 |
+| `overrides[].relation` | `string` | 必需 | 接受数据格式中的规范关系名与别名；无效值记录警告并跳过该项。 |
+
+方块及实体元数据与上述状态文件分开保存：
+
+| NBT 键 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `IsekaiReputationFactions` | `list<string>` | 空 | 方块实体的受保护阵营 ID；读取时规范化并去重。仅非空时写入。 |
+| `IsekaiPlayerPlacedContainerOwner` | `UUID` | 缺省 | 任意有效 UUID 均标记为个人储物，所有玩家都免于该容器的阵营偷窃判定。仅存在时写入。 |
+| `IsekaiStructureOriginFactions` | `list<string>` | 空 | 实体保存的结构来源阵营。仅由启用该选项的阵营规则纳入声望归属。 |
+
+玩家放置容器时，清空受保护阵营、记录拥有者并标记方块实体需保存。填充战利品时跳过玩家容器，否则记录可用的地点阵营。偷窃按槽位确定双容器的一侧，再依次检查玩家放置标记、保存的阵营 ID 与地点回退。
+
+结构模板加载实体时，将世界压入线程局部栈。实体读取 NBT 时，只有处于该上下文才认领地点阵营。这不是通用生成规则，也不是按实体当前位置赋予归属。
+
+## 约定
+
+在服务端线程且服务器已加载时使用查询与修改入口。内部映射不提供并发访问约定。世界存档状态可跨重启及数据重载保留；事件冷却表只存在于进程内，不写入 NBT。数据重载替换规则注册表，不清除已存声望与关系覆盖。
+
+`FactionRelationService.setRuntimeRelation` 规范化 ID，可同时写入两个方向，并标记状态需保存。服务器或关系为 null、ID 为空白时不修改。`clearRuntimeRelation` 删除指定方向的覆盖，使数据包默认规则重新生效。多个匹配覆盖冲突时，敌对优先于友好，再优先于中立；覆盖结果先于所有数据规则。
+
+`FactionReputationState.add` 返回最后处理的非 null 阵营的结果值，不是变化量或汇总。`snapshot` 返回不可变映射。玩家或阵营缺失时读取为 0。奖励需要同时触发流言、弹窗及报告时，使用服务层的任务奖励入口。
+
+### 报告投影
+
+`ReputationReportSyncService` 从默认阵营、已知定义及存档条目构建报告。未记录且不属默认集合的 0 声望阵营会省略。排序先取显式阵营或类别优先级，再取服务端组装的名称文本，最后取阵营 ID；不会按客户端翻译后的显示文字重新排序。
+
+`ReputationFactionNaming` 将村庄、职业、NPC 类型、独特 NPC、公民出身与文化 ID 分别显示为聚落、行业、族群、个人、故乡及文化记录。其余 ID 采用章程类呈现。名称、副标题与描述以 `Text` 发送；聚落描述相对于请求玩家重新构建。名称由有限片段确定性组合，可能重名。
+
+数据包最多发送 512 行。报告请求包及服务层成功修改都会重新构建报告；客户端在自身线程应用收到的快照。这是展示快照，不是客户端权威声望存储。
+
+## 扩展方式
+
+内部剧情集成可通过服务设置运行时关系：
+
+```java
+void changeAlliance(MinecraftServer server) {
+    FactionRelationService.setRuntimeRelation(server,
+            "example:city", "example:guild", ReputationRelation.FRIENDLY, true);
+}
+```
+
+使用 `clearRuntimeRelation(server, sourceId, targetId, true)` 移除双向覆盖。实体归属与守护者角色优先使用[数据规则](/zh-cn/wiki/reputation-data/)。Java 归属提供者必须给出实际阵营定义；仅站在某地点并不足以获得归属。
+
+## 验证
+
+分别检查玩家放置及生成的容器、双箱两侧、物品数量减少与物品替换。再使用视线被挡、睡眠、失明及没有目击者的情况重复检查。确认冷却按受害者或容器及维度区分。
+
+将声望设在 −100 两侧，比较同一事件中各阵营的面相修正。保存重启及重载数据，区分持久化状态与规则默认值。设置再清除运行时关系，确认回退。在不同位置与维度请求报告，确认同名显示记录仍保留不同阵营 ID。
+
+## 相关页面
+
+[声望与阵营](/zh-cn/wiki/reputation/)说明玩法；[声望数据](/zh-cn/wiki/reputation-data/)说明编写格式及加载失败行为。
+

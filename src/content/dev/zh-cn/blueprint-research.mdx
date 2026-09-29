@@ -1,0 +1,150 @@
+---
+title: "蓝图研究与铁匠委托"
+description: "物品研究状态、服务端誊录校验、托管存档与村民实际劳动。"
+category: systems
+order: 50
+updated: 2026-09-19
+---
+
+研究进度使用物品 NBT，铁匠委托使用全服托管账本。`item.blueprint` 下的研究代码与 `internal.blacksmith` 下的委托代码属于实现层；公开的村民集成门面是 `api.blacksmith.BlacksmithAPI`。
+
+## 它做什么
+
+`ResearchDataLoader` 先载入知识，再载入蓝图，跳过无效文件并以成功定义替换目录。[蓝图数据](/zh-cn/wiki/blueprint-data/)负责 JSON 约定，[研究](/zh-cn/wiki/blueprints/)与[委托](/zh-cn/wiki/blacksmith-commissions/)负责玩家操作说明。
+
+`BlueprintResearchService` 在服务端校验发现与誊录，不创建玩家或队伍知识账本。`BlacksmithService` 将已揭示图纸、配方产物和条款快照存入委托；接受后的订单不再从目录重新读取这些条款。
+
+## 运行时模型
+
+### 物品状态
+
+物品根标签 `IsekaiBlueprint` 必须是 NBT compound。以下字段由 `BlueprintResearchState` 写入，属于存档约定，并非另一套数据包格式。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Schema` | `int` | 1 | 绑定时写入；当前读取不校验或迁移该版本。 |
+| `Definition` | `string` | 绑定必需 | 蓝图 ID；无法解析到定义时仍保留绑定状态。 |
+| `NameKey` | `string` | 来自定义 | 揭示后的名称翻译键。 |
+| `DescriptionKey` | `string` | 来自定义 | 揭示后的描述翻译键。 |
+| `UnknownNameKey` | `string` | 来自定义 | 未鉴明名称翻译键。 |
+| `UnknownDescriptionKey` | `string` | 来自定义 | 未鉴明描述翻译键。 |
+| `Recipe` | `string` | 来自定义 | 缓存配方 ID；仅 Revealed 为真时返回。 |
+| `Type` | `string` | 来自定义 | 大写显示枚举；已存值无效时回退 UNKNOWN。 |
+| `Complexity` | `int` | 来自定义 | 从定义复制的显示复杂度。 |
+| `Decor` | `int` | 来自定义 | 从定义复制的装饰索引。 |
+| `Revealed` | `boolean` | 绑定时为 false | 绑定时为假；规范化时按当前全部要求重算。 |
+| `Knowledge` | `compound` | 绑定时为空 | 按 ID 存储整数进度；挂接时若缺失或类型不符则新建。 |
+| `Knowledge.<id>` | `int` | 0 | 读取为非负值；规范化按当前要求限制上限，未使用键保留。 |
+
+绑定会替换整个研究 compound。规范化时，定义不匹配则重新绑定，随后更新元数据、按当前要求限制各项进度并重算揭示状态；空要求列表直接完成。无关知识键保留。已有 compound 不会在每次规范化时重写 Schema，旧 `BlueprintRecipeId` 标签在此没有迁移路径。
+
+`revealedRecipe` 使用保存的 Revealed 标志与 Recipe 缓存，不单独查询当前定义。打开研究界面和委托报价前会规范化；锻造台的配方访问方法本身不会执行这一步。
+
+### 快照与客户端界面
+
+`ResearchSystem.init()` 只注册一次重载监听。数据包内容同步与成功重载会发送 `BlueprintCatalogPacket`；服务端停止时清空知识和蓝图注册表。目录包含创造模式变体所需的显示数据，不包含可变研究进度。
+
+`BlueprintScreenPacket` 提供要求、当前证据、配方步骤及产物快照。未揭示图纸同样收到配方信息，因此界面的揭示状态不能作为保密边界。上限为 2048 个目录条目、32 项要求、32 个步骤及每步 64 项材料；翻译键限 256 字符，学科限 64 字符。JSON 加载器不执行这些解码上限。
+
+两个接收处理器都调度到 Minecraft 客户端执行器。`ResearchScreenController` 在 ModernUI 线程更新当前同 ID 蓝图，避免重新打开；不同蓝图则创建界面并播放打开音效。字体顺序为 ArchitectsDaughter、ZhiMangXing、ModernUI 当前选择的后备字体族。自定义字体缺失或损坏时记录日志，其余字体链仍可使用。
+
+### 委托持久化
+
+`ForgeOrderStorage` 使用主世界保存的 `blacksmith/commissions_v1` 键，路径为 `data/isekaiexpansion/blacksmith/commissions_v1.dat`。持有人与铁匠 UUID 索引各只允许一份活动订单。蓝图与产物均复制 ItemStack，避免共享可变实例。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Orders` | `list<compound>` | 空列表 | 根列表：有效订单后附保留的不可读条目。 |
+| `Orders[].Id` | `UUID` | 必需 | 订单身份，用于拒绝过期回调。 |
+| `Orders[].Owner` | `UUID` | 必需 | 全服持有人索引；重复持有人使该条目加载失败。 |
+| `Orders[].Smith` | `UUID` | 必需 | 负责村民索引；重复铁匠使该条目加载失败。 |
+| `Orders[].Dimension` | `string` | 必需 | 指定工坊的世界 ID。 |
+| `Orders[].Station` | `long` | 缺失时为 0 | 指定工作站的压缩 BlockPos。 |
+| `Orders[].SmithPosition` | `long` | 必需，且必须为 long 类型 | 铁匠最后已知位置，用于加载租约。 |
+| `Orders[].Blueprint` | `compound` | 必需，物品不得为空 | 托管蓝图的 ItemStack NBT 快照。 |
+| `Orders[].Output` | `compound` | 必需，物品不得为空 | 报价产物的 ItemStack NBT 快照。 |
+| `Orders[].Cost` | `long` | 必需，必须为正 | 接受时的铜币价格；取消不退费。 |
+| `Orders[].RequiredTicks` | `int` | 必需 | 2–30 个完整每日额度；必须整除 DailyLimit。 |
+| `Orders[].DailyLimit` | `int` | 必需 | 每日 2000–6000 个工作刻。 |
+| `Orders[].Worked` | `int` | 0 | 已完成劳动，范围 0 至 RequiredTicks。 |
+| `Orders[].Day` | `long` | 0 | 最后工作日或初始接单日，按 24000 刻向下取整。 |
+| `Orders[].DailyWorked` | `int` | 0 | 范围 0 至 DailyLimit，且不超过 Worked。 |
+
+UUID 使用 Minecraft 的 UUID NBT 表示。其他缺失数字字段先按 NBT getter 读取为零，再经过构造校验。无效 ID、托管物品、劳动范围或重复索引会使该条目失败。原始 compound 会记录日志并保存在 `unreadableOrders`，再次保存时附在有效订单之后；不会自动修复，也不能直接领取。
+
+添加、移除、转交、记录铁匠位置变化或推进劳动都会标记存储为 dirty。转交仅改变铁匠、维度与工作站，不替换报价快照，也不重置当天进度。
+
+### 劳动与远程工坊
+
+`ForgeWorkProgress` 在 `2000 <= timeOfDay % 24000 < 9000` 且未用完每日额度时接受劳动。`work` 对同一服务端刻最多增加一次。进入后续日历日后，在下一次实际劳动时重置 DailyWorked；日期倒退则等待至保存的工作日。离线时间与跳过的天数不产生劳动。
+
+`BlacksmithWorkTask` 要求村民职业合适、存活、清醒、启用 AI、未交谈或受威胁，且认领工作站匹配。工作期间独占脑活动 `BLACKSMITH_WORK`。到站条件为距中心的平方距离不超过 4、垂直差不超过 1，且射线无遮挡或命中工作站。否则以速度 0.5、完成距离 1 导航，每 40 刻（2 秒）刷新行走请求。工作特效同样每 40 刻触发；完成后标记可领取，并通知在线持有人。
+
+| 调度参数 | 数值 |
+| --- | --- |
+| 远程工坊租约 | 最多 8 个；不限制已加载工匠的总数。 |
+| 检查间隔 | END_SERVER_TICK 阶段，每 20 刻（1 秒）。 |
+| 初次加载宽限 | 100 刻（5 秒）。 |
+| 无进展超时 | 1200 刻（60 秒）。 |
+| 失败后重试间隔 | 1200 刻（60 秒）。 |
+| 区块票据半径参数 | 2；中心分别为工作站与铁匠最后已知区块。 |
+| 票据过期时间 | 100 刻（5 秒）；持有租约时持续刷新。 |
+
+租约刷新维度空闲计时，并随铁匠记录位置更新。这些是带周边加载影响的区块中心，并不表示只加载 2 个区块。完成、分配失效或非工作时段会释放租约；加载失败或停滞则释放并延后重试。转交、领取、取消会清除该订单的租约与重试状态。服务端停止时关闭所有租约。存储订单的遍历不保证公平排队。
+
+## 约定
+
+### 服务端研究校验
+
+发现检查另一只手；誊录按来源顺序、再按槽位顺序搜索主物品栏。创造模式只免除消耗，不免除匹配。誊录在修改前检查当前手、蓝图物品、定义 ID、所请求知识是否属于要求、完成状态及证据。包中没有唯一物品令牌：同手替换为另一张相同定义蓝图后，操作可能作用于新图纸。完成后的重复请求不再消耗。
+
+先消耗证据，再加入经过上限限制的洞见。成功修改后标记背包 dirty、发送容器内容更新，再发送新快照。锻造台只读审阅将台内物品传入快照构建；誊录仍解析玩家当前手持物品，无法任意指定锻造台内的物品。
+
+研究与委托修改应在服务端线程执行。这些辅助代码不加锁，也不替任意异步调用者切换线程。`TranscribeBlueprintKnowledgePacket.handle` 经 IsekaiCore 包框架直接调用服务；此处理器本身没有额外执行器调度。
+
+### 事务边界
+
+接受委托会检查交互条件、两个唯一索引、已认领且可达的工作站与重新生成的报价。ItemStack 相等及条款相等检查用于拒绝变化的蓝图、产物或价格。先检查货币联动并付款，再清空玩家槽位、添加托管。除 `isLoaded`/`tryPay` 调用外，Numismatic 付款细节由 IsekaiCore 负责，此处不实现钱包。
+
+领取时校验持有人、订单 ID、指定铁匠与完成状态，随后同时模拟两件物品的背包容量，再移除订单并插入副本。取消要求尚未完成且能放回蓝图，可通过另一位合适铁匠处理，绝不退款。转交要求目标空闲且工作站可达，保留全部原条款。这些是同步服务操作，不是带崩溃事务日志的分布式支付协议。
+
+Blabber 回调重新解析当前村民，并检查捕获的铁匠或订单 ID。菜单 ID 为 `isekaiexpansion:blacksmith/villager`，普通交易仍保留为菜单选项。村民对话处理器另外按负面流言限制入口；仅职业符合并不表示事务一定可执行。
+
+## 扩展方式
+
+通过 `net.kzeroko.isekaiexpansion.api.blacksmith.BlacksmithAPI` 接入村民：
+
+| 方法 | 侧别 | 约定 |
+| --- | --- | --- |
+| `init()` | 通用初始化 | 注册调度器与对话；只调用一次，门面没有幂等保护。 |
+| `eligible(VillagerEntity)` | 实体上下文 | 只检查成年铁匠职业，不检查交互条件或订单。 |
+| `dialogue()` | 通用 | 返回菜单 Identifier。 |
+| `registerBrainActivity(Brain<VillagerEntity>)` | 服务端脑初始化 | 注册独占工作活动。 |
+| `createWorkTask()` | 服务端脑初始化 | 返回新的工作任务。 |
+
+现有村民 mixin 在核心优先级 10 安装工作任务，并在脑初始化后注册活动。其他调用者不要重复安装任务。接单、取消与结算仍是内部服务操作。
+
+`api.research.KnowledgeLedger` 是已有的公开 NBT 工具，并非研究门面。以下用于独立的服务端所属 compound：
+
+```java
+static int recordInsight(NbtCompound owner, Identifier knowledge) {
+    var ledger = KnowledgeLedger.attach(owner, "Knowledge");
+    return ledger.add(knowledge, 4, 24);
+}
+```
+
+`attach` 会将缺失或类型不符的存储改为 compound。`get` 与 `set` 将值限制为不小于 0；`add` 按给定非负上限限制结果并返回实际差值。`entries` 返回清理后的不可变副本，忽略无效 ID 键；`copyNbt` 返回独立 compound。调用者负责 dirty 标记与同步。实际蓝图应使用研究服务或状态路径，以重算揭示状态。
+
+## 验证
+
+- 在生存与创造模式发现、誊录，检查参照物所在手、单栈不足、证据优先级、副手排除和最后一次洞见的完整消耗。
+- 将研究物品放入箱子、交易或丢出，并存档重进。修改定义、移除知识、新增要求或放入错误文件，确认规范化及成功目录替换行为。
+- 在誊录请求到达前切换为另一种定义，再测试相同定义的替代物品。完成后的重复请求不得继续消耗。
+- 确认未揭示图纸无法绑定锻造台；已揭示图纸可绑定、开始前取回、推进步骤后在材料槽为空时审阅，并优先领取成品。
+- 检查两种语言、宽窄画面与界面缩放，验证字体回退、滚动边界、羽毛笔与揭示过渡，以及快照更新不重复播放打开音效。
+- 测试余额不足、报价过期、背包已满、重复持有人或铁匠，以及缺失或受阻工作站。同时领取两件物品，确认取消不退款、跨维度转交不重置劳动。
+- 保存并重启订单，移动或移除铁匠、卸载区域、耗尽租约预算，验证释放与重试时机。跳时或倒退日期不得补发劳动。在一次性测试存档损坏订单，确认原始托管数据仍保留。
+
+## 相关页面
+
+[蓝图数据](/zh-cn/wiki/blueprint-data/)、[蓝图研究](/zh-cn/wiki/blueprints/)与[铁匠委托](/zh-cn/wiki/blacksmith-commissions/)。

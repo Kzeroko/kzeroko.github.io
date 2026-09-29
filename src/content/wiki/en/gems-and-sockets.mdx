@@ -1,176 +1,110 @@
 ---
-title: "Gems & sockets"
-description: "Socket kinds, the insertion pity system, cracked and sealed sockets, the consumable list, combat procs and curses."
+title: "Gems and sockets"
+description: "Choose compatible gems, manage insertion strain, repair cracks and use socketed combat skills."
 category: crafting
 order: 30
-updated: 2026-09-01
-tagline: "A bounded gamble with a memory — failures make the next attempt better."
-tags: ['crafting', 'gear', 'gems']
+updated: 2026-09-18
 ---
 
-Equipment receives sockets from its **socket profile**. Each socket accepts exactly one kind of gem, and the four kinds do genuinely different jobs.
+Gems add attributes, elemental damage or skills to equipment with compatible sockets. Each socket holds 1 gem. The item's socket profile sets its kinds and level requirements; a gem may also carry an equipment restriction.
 
-<Callout type="caution" title="Prototype">
-The gem system is a working prototype with one current schema. It does not migrate removed data shapes — when the implementation changes, bundled data changes with it in the same commit.
-</Callout>
+## What each socket provides
 
-## The four socket kinds
-
-| Socket | Takes |
+| Kind | Benefit |
 | --- | --- |
-| `ATTRIBUTE` | A rolled fusible gem with one to three random attribute lines |
-| `FIXED` | A named material gem with predefined bonuses |
-| `ELEMENT` | A combat proc dealing damage from a configured magic school |
-| `SKILL` | A passive proc, or a manually activated equipment skill |
+| `ATTRIBUTE` | Random attributes from a Fusible Gem. Bundled line-count weights are 80:17:3 for 1, 2 or 3 lines. |
+| `FIXED` | Predefined attribute bonuses, sometimes scaled by the gem's loot difficulty. |
+| `ELEMENT` | Damage from a configured spell school on a combat trigger. |
+| `SKILL` | A skill triggered by combat or manual equipment-skill activation. |
 
-Socket rules can narrow this further — restricting stat domains, damage categories, magic schools, specific skills, or a minimum item level. **A gem must satisfy every restriction on its socket**, not just the kind.
+Random and fixed gems must fit the allowed stat domains and damage categories. Element gems must fit the school and damage categories; skill gems must fit the allowed skill list. All random lines must qualify. A random gem's “Applicable to” restriction must also match the equipment, including after insertion.
 
-## Inserting
+## Inserting a gem
 
-Put a compatible gem on the cursor and use it on socketed equipment. When more than one socket is available, a selection screen asks which one.
+Hold the gem on the cursor and left-click eligible equipment, then select the socket. The screen can open with only 1 eligible slot. A successful attempt consumes 1 gem; a failed attempt keeps it. Closing returns the remaining source stack.
 
-The bundled rules:
-
-| Rule | Value |
+| Bundled insertion rule | Value |
 | --- | --- |
-| Base success chance | 85% |
-| Maximum success chance | 95% |
-| Failure adds | 1 attunement strain |
-| Each strain point adds | +6 percentage points to the next attempt |
-| Success removes | 2 strain, floor 0 |
-| Failure may crack the socket | 20% |
-| Failure consumes the gem | no |
-| Success consumes the gem | yes |
+| Base chance | 85% |
+| Maximum chance | 95% |
+| Strain added on failure | 1 |
+| Chance bonus per strain | +6 percentage points |
+| Strain removed on success | 2, floor 0 |
+| Maximum stored strain | 10 |
+| Crack chance after failure | 20% |
 
-```text
-chance = min(success_cap, base_success + strain × bonus_per_strain)
-```
+Strain belongs to the equipment, shared by its sockets. Starting at 0 strain, the next chance is 85%, then 91% after 1 failure and 95% after 2 failures. More failures cannot exceed 95%. The 20% crack roll happens only after a failed insertion.
 
-<Callout type="tip" title="This is a bounded pity system">
-Failed attempts make later attempts better, but never make insertion certain. Five failures in a row take you from 85% to 95%, and there it stops.
-</Callout>
+Hold <kbd>Shift</kbd> on the equipment tooltip for strain, next chance, socket-state counts and curse details.
 
-## Locked, sealed and cracked
+## Locks, cracks and extraction
 
-A **locked** socket cannot accept, activate, reroll or release a gem. Two things lock one:
+A level lock lifts when the equipment meets the socket's required [equipment level](/en/wiki/leveling/). A seal is a separate persistent lock that Artificer's Lens can toggle on an empty, level-unlocked socket.
 
-- a **profile lock**, which lifts when the equipment reaches the socket's minimum item level;
-- a **persistent seal**, stored on the item, toggled by an Artificer's Lens while the socket is empty.
+Locked and cracked sockets cannot accept gems or provide gem attributes/procs. A cracked socket keeps any gem already inside. Cracks allow extraction; locks block it. Repair the crack with Kintsugi Resin before inserting again.
 
-A **cracked** socket is disabled: its attribute bonuses and combat procs stop applying, and nothing new can go in until Kintsugi Resin repairs it. A gem already inside a cracked socket stays there and can still be extracted.
-
-## Reading the tooltip
-
-The equipment tooltip always lists its socket rows, plus a "Hold Shift for socket details" hint. Holding <kbd>Shift</kbd> adds a footer with:
-
-- current and maximum attunement strain;
-- the next insertion chance;
-- locked and cracked socket counts;
-- any applied curse and its rolled multiplier.
-
-Element and skill gems show their trigger and cooldown. **Chance is only shown for random combat triggers** — manual skill activation is deterministic and has none.
-
-## Extraction
-
-| Tool | Behaviour |
+| Extraction tool | Result |
 | --- | --- |
-| Gem Cutter | Extracts the selected gem, 50% chance to shatter it |
-| Mythril Gem Cutter | Extracts safely |
-| Void Chisel | Consumable risky extraction |
-| Aetherial Calipers | Consumable safe extraction |
+| Gem Cutter | Selected gem has a 50% chance to shatter. |
+| Mythril Gem Cutter | Safe extraction. |
+| Void Chisel | Consumable extraction with 50% shatter chance. |
+| Aetherial Calipers | Consumable safe extraction. |
 
-Locked sockets block extraction. Cracked sockets do not.
+Cutters lose durability on use outside creative mode. Extraction leaves the socket's saved cooldown in place.
 
 ## Consumables
 
-Consumables are checked **before** any roll or item consumption. An inapplicable consumable does nothing and is not spent.
+Inapplicable consumables do nothing and are not spent. Bundled consumables use a certain action roll; Void Chisel's separate shatter roll still applies.
 
 | Item | Effect |
 | --- | --- |
-| Chaos Prism | Replaces every line and value on a random attribute gem |
-| Perfection Dust | Keeps the attributes and operations, rerolls their values |
-| Entropic Dodecahedron | Replaces the lines of a selected socketed random gem |
-| Void Chisel | Extracts a selected gem with a configured shatter risk |
-| Aetherial Calipers | Safely extracts a selected gem |
-| Artificer's Lens | Toggles an empty socket between sealed and open |
-| Mutating Clay | Changes an empty, open, healthy socket to another kind |
-| Blood-Pact Quill | Applies one configured curse to uncursed socketed equipment |
-| Hallowed Ash | Removes the equipment's curse |
-| Kintsugi Resin | Repairs a selected cracked socket |
-| Harmonic Oil | Reduces attunement strain |
+| Chaos Prism | Replaces random lines, values and equipment restriction. |
+| Perfection Dust | Keeps attributes, operations and restriction; rerolls values. |
+| Entropic Dodecahedron | Rerolls the selected socketed random gem, including its restriction. |
+| Void Chisel | Extracts a gem with 50% shatter chance. |
+| Aetherial Calipers | Extracts safely. |
+| Artificer's Lens | Toggles the seal on an empty socket after its level unlock. |
+| Mutating Clay | Changes an empty, unlocked, uncracked socket to another kind. |
+| Blood-Pact Quill | Binds a random configured curse to uncursed equipment. |
+| Hallowed Ash | Removes the bound curse. |
+| Kintsugi Resin | Repairs a cracked socket after its level unlock; sealing does not block repair. |
+| Harmonic Oil | Removes 1 strain, to a minimum of 0. |
 
-Rerolling keeps a gem's stored difficulty context, so a gem found in a hard place still counts as one afterwards.
+Rerolls keep the stored difficulty context and reapply its scaling from unscaled base values. Replacing lines can also change the gem's equipment restriction. Reducing strain with Harmonic Oil reduces the insertion bonus that strain supplied.
 
-## Combat triggers
+## Combat and manual skills
 
-| Trigger | Fires on |
+| Trigger | Equipment scanned |
 | --- | --- |
-| `MELEE_HIT` | Landing a melee hit |
-| `RANGED_HIT` | Landing a ranged hit |
-| `MAGIC_HIT` | Landing a spell hit |
-| `ON_HURT` | Taking damage |
-| `ON_KILL` | Killing a target |
-| `TRIGGERABLE` | Manual activation — **skill gems only** |
+| `MELEE_HIT`, `RANGED_HIT`, `MAGIC_HIT` | Attacker's hands for the matching damage category. |
+| `ON_KILL` | Killer's hands. |
+| `ON_HURT` | Defender's armour and both hands. |
+| `TRIGGERABLE` | Manual skill search: main hand, offhand, head, chest, legs, feet. |
 
-Element gems cannot use `TRIGGERABLE`. A manual skill gem uses its equipment-skill key, energy cost, per-socket cooldown and equipment search priority.
+Combat proc scans do not include trinkets. Skill gems require a player and can cost astral energy. Each socket has its own cooldown. Element gems cannot use `TRIGGERABLE`.
+
+Manual activation is deterministic once its cooldown and energy checks pass. It selects the first compatible gem in the listed order, then the first socket. If that gem is cooling down or unaffordable, it does not skip ahead. See [Equipment skills](/en/wiki/equipment-skills/) for activation controls.
 
 ## Curses
 
-One curse can be bound to an equipment stack, its strength rolled inside the curse definition's multiplier range. Bundled downside types:
-
-- negative attribute modifiers;
-- recurring harmful status effects;
-- increased incoming damage.
-
-Curse effects are collected from armour, both hands, and equipped trinkets. The tooltip shows the curse and its rolled multiplier.
+Equipment can carry 1 bound curse. Its stored strength scales the curse's attribute penalties, status duration or incoming-damage bonus. Curse status and damage effects collect from armour, both hands and trinkets; their scan is broader than combat gem procs. Hallowed Ash removes the bound curse.
 
 ## Bundled socket progression
 
-Profiles are evaluated highest priority first; the first match wins.
+The first matching profile wins: higher priority first, then profile ID. This table shows the bundled profiles, so custom packs and overlapping item tags can change the result.
 
-| Equipment group | Socket progression |
+| Equipment group | Kind and minimum equipment level |
 | --- | --- |
-| Relics | Attribute at 0 |
-| Armour | Attribute at 0, Fixed at 10 |
-| Shields | Fixed at 0, Attribute at 10 |
-| IsekaiCore shields | Attribute at 0 and 10 |
-| Melee weapons | Attribute at 0 and 10, melee Element at 20 |
-| Ranged weapons | Attribute at 0 and 10, ranged Element at 20 |
-| Wands and staves | Attribute at 0, magic Element at 10, Skill at 20 |
-| Tools | Attribute at 0 |
-| Origami Amanoyozakura | Attribute at 0, Skill at 20 |
+| Eligible relic/trinket tags | `ATTRIBUTE` at 0; the profile excludes parachutes, Create goggles, Backpacked backpacks and lanterns. |
+| Armour | `ATTRIBUTE` at 0, `FIXED` at 10. |
+| Shields | `FIXED` at 0, `ATTRIBUTE` at 10. |
+| IsekaiCore shields | `ATTRIBUTE` at 0 and 10. |
+| Melee weapons | `ATTRIBUTE` at 0 and 10, melee `ELEMENT` at 20. |
+| Ranged weapons | `ATTRIBUTE` at 0 and 10, ranged `ELEMENT` at 20. |
+| Wands and staves | `ATTRIBUTE` at 0, magic `ELEMENT` at 10, `SKILL` at 20. |
+| Tools | `ATTRIBUTE` at 0. |
+| `isekaiexpansion:origami_amanoyozakura` | `ATTRIBUTE` at 0, `SKILL` at 20. |
 
-The numbers are [equipment levels](/en/wiki/leveling/). This is the concrete reason to commit to one weapon: a wand only reaches its Skill socket at equipment level 20.
+## Where the data lives
 
-## For datapack authors
-
-All paths sit under `data/isekaiexpansion/`:
-
-```text
-gem_system/settings.json
-gem_attributes/random_roll/*.json
-gem_attributes/fixed_attributes/*.json
-gem_attributes/element_attributes/*.json
-gem_attributes/skill_attributes/*.json
-socket_profiles/*.json
-curses/*.json
-gem_consumables/*.json
-```
-
-Reloads are **all or nothing**: every gem resource is validated together, and one invalid resource voids the whole reload while the previous configuration stays active. Once validation passes, the complete configuration is sent to every client.
-
-### Cross-mod definitions
-
-Every gem JSON resource supports Fabric's standard `fabric:load_conditions`. Use a load condition rather than registering substitute items or weakening registry validation:
-
-```json
-"fabric:load_conditions": [
-  { "condition": "fabric:all_mods_loaded", "values": ["jewelry"] }
-]
-```
-
-A resource whose conditions do not match is intentionally excluded. If the required mod *is* loaded, every referenced item and registry entry is still validated strictly. The bundled Citrine, Jade, Ruby, Sapphire, Tanzanite and Topaz fixed gems are Jewelry compatibility and load only with the `jewelry` mod present.
-
-### Localisation
-
-Gem strings belong only in `language_assemble/categories/gem/en_us.json` and `…/zh_cn.json`. The assembly task rejects duplicate keys across categories, so a similarly named non-gem item — `gem_ofcursedocean`, for instance — stays in its own category.
+The rules come from `gem_system`, `gem_attributes`, `socket_profiles`, `curses` and `gem_consumables` data resources. [Gem data](/en/wiki/gem-data/) documents every field, conditional compatibility, validation and reload behaviour.

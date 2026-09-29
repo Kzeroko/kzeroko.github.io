@@ -1,0 +1,174 @@
+---
+title: "Particlize"
+description: "把实体溶解成碎片的组合／分解特效：配置 JSON、它接受的每一个字段、继承怎么解析，以及客户端预算。"
+category: client
+order: 30
+updated: 2026-09-18
+tagline: "把实体打散成碎片，以及决定它长什么样的那份 JSON。"
+tags: ['特效', 'particlize', '着色器', '资源包']
+---
+
+Particlize 拿实体已经渲染出来的模型，把它打散成碎片，或者反过来从碎片拼起来。具体长什么样由一份配置决定：播多久、溶解边缘什么颜色、飞出多少碎片、离远了还剩多少。配置是资源包 JSON，所以调一个特效不需要动代码。哪个时刻播哪一个，在 [实体特效](/zh-cn/dev/entity-fx/)。
+
+## 文件放在哪里
+
+```
+assets/<命名空间>/particlize_fx/<名称>.json
+```
+
+一个文件就是一份配置，它的标识符是 `<命名空间>:<名称>`。内置的那一套在 `assets/isekaiexpansion/particlize_fx/` 下，共十二个文件，其中 `base.json` 是其它配置共同继承的那一份。
+
+因为它们属于资源（assets）而不是数据（data），资源包覆盖一份配置的方式和覆盖一张贴图一样：列表里靠前的包整份文件胜出，包与包之间不会按字段合并。配置内部的继承是另一套机制，见下面。
+
+## 最小示例
+
+每个字段都有内置默认值，所以能被接受的最小文件就是 `{}`。而真正有用的最小文件是继承一份再改一处：
+
+```json
+{
+  "extends": "isekaiexpansion:base",
+  "surface": {
+    "tint": "#7FE6FFFF"
+  }
+}
+```
+
+`extends` 用标识符指向另一份配置。父配置的 JSON 会先和这份文件深度合并，然后才开始解析：嵌套对象逐键合并，这里出现过的键覆盖父配置的。所以上面这个例子保留了 `base` 里其余全部的 surface 设置。
+
+继承可以串多少层都行，成环会被检测出来并报告，而不是卡死。
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `extends` | identifier | 不继承 | 要继承的配置，在解析之前深度合并。目标不存在会让这份配置失败。 |
+| `timeline` | object | 内置默认值 | 特效什么时候开始、播多久。 |
+| `surface` | object | 内置默认值 | 作用在实体自己几何体上的那一道溶解。 |
+| `shards` | object | 内置默认值 | 溶解过程中甩出去的散碎粒子。 |
+| `lod` | object | 内置默认值 | 距离阈值与复杂度预算。 |
+
+这四个对象互相独立。省掉哪个，哪个就整体取默认值；写了哪个，就只有你写出来的键会变，其余的仍然沿用默认值或父配置的值。
+
+### `timeline`
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `duration_ticks` | integer | `32` | 溶解的长度，夹在 `1…1200`。 |
+| `delay_ticks` | integer | `0` | 开始渲染前先等多久，夹在 `0…1200`。用来和起手动作对齐。 |
+| `hold_ticks` | integer | `8` | 结束状态在屏幕上再停留多久，夹在 `0…1200`。 |
+| `easing` | enum | `smoother_step` | 作用在进度上的曲线：`linear`、`smooth_step`、`smoother_step`、`quad_in`、`quad_out`。写了认不出来的名字会静默变成 `smoother_step`。 |
+
+### `surface`
+
+溶解本身——作用在实体自己几何体上的那一道着色器。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `shape` | enum | `plane` | 溶解扫过时用的遮罩：`plane`、`sphere`、`cylinder`、`box`、`noise`。认不出来的名字变成 `plane`。 |
+| `direction` | `array<number>` | `[0.0, 1.0, 0.0]` | 扫过的方向，加载时会归一化。长度为零的向量变成正上方。 |
+| `tint` | colour | `#B873FFFF` | 铺在溶解表面上的颜色，格式 `#RRGGBBAA`。 |
+| `tint_strength` | number | `0.22` | `tint` 有多少真的铺到表面上，`0.0…1.0`。 |
+| `edge_color` | colour | `#7629FFFF` | 正在推进的那条溶解边缘的颜色。 |
+| `edge_width` | number | `0.13` | 这条边缘的厚度，`0.001…1.0`。不能为零——没有厚度的边缘会渲染成一条硬接缝。 |
+| `emission` | number | `0.85` | 边缘的自发光亮度，`0.0…4.0`。超过 `1.0` 会过曝，做魔法效果时正是要这个。 |
+| `noise_scale` | number | `5.5` | 溶解噪声的频率，`0.01…128.0`。越高颗粒越细。 |
+| `noise_strength` | number | `0.16` | 这份噪声把边缘扰动多少，`0.0…1.0`。 |
+| `cell_scale` | number | `14.0` | 碎裂单元的大小，`1.0…128.0`。越高碎块越多越小。 |
+| `shatter` | number | `0.18` | 表面按这些单元碎裂得有多厉害，`0.0…1.0`。 |
+| `displacement` | number | `0.025` | 碎块离开模型多远，`0.0…2.0`，单位是格。 |
+| `bounds_padding` | number | `0.06` | 额外的渲染包围盒，免得飘出去的碎块被剔除，`0.0…1.0`。特效在边缘被切掉时调大它。 |
+
+### `shards`
+
+溶解过程中甩出去的那些散碎粒子。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | 填 `false` 就只渲染表面那一道。客户端配置也能全局关掉碎片。 |
+| `color` | colour | `#B873FFE6` | 碎片颜色，含透明度。 |
+| `count` | integer | `84` | 近距离时的碎片数量，夹在 `0…512`。 |
+| `far_count` | integer | `24` | 超过 `lod.far_distance` 之后的数量，夹在 `0…count`——比 `count` 大的值会被降到 `count`，反过来不会。 |
+| `size` | number | `0.035` | 碎片大小，单位是格，`0.002…1.0`。 |
+| `size_variance` | number | `0.55` | 围绕 `size` 的随机浮动，`0.0…1.0`。 |
+| `speed` | number | `0.55` | 初始向外的速度，`0.0…4.0`。 |
+| `spread` | number | `0.45` | 初始散射的锥角宽度，`0.0…4.0`。 |
+| `gravity` | number | `0.015` | 向下的牵引，`-1.0…1.0`。负值会让碎片往上飘。 |
+| `lifetime_ticks` | integer | `14` | 一个碎片活多久，`1…1200`。 |
+
+### `lod`
+
+距离与复杂度预算。混战时还能不能玩，靠的就是这几个字段。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `near_distance` | number | `24.0` | 这个半径以内保持完整质量，`1.0…512.0` 格。 |
+| `far_distance` | number | `56.0` | 超过之后降质量；不会小于 `near_distance`。 |
+| `max_distance` | number | `96.0` | 超过之后完全不渲染；不会小于 `far_distance`。 |
+| `complex_model_vertices` | integer | `6000` | 顶点数超过它就按复杂模型处理，`256…1000000`。 |
+| `extreme_model_vertices` | integer | `18000` | 再超过它就走最省的路径；不会小于 `complex_model_vertices`。 |
+| `fallback_high_subdivisions` | integer | `8` | 靠近镜头时后备网格的细分级别，`1…12`。 |
+| `fallback_medium_subdivisions` | integer | `5` | 中距离级别；不会高于 `fallback_high_subdivisions`。 |
+| `fallback_low_subdivisions` | integer | `3` | 远距离级别；不会高于 `fallback_medium_subdivisions`。 |
+
+三个距离和三个细分级别都是按顺序依次夹的，所以一份配置不可能描述出比近距离还近的远距离，也不可能让低级别比高级别更精细。按常理顺序写，这些钳制就永远不会触发。
+
+## 校验
+
+这里没有任何东西会抛到玩家脸上。
+
+- **格式错误或解析不了的配置**会打一条警告日志、点名是哪份资源，然后只丢掉这一份。其余配置照常加载。
+- **`extends` 指向了不存在的配置**同样只让这一份失败，日志里是 `Unknown inherited profile`。
+- **`extends` 成环**会在解析时被检测到，并把整条路径打进日志，而不是一路递归到客户端崩溃。
+- **超范围的数值**会被钳制，而不是拒绝。`count` 写 `9999` 会变成 `512`，游戏里不会有任何提示——日志只记加载失败，不记钳制。
+- **非有限的数值**会退回到它那一项范围的下限。
+- **认不出来的枚举名**会退回：`shape` 退到 `plane`，`easing` 退到 `smoother_step`。大小写和前后空格都不影响。
+- **一份配置都没加载成功时**，注册表会保留一条——`arcane_pulse` 指向内置默认值——这样渲染器总有东西可用，而不是对着空表崩掉。
+
+拿一个注册表里没有的标识符去问，返回的是空。这该由调用方自己处理，而不是偷偷换一份给它。
+
+## 重载
+
+`ParticlizeProfileRegistry` 是客户端资源重载监听器，所以 F3+T 以及任何资源包变化都会重载配置。解析在别的线程上做，解析完的映射整体原子替换，所以正在播的特效会用它开始时那份配置播完。
+
+配置本身完全不过网络。服务端只发要播哪个配置 ID，客户端用自己的资源包去解析。两个玩家装了不同资源包，就应该看到不同的效果。
+
+## 播放一份配置
+
+服务端这边，由 `ParticlizeFxBroadcaster` 决定谁能看到：
+
+| 方法 | 谁能看到 |
+| --- | --- |
+| `playTracking(target, profileId, mode, …)` | 所有正在追踪该实体的玩家。返回一个特效 ID。 |
+| `playTrackingObservers(…)` | 追踪者，外加一个显式的观察者过滤。 |
+| `playNearby(entity, profileId, mode, seed, priority, radius)` | 实体 `radius` 以内的所有人。 |
+| `playFor(…)` | 指定的某一个玩家。 |
+| `cancelTracking(target, effectId)` | 用 `playTracking` 返回的 ID 停掉正在播的特效。 |
+| `clearFor(viewer)` | 清掉某个玩家排队中的全部特效，用于登出和切维度。 |
+
+`seed` 参数让一次散射可复现：同一个种子在每个客户端上产生同样的碎片分布。两个玩家对录像时这很重要，其余时候无所谓。
+
+`ParticlizeMode` 有 `DECOMPOSE`、`COMPOSE`、`PULSE`。`ParticlizePriority` 有 `AMBIENT`、`NORMAL`、`IMPORTANT`、`CRITICAL`，决定客户端超预算时哪些能留下来。
+
+客户端这边，`ParticlizeFx` 在本地启动一个特效，并返回一个可以用来取消它的 `ParticlizeHandle`。只在纯装饰、纯本地的场合用它；任何别的玩家也该看到的效果都走广播器。
+
+## 客户端配置
+
+在 `config/isekaiexpansion.json` 的 `particlize_fx` 分类下。全部是客户端设置，服务端不会强制。
+
+| 选项 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `enableParticlizeFx` | boolean | `true` | 填 `false` 就在这台客户端上关掉全部 particlize 效果。 |
+| `particlizeFxShards` | boolean | `true` | 填 `false` 保留表面溶解，去掉散碎粒子。 |
+| `particlizeFxRenderDistance` | integer | `128` | 硬上限，单位是格，`8…256`。叠在每份配置的 `lod.max_distance` 之上，取两者中更小的。 |
+| `particlizeFxShaderCrowdThreshold` | integer | `4` | 同时有多少个走着色器路径的特效之后开始降级，`1…16`。 |
+| `particlizeFxNativeCrowdThreshold` | integer | `8` | 更省的原生路径上的同一个限制，`1…32`。 |
+| `particlizeFxMaxShardsPerFrame` | integer | `1024` | 一帧最多画多少碎片，`128…2048`。要得比这多的配置会被削，按优先级先削。 |
+
+<Callout type="note" title="配置只是申请，决定权在客户端">
+一份配置的 `count` 和 `lod` 都只是申请。几个特效叠在一起时，拥挤阈值和每帧碎片上限会盖过它们——而那正是一份配置看起来最贵的时候。单独调完一份配置之后，再放五个到屏幕上看一次。
+</Callout>
+
+## 相关页面
+
+- [实体特效](/zh-cn/dev/entity-fx/)——死亡、传送、重生分别播哪一份配置。
+- [Effekseer 粒子](/zh-cn/dev/effekseer-particles/)——另一套特效系统，做的是制作好的发射器，而不是实体溶解。

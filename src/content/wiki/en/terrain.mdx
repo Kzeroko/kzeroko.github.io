@@ -1,0 +1,81 @@
+---
+title: "Terrain and landmarks"
+description: "KTM2's terrain families, the unique World Tree, atmosphere and operator location commands."
+category: world
+order: 176
+updated: 2026-09-26
+---
+
+KTM2 combines a bundled ReTerraForged landscape with `20` custom terrain families. Mountains, settlement plains, a saved World Tree and exotic districts share the Overworld, with placement constrained by the original geography.
+
+## What you can find
+
+| Family and ID | Visible features |
+| --- | --- |
+| Halo Crown — `isekaiexpansion:halo_crown` | Layered mountains supporting a complete stone ring. |
+| Sentinel Isles — `isekaiexpansion:sentinel_isles` | Ocean islands with tall stone pillars. |
+| Verdant Knives — `isekaiexpansion:verdant_knives` | Separated blade-shaped ridges in mountain terrain. |
+| Amber Basin — `isekaiexpansion:amber_basin` | Excavated highland basin with terraces and sparse needles. |
+| Great Plains — `isekaiexpansion:great_plains` | Broad prepared settlement ground with a gently varying core. |
+| World Tree — `isekaiexpansion:world_tree` | The unique reserved tree and its central woodland. |
+| Luminous Grove — `isekaiexpansion:luminous_grove` | Denser woodland around the World Tree. |
+| Starlit Glade — `isekaiexpansion:starlit_glade` | More open woodland around the same landmark. |
+| Prismatic Barrens — `isekaiexpansion:crystal_land` | Crystal outcrops, a water channel and local atmospheric flashes. |
+| Skyreach Archipelago — `isekaiexpansion:giant_sky_land` | Suspended islands, connecting routes, lakes and groves above the original ground. |
+| Aquapolis Cataracts — `isekaiexpansion:aquapolis` | Raised limestone bastions, reservoirs, spillways, bridges and domed structures. |
+| Evernight Aurora Tundra — `isekaiexpansion:evernight_tundra` | Frozen terrain, branching chasms, fossils and a local aurora sky. |
+| Abyssal Volcano — `isekaiexpansion:abyssal_volcano` | Asymmetric tapered massif, a breached summit crater, tilted basalt fins and lava channels feeding irregular lower basins. |
+| Garden of the Firmament — `isekaiexpansion:garden_of_the_firmament` | Branching stone pillars supporting green plateaus, connecting bridges and tiered waterfalls. |
+| Giant Stone Valley — `isekaiexpansion:giant_stone_valley` | Dry winding valley framed by broad tilted slab arches, broken formations and terraced escarpments. |
+| Riftborne Monolith — `isekaiexpansion:riftborne_monolith` | A colossal floating monolith above a broken pedestal, surrounded by smaller fragments and enclosing ridges. |
+| Infernal Deep Cavern — `isekaiexpansion:infernal_deep_cavern` | Basalt chamber with stalactites, lava channels and descending dry terraces. |
+| Sunken Azure Grotto — `isekaiexpansion:sunken_azure_grotto` | Turquoise pools, mossy terraces, waterfalls and scattered masonry remnants. |
+| Viridian Toxic Depths — `isekaiexpansion:viridian_toxic_depths` | Irregular green pools separated by dry ridges and stone crossings. |
+| Worldroot Hollow — `isekaiexpansion:worldroot_hollow` | Braided giant roots, elevated root paths and organic growths within a stone cavern. |
+
+The exotic family IDs are category identities for location commands. Generated exotic biomes use palette names: `isekaiexpansion:crystal_land_amethyst` (Amethyst Barrens), `isekaiexpansion:aquapolis_calcite` (Whitewater Aquapolis) and `isekaiexpansion:evernight_tundra_boreal` (Boreal Ossuary). The default sky palette creates Skyreach Highlands, Skyreach Groves and Skyreach Lake Gardens under `giant_sky_land_verdant`, `giant_sky_land_verdant_grove` and `giant_sky_land_verdant_wetland`, all in the `isekaiexpansion` namespace.
+
+The additional default palette IDs are `isekaiexpansion:abyssal_volcano_basalt`, `isekaiexpansion:garden_of_the_firmament_verdant`, `isekaiexpansion:giant_stone_valley_weathered`, `isekaiexpansion:riftborne_monolith_riftstone`, `isekaiexpansion:infernal_deep_cavern_basalt`, `isekaiexpansion:sunken_azure_grotto_azure`, `isekaiexpansion:viridian_toxic_depths_viridian`, `isekaiexpansion:worldroot_hollow_ancient`.
+
+## World creation and placement
+
+The default world preset uses KTM2 automatically; the customisation screen is a read-only view, not an activation step. Dedicated-server dimension creation also selects this default. Turning off custom terrain does not restore an unrelated world preset.
+
+District selection is deterministic for a seed and configuration, but a placement roll is not a promise that every grid cell contains a landmark. Complete shapes must fit permitted geography and available height without colliding with reserved plains or the World Tree. Sentinel Isles seek oceans, Verdant Knives seek mountains, and Amber Basin seeks high ground; most surface exotic districts require comparatively level inland sites. Abyssal Volcano also accepts inland highlands, subject to the full-caldera and build-height checks. Underground families instead seek high ground, keep the original surface height and carve sealed chambers beneath continuous rock cover.
+
+Skyreach, Firmament and Riftborne keep the underlying ground-height system intact. Riftborne’s detached rock stays at its own altitude during biome blending, above its shaped valley and pedestal. Firmament has grassy caps over soil, with complete waterfalls descending to receiving pools. Exotic lakes vary in orientation, shoreline and depth. Within owned exotic terrain, vanilla cave biomes such as Deep Dark give way to the exotic biome; underground ownership is limited to the chamber and its surrounding buffer. Outside owned terrain, biome selection falls back to the original source.
+
+## The World Tree and Great Plains
+
+The World Tree reserves one site and stores its coordinates, branching design and extent. On an existing world without a reservation, selection is moved beyond existing Overworld region files before searching. Restarting restores the saved reservation; changing search settings does not move it. An invalid saved reservation or one that no longer fits the build height stops attachment instead of silently selecting a new tree.
+
+Great Plains use a separate planner and a buildable core that can shrink when the preferred size does not fit. Their centre varies gently rather than becoming a mathematically flat platform. Both kinds of reserved landscape take precedence over ordinary districts.
+
+## Local skies and other systems
+
+| Interaction | Behaviour |
+| --- | --- |
+| Crystal atmosphere | Client flashes and delayed thunder use local biome blending; they do not change global weather. |
+| Evernight atmosphere | Dark sky and aurora are presentation effects; the server's world time is unchanged. |
+| No active shader pack | A fallback dome, aurora and crystal flash render when visibility allows. Foggy/submerged views suppress that overlay. |
+| Active Iris shader pack | The fallback is suppressed. The automatic overlay recognises compatible Eclipse/Bliss source layouts; an unsupported layout retains its original sources. |
+| New surface atmospheres | Volcanic ember haze, pale highland light and cloud shelves, dusty valley light, and cold rift haze blend across biome edges in supported shader packs. |
+| Cavern atmospheres | Infernal warmth, azure water light, green low mist and muted root glow use the same shader overlay. |
+| Toxic pools | With the default setting, water contact in Viridian Toxic Depths applies Poison to survival/adventure players. Creative and spectator players are excluded; `viridianToxicDepths.toxicWater` disables this behaviour. |
+| Shader preference | `autoPatchExoticShaders` is local. A compatible overlay is applied in memory when the pack loads, without rewriting the pack. |
+| Configuration | The server owns generation and synchronises terrain presentation settings at login through IsekaiCore `0.4.0-build60`. Already generated chunks are not rebuilt by a config edit. |
+
+## Finding a landmark
+
+Operator commands require permission level `2`. The short root `/ise` is equivalent to `/isekaiexpansion`.
+
+| Command | Result |
+| --- | --- |
+| `/ise terrain locate <family> [radius]` | Searches a family from the table. Radius defaults to `64000`, allowed range `1024–64000`; the search excludes positions within `512` blocks of the origin. |
+| `/ise terrain landmark world_tree` | Reports the saved/planned World Tree anchor in an active KTM2 Overworld. |
+
+Location search uses terrain descriptors and verifies the biome without generating target chunks. It can return no match within the limit. The coordinate suggestion preserves current Y with `~`; it is not a safe-arrival teleport. See [wayfinding](/en/wiki/wayfinding/) for search lifecycle and result handling.
+
+## Where the data lives
+
+Server options and all palette defaults are documented in [terrain configuration](/en/wiki/terrain-configuration/). The packaged preset lives at `data/isekaiexpansion/terrain/ktm2.json`; [terrain generation](/en/dev/terrain-generation/) covers its implementation, persistence and shader integration.

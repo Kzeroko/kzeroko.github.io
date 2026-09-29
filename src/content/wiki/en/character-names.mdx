@@ -1,0 +1,66 @@
+---
+title: "Character names"
+description: "Choose a translated fantasy name for your character and meet named citizens, adventurers and merchants."
+category: core
+order: 35
+updated: 2026-09-26
+---
+
+The name catalogue contains complete fantasy names in English and Simplified Chinese. You can choose a preset during the first character-creation step or enter your own name. Generated NPCs draw from the same traditions.
+
+## Naming traditions
+
+These are fixed full names, including family names. Different entries can share a given name; NPC names are not globally unique.
+
+| Tradition | Default selection |
+| --- | --- |
+| Otherworld — Western | Fallback for humans and unmatched identities. |
+| Elven — Silvergrove | Elves. |
+| Dwarven — Emberhall | Dwarves. |
+| Beastfolk — Free Marches | Felines. |
+| Draconic — Ashen Peaks | Dragons and the advanced dragon branches. |
+| Fae — Dreamgarden | Slimes and winged spirits. |
+| Maritime — Pearl Isles | Mermaids. |
+| Nocturne — Velvet Court | Demons. |
+| Yamato — Moonlit Provinces | Yamato culture; also kitsune and oni without a cultural override. |
+| Donghuang — Jade Rivers | Donghuang culture. |
+
+Culture takes precedence over the default for a race. A kitsune from Donghuang uses Donghuang names; one from Yamato uses Yamato names. Content can define a more specific race-and-culture combination.
+
+## Choosing your name
+
+In the **Basics** chapter, use **Find your name** to choose a tradition and a feminine, masculine or neutral name style. The initial style follows the character's gender; choosing a name does not change gender or race. **For my character** uses the race currently available to the creator. Before origin selection, it uses the Western fallback.
+
+Search checks the displayed name and its Roman-letter identifier. Each page shows at most 8 names. **Surprise me** selects from all current search results, including other pages. You can edit the name field at any time; typing changes the selection into a custom name.
+
+Presets display in each viewer's language. A typed name remains the text you entered, with a limit of 48 UTF-16 units and no formatting or control characters. The display-name toggle lets you show your account name while retaining a chosen character name. Account identity, commands and permissions still use the account name.
+
+The nameplate above your character and the status screen use this selection too. A registered guild card shows its loaded owner's current name when inspected, including renames after registration; when the owner is not loaded, it shows the translated name saved at registration. The card shows a rounded head-and-shoulders photograph of its owner. A loaded owner uses their customised character and equipment; an unloaded owner uses a three-dimensional account-skin stand-in. The photograph is a still with open eyes; it follows the card tilt and refreshes when the card is reopened. Cards from the earlier prototype format need to be registered again.
+
+Supporter arrival and departure announcements use the current character name, with presets translated for each viewer. An arrival uses the name saved before joining; if no character name has been chosen yet, it uses the account name.
+
+## Resetting an option
+
+The small curved-arrow control restores its adjacent option to the default. Sliders return to their marked default, parts return to the compatible gender/race default, and the colour reset affects the selected channel or linked group. The name reset clears the character name and restores account-name display.
+
+Resets enter the same undo history as other edits. **Revert** still returns to the profile held when the editor opened; it does not replace the profile with factory defaults.
+
+## NPC names
+
+Unnamed non-unique IsekaiExpansion NPCs receive names when they load. Villagers and wandering traders are included by default. Guard Villagers support uses an optional entity-type tag entry, so that third-party mod is not required.
+
+Unique characters and existing custom names keep their names. Brokers and guild receptionists use the format **name · job**. Naming does not run every tick or rename an NPC when its culture changes. Once assigned, its translated name is stored with the entity and survives reloading.
+
+Dialogue shows the NPC's role or type until they trust you. At Trust, the speaker heading and `{name}` token reveal the full name, including a saved job suffix. The relationship is checked for each player when the conversation opens; being an allegiance owner alone does not reveal the name. Villagers and other NPCs without a trust integration keep their role label. Unique characters use a role label too: Evelina is introduced as Magic Caster.
+
+This affects dialogue presentation. It does not rename the entity or hide world nameplates.
+
+## Settings and content
+
+The server's naming settings control automatic assignment, villagers, tagged third-party NPCs, utility job suffixes and player presets independently. Disabling automatic assignment leaves existing names in place; typed player names remain available when presets are disabled.
+
+Expansion's **Supporter announcements** settings control arrival and departure broadcasts, action-bar display, your own arrival message and the arrival chime. They are server-controlled. Your own arrival appears once when enabled; departure messages go only to remaining connected players and play no sound. These settings now belong to Expansion; Core continues to determine supporter eligibility.
+
+The complete catalogue stays in the game resources. This guide describes its traditions and behaviour, without reproducing the name lists or maintaining a changing census.
+
+Pool definitions, translations and entity tags are described in [Name pool data](/en/wiki/name-pools/). Character appearance uses [Humanoid and NPC presets](/en/wiki/humanoid-presets/).

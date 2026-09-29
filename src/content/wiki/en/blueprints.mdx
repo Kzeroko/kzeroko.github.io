@@ -1,47 +1,56 @@
 ---
 title: "Blueprint research"
-description: "Turning a finished artifact into a reconstructable plan — discovery, evidence, transcription, and why progress lives on the paper."
+description: "Discover a plan, transcribe evidence and carry its research into forging."
 category: crafting
 order: 20
-updated: 2026-09-01
-tagline: "The plan is the item. Progress travels with it."
-tags: ['crafting', 'research', 'blueprints']
+updated: 2026-09-19
 ---
 
-Blueprint research is how an unknown [forgery](/en/wiki/forgery/) recipe becomes a known one. You take something finished, take it apart on paper, and fill in what you do not yet understand.
+A blueprint stores its own discovery and research. Give the paper to another player, put it in a chest or save and reload: its recorded progress travels with the item.
 
-Research progress is stored **on nothing but the blueprint itself** — not on the player, the team, the world or the server save.
+## What research unlocks
 
-<Callout type="tip" title="Why that matters">
-A half-researched blueprint can be dropped, traded, stored in a chest or left inside a block entity without losing its history. Research is a tradeable good rather than a personal unlock, which changes a lot on a multiplayer server.
-</Callout>
+| State | What you can do |
+| --- | --- |
+| Empty | Discover a supported reference item held in the opposite hand. |
+| Unidentified | Transcribe evidence into its required knowledge domains. |
+| Revealed | View the recipe, bind it to a forgery anvil or request a blacksmith commission. |
 
-## The loop
+A revealed plan does not grant a permanent player unlock. Keep the blueprint for [forgery](/en/wiki/forgery/) or [commissioning](/en/wiki/blacksmith-commissions/).
 
-<Steps>
+## Discover and transcribe
 
-1. Hold an **empty blueprint** in one hand.
+1. Hold an empty `isekaiexpansion:blueprint` in one hand and a supported reference item in the other. Use the blueprint.
+2. Discovery consumes the definition's reference count and binds the sheet to that blueprint.
+3. Open the unidentified plan and choose an unfinished knowledge domain. Its evidence comes from the main inventory, including the hotbar.
+4. Transcribe. The server checks the currently held blueprint and evidence again, consumes the full source count and adds insight up to the domain's requirement.
+5. Complete every domain to reveal the plan. Use it normally to view the recipe, or sneak while using it to return to the research view.
 
-2. Hold a **supported finished artifact** in the other, and use the blueprint. The artifact is consumed and the blank sheet becomes an unidentified draft.
+Evidence sources have an authored priority: the first source with a sufficient stack wins, then the first matching main-inventory slot. The system does not combine partial stacks or search the offhand for evidence. It does not choose the most efficient source automatically.
 
-3. Open the draft. Every unresolved knowledge field shows a suitable **evidence item** from your inventory, its insight value, and how much is still needed.
+**Creative mode** still requires matching reference items and evidence counts, but does not consume them. **A completed domain** consumes no further evidence. **A final transcription** still consumes the full source count even when only part of its insight is needed.
 
-4. Press **Transcribe**. The blueprint and the evidence in your hands are rechecked, the declared amount is consumed, and the gained insight is written into that exact blueprint stack.
+### Bundled diamond-sword example
 
-5. When every field is complete, the blueprint **reveals** its identity and its forgery recipe.
+| Requirement | Insight | Example evidence |
+| --- | --- | --- |
+| `isekaiexpansion:metallurgy` | 24 | Iron ingot: 4 per item. |
+| `isekaiexpansion:weaponcraft` | 12 | Flint: 2 per item; iron sword: 12 per item. |
 
-6. Write the revealed blueprint to a forgery anvil and forge with the normal insert-and-strike flow.
+Discover this plan with a diamond sword. Evidence alternatives follow their configured priority, so an iron sword is not selected ahead of available flint. These are bundled values; a server data pack can change them.
 
-</Steps>
+## Using the plan at an anvil
 
-In Creative mode you still perform discovery and transcription, but reference artifacts and evidence are not consumed.
+An unrevealed plan cannot supply a recipe. A revealed plan must point to an available forgery recipe before an empty, unlocked anvil will accept it. Binding stores a copy on the anvil and consumes the held blueprint outside creative mode.
 
-## Behaviour you can rely on
+Sneak-use the anvil with an empty hand to retrieve a bound blueprint before any step or progress has started, provided no ingredients remain. After a step has advanced, that same interaction opens a read-only recipe review when the anvil contains no ingredients and forging is unfinished. It does not allow transcription against the stored item. Completed output takes priority over these interactions.
 
-- A mid-forge anvil can open a **read-only** snapshot of its own stored blueprint. The item remains the single source of blueprint data.
-- An unrevealed blueprint exposes **no** recipe to the anvil.
-- Old blueprint stacks carrying `BlueprintRecipeId` migrate to the matching datapack definition as already-revealed plans.
+## Changes to research data
 
-## For datapack authors
+Opening a bound plan refreshes its metadata and checks its saved progress against current requirements. A data pack can add requirements and make a previously revealed plan incomplete again. If its definition disappears, the bound sheet cannot be rediscovered as another plan automatically.
 
-Knowledge fields and blueprint definitions live under `data/<namespace>/knowledge` and `data/<namespace>/blueprints`. A revealed blueprint supplies the same recipe identifier the previous implementation used, so existing forgery recipes need no changes.
+Legacy items containing only `BlueprintRecipeId` are not migrated into revealed research plans by the current implementation.
+
+## Where the data lives
+
+Knowledge sources live in `data/<namespace>/knowledge/`; plans live in `data/<namespace>/blueprints/`. [Blueprint and knowledge data](/en/wiki/blueprint-data/) covers every field, validation and reload behaviour.

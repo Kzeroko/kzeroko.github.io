@@ -1,0 +1,220 @@
+---
+title: "Structure-space Runtime"
+description: "Property identity, acquisition, access checks, furniture surveys, persistence and client snapshots."
+category: systems
+order: 82
+updated: 2026-09-27
+---
+
+`net.kzeroko.isekaiexpansion.api.structurespace.StructureSpaceAPI` is the public facade for server-owned homes. It delegates to `internal.structurespace.StructureSpaceService`; storage is package-private, while `SpaceShape`, `SpaceEntry` and `HomePermission` are internal types exposed by the facade's current signatures.
+
+## What it does
+
+The subsystem owns property geometry, resident contracts, shared permissions, rest rewards and derived furniture surveys. Read [My Home](/en/wiki/my-home/) for gameplay and [structure-space data](/en/wiki/structure-space-data/) for every authoring field.
+
+The Property Registry UI exists, but this checkout opens it through `/ise dev structurespace`, an operator-level 2 command. It is not currently connected to a registrar NPC. `/ise home` is a player command and the status screen also opens the personal ledger. An integration opening the catalogue calls internal `OpenSpacesScreenPacket.send(player, group)`; there is no catalogue-opening method on the public facade.
+
+## Runtime model
+
+### Identity and geometry
+
+Each `ServerWorld` has a cached `StructureSpaceStorage`. A `SpaceKey` contains structure ID, group ID, immutable anchor position and room ID; the dimension is supplied separately by the world or snapshot. Room IDs match `[a-z0-9_./-]{1,64}`. `SpaceShape` defensively copies its boxes and exposes a union of inclusive regions, with limits of 16 regions, 128 blocks per envelope axis and 262144 summed region blocks. Its equality compares ordered coordinates, so reordering otherwise equivalent regions changes equality.
+
+The chunk index covers the declared regions. Point queries confirm actual region membership; gaps in the envelope are not property. Registration rejects intersections with another property's regions. Querying homes for a containing structure instead filters matching structure ID and envelope intersection with that structure; it is a catalogue query, not a point permission check. Outside a structure, that query falls back to the home containing the supplied position.
+
+`bind` offsets relative geometry, expires old renters and preserves the existing anchor's room/group identity. It uses the containing structure ID or `isekaiexpansion:authored_home`. Updating an existing identity retains residents and grants, replaces the definition and rebuilds the index. `register` accepts absolute geometry and returns immediately for an existing exact key, preserving runtime edits during regeneration.
+
+### Contracts and access
+
+Rental expiry uses `world.getTime()`, not time of day or wall-clock time. A rental is active strictly while its saved end exceeds now. The periodic sweep runs every 200 ticks (10 seconds); permission and membership checks still use the current time between sweeps.
+
+| Quantity | Contract |
+| --- | --- |
+| Resident capacity | 1–64; owners plus active rentals. |
+| Day | 24000 ticks. |
+| Maximum duration per rent call | 2880000 ticks, or 120 days. Repeated renewals can extend the total farther. |
+| Positive-price quote | Price × ceiling(clamped duration / 24000). |
+| Quote clamp | 1 through 2880000 ticks, including nonpositive input; acquisition instead rejects nonpositive or oversized duration. |
+| Guest rules | At most 128. |
+| Permission bits | USE=1, BUILD=2, BREAK=4, ENTITIES=8, SLEEP=16; ALL=31. |
+
+Owners pass every permission check. Active renters pass USE and SLEEP before guest overrides. Other access is denied when there is no permanent owner; otherwise an explicit guest mask wins over the team mask, including zero. The team check asks IsekaiCore `TeamLogic.server().areOnSameSide(..., false)` against any owner. A negative guest mask removes the override; the facade accepts only −1 through 31. A null guest edits the team mask, with −1 treated as zero.
+
+Permission edits require the calling player's UUID to be an owner in the target world. A new guest must be online or in the server profile cache; an existing guest remains editable offline. Owners cannot be guest targets. Removing the final owner through `removeMember` clears the access table.
+
+### Furniture and rest
+
+`HomeFurnitureRegistry` holds an immutable ordered rule list plus an identity-keyed block-state match cache. The first matching rule owns a block even after that rule's count limit is reached. Data reload replaces successful rules; tag invalidation clears matches and increments the revision.
+
+`HomeFurnitureTracker` is per world and nonpersistent. Requests for ownerless homes return ready with zero score. For an owned home, a changed shape reference, rule revision or result age of 1200 ticks (60 seconds) marks the result dirty. Dirty snapshots may carry the previous numbers, but `ready=false` prohibits awarding from them.
+
+| Survey scheduling | Behaviour |
+| --- | --- |
+| Shared world budget | 2048 visited positions per tick. |
+| Job slice | Up to 256 positions per turn. |
+| Turns | Up to max(8, initial queue size), also bounded by the shared budget. |
+| Missing chunk | Reset cursor and remove from queue; a later request must requeue it. No chunk loads. |
+| Overlap | Repeated positions consume scan budget but do not score twice. |
+| Category/home/tier caps | 20 points per category, 100 total, tier=min(5, score/20). |
+| Periodic requests | Every 100 ticks (5 seconds) for owners standing inside their home. Ledger snapshots request owner surveys too. |
+| Cache cleanup | Every 1200 ticks, discard unqueued jobs completed more than 2400 ticks ago. |
+
+The block-change hook runs after `WorldChunk.setBlockState` on the server thread. It invalidates only when the owning home's previous and current first matching rules differ. A geometry/rule revision change during scanning restarts the cursor.
+
+Before `ServerWorld.wakeSleepingPlayers`, eligible sleeping residents are checked against the actual bed. Rested lasts 12000 ticks for renters or 24000 for owners. Owners additionally receive 24000 ticks of Hearthbound only from a ready positive tier. No new award means no explicit removal of an old Hearthbound effect.
+
+`isekaiexpansion:home_rested` adds a MULTIPLY_TOTAL maximum-health modifier of 0.05. `isekaiexpansion:hearthbound` uses 0.02 maximum health and 0.01 movement speed per effect level. The housing combat-cap multiplier is `1 + 0.1 × restedPresent + 0.02 × min(5, hearthLevel)`; Fate Balance tracks loot-cap modifiers separately from this home combat multiplier. Awarding effects does not directly heal. Effect removal clamps excess current health.
+
+## Contracts
+
+### Public facade reference
+
+All methods with a world/player argument operate on live server state. `rentCost` is a pure arithmetic helper also used by the client.
+
+| Method | Result and boundary |
+| --- | --- |
+| `getSpaceAt(world, pos)`, `getCurrentSpace(player)` | Nullable immutable definition view. |
+| `getSpacesForPlayer(world, uuid)` | Current resident properties in that world; cleans expired rentals. |
+| `getSpacesForStructureAt(world, pos)` | Structure catalogue or standalone containing home. |
+| `getSpacesForEntityStructure(entity)` | Same query; client-world entity returns an empty list. |
+| `getSpacesForPlayerStructure(player)` | Same query at the player's current position. |
+| `allows(world, player, pos, permission)` | Requested permission; true outside homes. |
+| `canPlayerUseInSpace(world, player, pos)` | USE; true outside homes. |
+| `canPlayerModifyInSpace(world, player, pos)` | BREAK exception for protected structures; false outside homes. |
+| `canPlayerBedSetSpawn(player, bedPos)` | SLEEP exception; false outside homes. |
+| `hasSpaceAccess(world, player, pos)` | Resident membership only; guests do not qualify; false outside homes. |
+| `tryRent(world, key, uuid, durationTicks)`, `tryBuy(world, key, uuid)` | Unpaid trusted acquisition; honours flags/capacity and emits acquisition events. |
+| `tryRentPaid(world, key, player, durationTicks)`, `tryBuyPaid(world, key, player)` | Payment-backed acquisition result. Does not itself require a catalogue offer or proximity. |
+| `rentCost(pricePerDay, durationTicks)` | Rounded, saturated quote; nonpositive price returns zero. |
+| `addMember(world, key, uuid)` | Add permanent resident without payment or allow-buy check; respects capacity and converts an existing rental. No bought event. |
+| `removeMember(world, key, uuid)` | Remove ownership and rental; no refund or acquisition event. |
+| `getMembers(world, key)` | Copied owner set and active renter map; empty if missing. |
+| `getRentEndTick(world, key, uuid)` | Absolute world-age expiry or −1. |
+| `getRentRemainingTicks(world, key, uuid)` | Remaining ticks, or 0. |
+| `bind(world, anchor, room, group, relativeShape, capacity, rent, buy, rentPrice, buyPrice)` | Create/update authoring binding; can throw for identity, overlap or contract validation. |
+| `register(world, structure, group, anchor, shape, capacity, rent, buy, rentPrice, buyPrice, room)` | Create missing absolute definition only. |
+| `unbindEmpty(world, anchor)` | Refuses any active resident at that anchor; absent binding also returns true. |
+| `snapshot(world, player, key)` | Nullable `SpaceEntry`; only owner gets guest/team settings and a survey. |
+| `updatePermissions(world, owner, key, guest, mask)` | Owner-authorised change; false for invalid target/mask/capacity. |
+| `onBlockChanged(world, pos, previous, current)` | Invalidate relevant survey. |
+| `validateRespawn(player)` | Clear disallowed nonforced home bed before vanilla respawn selection. |
+
+`SpaceInfo` holds key, shape, capacity, flags and prices; `MemberInfo` copies its collections. `SpaceEntry` additionally holds dimension, active occupancy, viewer ownership/rental/remaining duration, owner-only grants, score, tier, ready flag and category totals; its maps are copied. `AccessMode` declares RENT, BUY and RENT_OR_BUY but does not replace the independent rent/buy booleans.
+
+### Payment and events
+
+Paid acquisition first verifies existence, allow flag and nonownership, then duration for rent and affordability. It mutates membership before calling IsekaiCore's payment bridge. A returned payment failure restores the previous active rental or removes the new membership and marks storage dirty. This is membership rollback, not a currency refund transaction; the facade cannot undo a dependency failure after currency was partially withdrawn.
+
+The IsekaiCore source checkout's `NumismaticCompat` checks inventory plus wallet, deducts inventory first, then wallet, and saturates quotes on overflow. Missing or failed compatibility returns failure for positive charges; zero-cost calls succeed without payment. This external contract was inspected in the local dependency sources against the consumed `0.4.0-build60` coordinate; that inspection is not a binary-equivalence test.
+
+| AcquireResult | Meaning |
+| --- | --- |
+| SUCCESS | Membership committed and payment succeeded. |
+| NOT_FOUND | Key absent. |
+| NOT_ALLOWED | Offer flag disabled, or invalid rental duration. |
+| ALREADY_OWNER | Buyer/renter is already permanent. |
+| NO_CAPACITY | New resident cannot fit; active renewal/conversion does not need another slot. |
+| INSUFFICIENT_FUNDS | Affordability precheck failed. |
+| PAYMENT_FAILED | Payment returned false after membership mutation; membership restored. |
+| FAILED | Remaining acquisition failure. |
+
+Internal `StructureSpaceEvents.ON_SPACE_BOUGHT` carries world, SpaceInfo and player UUID; `ON_SPACE_RENTED` also carries the final expiry. They fire after acquisition, with paid calls firing only after payment succeeds. Listeners run in registration order, cannot cancel, and are not exception-isolated. A throwing listener can escape after committed state; do not interpret that exception as an uncommitted purchase.
+
+### Persistence
+
+Storage uses `IsekaiPersistData.key("structure", "spaces", 2)`: `data/isekaiexpansion/structure/spaces_v2.dat` under the dimension's persistent-state directory. The implementation does not import v1. Inside the persistent-state payload:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Spaces` | `list<compound>` | Empty | Property entries; no per-entry exception recovery. |
+| `Spaces[].StructureId`, `Spaces[].GroupId` | `string` | Invalid if absent | Parsed identifiers. |
+| `Spaces[].AnchorPos` | `long` | 0 | Packed absolute block position. |
+| `Spaces[].RoomId` | `string` | Invalid if absent | Validated room ID. |
+| `Spaces[].Regions` | `list<compound>` | Invalid if absent/empty | Absolute regions; same shape limits as authoring. |
+| `Spaces[].Regions[].Box` | `int[6]` | Invalid | Inclusive minimum XYZ, maximum XYZ. |
+| `Spaces[].Capacity` | `int` | 1 | Nonpositive reads become 1; above 64 rejects. |
+| `Spaces[].AllowRent`, `Spaces[].AllowBuy` | `boolean` | false | Runtime save defaults differ from anchor rent default. |
+| `Spaces[].RentPrice`, `Spaces[].BuyPrice` | `long` | 0 | Nonnegative copper prices; negative rejects. |
+| `Spaces[].Owners` | `list<compound>` | Empty | Permanent UUIDs; duplicate UUIDs collapse. |
+| `Spaces[].Owners[].Most`, `Spaces[].Owners[].Least` | `long` | 0 | UUID halves. |
+| `Spaces[].Renters` | `list<compound>` | Empty | UUID-to-expiry map; later duplicate UUID wins. |
+| `Spaces[].Renters[].Most`, `Spaces[].Renters[].Least` | `long` | 0 | UUID halves. |
+| `Spaces[].Renters[].Until` | `long` | 0 | Absolute world-age expiry. |
+| `Spaces[].Access` | `compound` | Empty | Shared permissions. |
+| `Spaces[].Access.Team` | `int` | 0 | Mask restricted to 31. |
+| `Spaces[].Access.Guests` | `list<compound>` | Empty | Reads at most 128 entries. |
+| `Spaces[].Access.Guests[].Player` | `UUID int[4]` | Invalid if absent | Guest UUID. |
+| `Spaces[].Access.Guests[].Permissions` | `int` | 0 | Restricted mask; negative removes the entry. |
+
+Load does not rerun cross-home overlap checks or reconcile owner/renter duplication and capacity against members. Duplicate property keys overwrite in the map; every loaded definition is also indexed. Malformed entries can fail the load rather than being skipped. Treat this as a runtime save format, not an alternate permissive authoring format. Coziness, queue state, offers and preview subscriptions are not persisted.
+
+### Network and client lifecycle
+
+The catalogue captures a `SpaceOffers` key set, dimension, optional group and expiry of now+1200 ticks. Acceptance checks that identity, dimension and inclusive expiry, not merchant distance, current structure, geometry or the displayed price. The paid facade then checks the current definition. Refresh after success or expiry retains the stored group filter.
+
+Acquisition, ledger requests and permission edits share a 5-server-tick throttle. Preview toggles bypass it. Client permission edits can target another server dimension, but must still pass owner authorisation. The UI's pending timer is only a duplicate-click guard: 1500 ms for permissions and 2000 ms for acquisition.
+
+| Packet ID suffix, namespace `isekaiexpansion` | Payload and checks |
+| --- | --- |
+| `request_rent_space` | SpaceKey plus VarLong duration; valid offer and paid rent. |
+| `request_buy_space` | SpaceKey; valid offer and paid purchase. |
+| `home_action` | Unsigned action byte: 0 ledger, 1 team mask, 2 guest mask, 3 preview boolean. Permission actions carry dimension, key, optional guest UUID and VarInt mask. Other actions reject. |
+| `open_spaces_screen` | Homes flag, show-screen flag, balance, entries and player names. Up to 256 entries and 512 names, names at most 64 characters. |
+| `apply_space_editor` | Anchor, room/group strings (64 characters), capacity, rent/buy flags, fixed-long prices, ShowBox, Regions NBT and bind flag. Creative operator level 2, squared distance at most 4096, coordinate and contract validation. Binding happens before authoring fields are written. |
+| `unbind_space` | Anchor position; same operator/distance check plus loaded chunk and anchor block entity. |
+| `open_space_editor` | Anchor position; opens only if the client currently has that anchor block entity. |
+| `sync_client_space_editor` | Anchor position, room/group, capacity, contract flags, fixed-long prices and ShowBox; updates the loaded client anchor. |
+| `sync_client_space_selection` | Anchor position, Regions NBT and ShowBox; updates the loaded client anchor's geometry. |
+
+Each snapshot entry serialises dimension, key, absolute Regions, capacity/occupants, flags/prices, ownership/rental flags, remaining duration, team mask, guests, score/tier/ready and category totals. The reader caps guests at 128, categories at 256 and category names at 64 characters; authored rules impose the tighter 16-category limit. SpaceKey carries structure/group IDs, anchor and room string capped at 64.
+
+Ledger snapshots traverse server worlds and take at most 256 homes before sorting by dimension then room. Preview updates include only the current dimension, no balance or names, and run every 100 ticks. Rendering rejects expired rentals, wrong dimension, invisible envelopes and distances beyond 96 blocks; disconnect clears meshes, homes, enabled state and drafts. The catalogue/ledger screen does not pause the game. Only the selected home/offer key is remembered between screen instances; data remains a snapshot.
+
+### Threading and protection scope
+
+Call world-state methods on the server thread after the world exists. Maps and storage are unsynchronised; the facade does not check or schedule thread affinity. Do not use it from generation workers: the processor explicitly queues registration. It strips anchors even when world/context/NBT is absent, and only catches errors around the later registration call.
+
+Home hooks cover server block use/break, placement, bucket placement/pickup, ignition, direct entity interaction/attack and sleeping. Creative operators level 2 bypass those home guards. Dungeon restrictions, mining fatigue and unbreakable tags can still reject an otherwise permitted action. This is not a universal claim engine for projectiles, automation or environmental changes. Integrations should call `allows` with the action-specific permission; do not substitute `hasSpaceAccess`.
+
+## Extending it
+
+A server-side interaction can ask the facade for exactly the permission it needs. The following method assumes a live world/player and server-thread execution:
+
+```java
+static boolean mayUseHomeBlock(ServerPlayerEntity player, BlockPos position) {
+    return StructureSpaceAPI.allows(
+            player.getServerWorld(), player, position, HomePermission.USE);
+}
+```
+
+For a new authored property, construct a relative shape and bind it. Registration validation still applies:
+
+```java
+static void bindRoom(ServerWorld world, BlockPos anchor) {
+    SpaceShape shape = new SpaceShape(List.of(new BlockBox(0, 0, 0, 5, 3, 5)));
+    StructureSpaceAPI.bind(world, anchor, "room_1",
+            new Identifier("isekaiexpansion", "guild_lodging"),
+            shape, 1, true, true, 100L, 10000L);
+}
+```
+
+Author furniture through the [data format](/en/wiki/structure-space-data/) rather than modifying the match cache. A custom purchase UI must obtain server-owned keys/prices and enforce its own admission before using paid acquisition; the facade alone is not that admission policy.
+
+## Verifying
+
+- Bind an L-shaped union and confirm the gap remains outside; reject overlap with a different home and capacity below current residents.
+- Renew a full property's active rental, convert it to ownership, and force payment failure to check membership restoration.
+- Compare owner, renter, explicit-zero guest, inherited teammate and outsider permissions; remove the final owner and check grants are cleared.
+- Expire a rental between sweeps and attempt bed respawn. Confirm a forced spawn point is left alone.
+- Furnish overlapping regions, unload a required chunk and reload rules during a survey. Pending or stale results must not award Hearthbound.
+- Test an expired/wrong-dimension offer, changed server price, unknown guest and oversized packet lists. Check cross-dimension ledger permissions remain owner-only.
+- Save/reload a valid v2 world, then exercise all template rotations/mirrors and repeated generation without replacing a bound property.
+
+These are regression procedures; no in-game execution is asserted by this reference.
+
+## Related
+
+- [My Home](/en/wiki/my-home/) — player-facing rules.
+- [Structure-space data](/en/wiki/structure-space-data/) — anchor and furniture fields.
+- [Persistent state](/en/dev/persistent-state/) — storage helper.
+- [Fate Balance API](/en/dev/fate-balance-api/) — cap composition.

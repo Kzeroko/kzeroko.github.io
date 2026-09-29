@@ -1,0 +1,198 @@
+---
+title: "Dungeon runtime"
+description: "Native session lifecycle, placement, restart recovery, aggregate NBT and internal extension contracts."
+category: systems
+order: 174
+updated: 2026-09-19
+---
+
+The native dungeon runtime owns session membership, instance placement, encounter progress and temporary upgrades on the server. Its durable state is one aggregate; player components and client screens are projections of that state.
+
+## What it does
+
+`internal.dungeon` is an internal subsystem, not a public `DungeonAPI` facade. `DungeonSessionManager.init()` installs tick, connection, death and entity-load hooks, bootstraps powerups and installs void recovery. Definitions come from `DungeonDefinitionLoader`; the complete authoring contract is in [dungeon data](/en/wiki/dungeon-data/).
+
+`DungeonWorldPolicy` treats the built-in `isekaiexpansion:dungeon_instance` and every dimension referenced by a loaded definition as dungeon worlds. This policy is dimension-wide, not restricted to a placed instance's bounding box.
+
+## Runtime model
+
+### Entry, placement and membership
+
+`tryEnter` rejects spectators, an already-active participant and unknown definitions. It reuses an active session matching definition ID and physical `GlobalPos` entrance, otherwise allocates that entrance a stable slot and creates a session. The recorded party key uses the player UUID for `SOLO`, otherwise the quest team resolver; admission does not compare this key when reusing the gateway.
+
+Slots map to a grid: column is `floorMod(slot, 2048)`, row is `floorDiv(slot, 2048)`; origin is column/row times authored spacing at authored base Y. Removing a session retains its entrance allocation. Slots are not reclaimed and are independent of the player's dimension or team.
+
+`DungeonStructureService` plans the Jigsaw graph, validates pieces and anchor coverage, checks the `256`-chunk layout and `1024`-chunk guarded preload budgets, then places synchronously. The guard is `1` chunk. Placement random uses world seed, anchor and definition ID; planning uses Minecraft's structure context. There are no retained chunk tickets in this service.
+
+The service searches for a safe entry before the first participant binds and stores exact feet coordinates as bottom-centre plus `0.02` blocks. Search bounds are `8` horizontal and `8` vertical blocks. Once participants exist, `setSpawnPosition` throws. An unsafe persisted arrival can trigger deterministic layout restoration, but restoration must make the same saved arrival safe.
+
+After placement, a new session resets referenced gate controllers, binds the player and teleports them. Failed placement removes a newly created session; failed entry unbinds the player and removes the session if empty. Successful entry dispatches `SESSION_STARTED` for a new session, then `PLAYER_ENTERED`, with their corresponding scripts.
+
+Teleportation clears velocity and fall distance. The player moves first; only then does `NpcFollowerSync.transferFollowersToPlayer` transfer loaded followers using its own placement rules. Return uses the entrance's bottom-centre plus `0.02` blocks and resets portal cooldown. A missing return dimension or failed teleport leaves the participant bound for later recovery.
+
+### Ticking, hazards and completion
+
+The server uses overworld game time. Each tick removes empty sessions, ignores resolved sessions, and fails active sessions whose definition disappeared or timed deadline expired. Deadline checks run even when all participants are offline.
+
+Ordinary scripts and hazards need an online participant in the session dimension. `TICK` scripts run every `20` ticks. Extraction is represented by a positive completion deadline while status remains `ACTIVE`; it suspends hazard/tick processing and completes only when that deadline is reached with a participant present. The original timed deadline is evaluated first.
+
+Hazards save a snapshot of their waves. A batch is attempted once, then the spawn index advances. Each spawn searches with `48` attempts, radius up to `3` blocks and vertical depth/delta `2`, around anchors on a `1.25`-block ring. Mobs initialise with `SpawnReason.EVENT`, become persistent, then receive authored NBT while preserving transform/UUID. Entities with nonempty authored NBT receive the equipment-preservation tag; every spawn receives the `ise_dungeon_hazard:<sessionUUID>:<hazardUUID>` ownership tag.
+
+The in-memory entity index accelerates death callbacks. A `10`-tick liveness check removes loaded dead/removed entities; an unloaded UUID remains pending. Entity-load reconciliation discards tagged entities whose session/hazard no longer exists or whose dimension is wrong, and reattaches valid entities to the hazard. Once the final hazard is removed, the runtime emits `HAZARD_CLEARED`, runs scripts and offers eligible powerups.
+
+Completion first sets `COMPLETED`, emits `SESSION_FINISHED`, then cleans hazards. Each online participant receives the advancement and quest-completion trigger, clears powerups and attempts return/departure. Failure sets `FAILED`, emits the finish event when a definition and initiator are available, and returns online participants without completion credit. Both clear remaining persisted upgrade/offer progress; a session remains while offline or unsuccessfully returned participants are still bound.
+
+Offline participants do not receive deferred completion credit on reconnect. A reconnect to a resolved session clears the transient component and attempts return/departure; reconnecting to an active session restores normalised levels, HUD and a pending offer. Disconnect stashes component levels and clears the mirror without removing membership. It does not pause the deadline.
+
+### Death and void recovery
+
+`PlayerManagerDungeonRespawnMixin` wraps vanilla player recreation. `DungeonRespawnController.prepare` captures the original spawn settings before the dead entity is removed. For `MUST_COMPLETE`, it validates/restores the layout and supplies the saved session spawn through a temporary vanilla spawn point. The wrapper restores the old player's original spawn in `finally`; finishing also restores the replacement player's settings.
+
+After vanilla registers the replacement, the controller enforces the exact target. Same-world drift above squared distance `1.0E-6` uses a network teleport correction; a wrong dimension uses Fabric teleportation. It clears motion/fall distance and restores the session component, HUD and pending offer. Failure to prepare/enforce the target fails the session while leaving the just-respawned player at their vanilla result.
+
+Without `MUST_COMPLETE`, ordinary death follows vanilla respawn and removes that participant without teleporting them back to the gateway; other participants can continue. Out-of-world damage in a valid must-complete session is handled separately: damage is cancelled and an end-tick forced exit is queued. This bypasses the voluntary return-portal restriction.
+
+### World protection and client presentation
+
+Dungeon-world hooks cancel natural spawning, keep blocks during explosions, restrict noncreative block breaking/placement and fluid placement, and deny generic entity block modification. These are specific hook protections, not a claim that every other mod's direct world mutation is intercepted.
+
+The HUD packet sends title, difficulty, session identity and session/extraction intervals, not the complete persistent session. Client state uses an immutable volatile snapshot. The ModernUI overlay hides while a screen is open, HUD is disabled or no future countdown exists; extraction takes display priority over the session timer.
+
+`DungeonCountdownClock` interpolates a captured game-time interval with monotonic time at `20` ticks per second. This is presentation only: server game time remains authoritative, so lag or pause can make the display diverge. The powerup screen does not pause and refuses ordinary closure; selecting sends intent and begins its own exit animation without waiting for a server acknowledgement.
+
+### Aggregate NBT
+
+The overworld file is `data/isekaiexpansion/dungeon/runtime_v2.dat`, opened through `IsekaiPersistData`. No former split-file store is read or migrated. The tables name the payload inside this state; block-entity and item NBT are documented separately in the authoring page.
+
+### Aggregate and allocations
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Version` | `int` | 2 | Must equal 2; missing or other values discard the whole aggregate with a warning. |
+| `Allocations` | `list<compound>` | [] | Physical entrance to stable slot mapping; invalid entries are logged and skipped. |
+| `Allocations[].Dimension` | `string` | Required | Entrance world identifier; invalid ID skips the allocation. |
+| `Allocations[].Pos` | `long` | 0 | Packed entrance block position. |
+| `Allocations[].Slot` | `int` | 0 | Nonnegative and unique. Duplicate entrance or slot rejects that allocation. |
+| `Sessions` | `list<compound>` | [] | Session records; invalid records are logged and skipped as a whole. |
+
+### Session records
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Id` | `UUID int array` | Required | Session UUID; duplicates reject the later record. |
+| `Definition` | `string` | Required | Dungeon identifier; invalid syntax rejects the session. |
+| `Party` | `string` | "" | Stored party key; the reader does not reject blank values. |
+| `Status` | `string` | Required | Exact ACTIVE, COMPLETED or FAILED; invalid rejects. |
+| `Entrance` | `compound` | Required | Physical return entrance; must agree with an allocation. |
+| `Entrance.Dimension` | `string` | Required | Valid world identifier. |
+| `Entrance.Pos` | `long` | 0 | Packed block position. |
+| `Instance` | `compound` | Required | Placement identity and immutable populated spawn. |
+| `Instance.Dimension` | `string` | Required | Instance world identifier. |
+| `Instance.Origin` | `long` | 0 | Packed layout origin. |
+| `Instance.Spawn` | `compound` | Required | Exact player-feet position; wrong/missing container rejects. |
+| `Instance.Spawn.X, Instance.Spawn.Y, Instance.Spawn.Z` | `double` | Required numeric fields | All 3 must be numeric and finite; integers are readable as doubles. |
+| `Instance.Slot` | `int` | 0 | Must match the entrance's allocated slot. |
+| `Instance.StructurePlaced` | `boolean` | false | Layout placement marker; entry rechecks arrival safety. |
+| `Timing` | `compound` | Required | Server overworld game ticks, not wall-clock timestamps. |
+| `Timing.StartedAt, Timing.Deadline` | `long` | 0 | Read without clamping. Deadline > 0 expires when current time reaches it. |
+| `Timing.CompletionStartedAt, Timing.CompletionDeadline` | `long` | 0 | Negative clamps to 0; positive completion deadline means extraction in progress. |
+| `Participants` | `list<compound>` | [] | Records below; malformed or duplicate participant rejects the whole session. |
+| `Hazards` | `list<compound>` | [] | Records below; malformed or duplicate hazard rejects the whole session. |
+| `Scripts` | `compound` | Required | Replay state shared by script ID. |
+| `Scripts.Cooldowns` | `list<compound>` | [] | Duplicate script IDs overwrite earlier values. |
+| `Scripts.Cooldowns[].Script` | `string` | Required | Valid script identifier; invalid syntax rejects the session. |
+| `Scripts.Cooldowns[].Until` | `long` | 0 | Next eligible tick; saved value is read without clamping. |
+| `Scripts.Executed` | `list<string>` | [] | Set of executed script IDs; invalid IDs reject the session. |
+
+### Participant and hazard records
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Participants[].Player` | `UUID int array` | Required | Participant UUID. |
+| `Participants[].Powerups` | `list<compound>` | [] | Positive levels only; duplicate IDs overwrite. Stored levels are not registry-normalised here. |
+| `Participants[].Powerups[].Id` | `string` | Required for positive levels | Valid powerup identifier; unknown registered identity is retained until restoration filters it. |
+| `Participants[].Powerups[].Level` | `int` | 0 | Nonpositive entries omitted; component restoration clamps to the registered maximum. |
+| `Participants[].Offer` | `list<string>` | [] | Valid identifiers; deduplicated in order, limited to 3. Invalid identifier rejects the session. |
+| `Hazards[].Id` | `UUID int array` | Required | Hazard UUID. |
+| `Hazards[].Dimension` | `string` | Required | Hazard world identifier. |
+| `Hazards[].X, Hazards[].Y, Hazards[].Z` | `double` | 0 | Portal anchor; this reader has no explicit finite-coordinate check. |
+| `Hazards[].Portal` | `UUID int array` | Absent | Optional portal entity UUID; unrecognised representation is ignored. |
+| `Hazards[].Wave, Hazards[].Spawn` | `int` | 0 | Wave and batch indexes, lower-clamped to 0; upper bounds are handled by runtime progression. |
+| `Hazards[].NextProcess` | `long` | 0 | Absolute next processing tick; loaded directly, including negative values. |
+| `Hazards[].Living` | `list<compound>` | [] | Tracked entity UUID set; unloaded entities remain in it. |
+| `Hazards[].Living[].Id` | `UUID int array` | Absent entries skipped | Unrecognised UUID representation is skipped. |
+| `Hazards[].Waves` | `list<compound>` | [] | Saved wave snapshot, independent of later definition changes. |
+| `Hazards[].Waves[].Entries` | `list<compound>` | [] | Saved ordered spawn batches. |
+| `Hazards[].Waves[].Entries[].Entity` | `string` | Required | Valid entity type identifier. |
+| `Hazards[].Waves[].Entries[].Count` | `int` | 1 | Missing reads 0 then clamps to 1; range 1–64. |
+| `Hazards[].Waves[].Entries[].Delay` | `int` | 0 | Clamped to 0–12000 ticks. |
+| `Hazards[].Waves[].Entries[].X, Hazards[].Waves[].Entries[].Y, Hazards[].Waves[].Entries[].Z` | `double` | 0 | Spawn offset relative to hazard anchor. |
+| `Hazards[].Waves[].Entries[].EntityNbt` | `compound` | {} | Wrong/missing container becomes empty; nonempty compound is copied. |
+
+The participant-to-session index and next-slot counter are reconstructed, not serialized. Loading validates allocation/session correspondence, rejects duplicate session IDs and resolves cross-session participant duplicates by newest `StartedAt` first, removing older memberships and marking the repair dirty. Equal start times follow the underlying stable iteration order.
+
+Malformed nested participant, hazard or script data can discard the enclosing session. Allocation/session errors are isolated per record; an unsupported root version discards everything. The loader does not import old filenames, infer missing spawn coordinates or reconstruct a missing allocation from a session.
+
+Portal entities additionally save `DungeonSession` as an optional UUID and `DungeonTheme` as `ENTRANCE`, `INNER_RETURN` or `HAZARD`; missing/invalid theme becomes `HAZARD`. These are entity records, not another authority for membership.
+
+## Contracts
+
+Mutate on the server thread. `DungeonRuntimeState` owns membership/index consistency and dirty tracking; `get`, `all` and session accessors can expose live mutable session objects. The collection returned by `all` is copied, but its sessions are not. Use `addParticipant`, `removeParticipant` and progress setters, and call `markChanged` after direct session mutations. Managed-session checks require the exact object held by the aggregate.
+
+`DungeonEvents` exposes internal `SESSION_STARTED`, `PLAYER_ENTERED`, `HAZARD_CLEARED` and `SESSION_FINISHED` notifications. Contexts contain live session/definition references and a triggering player. They are not cancellable access checks, and the array-backed listener loops do not catch listener exceptions. Scripts also run actions before recording replay memory without a general exception barrier or rollback.
+
+All network channels below have the `isekaiexpansion:` prefix:
+
+| Channels | Contract |
+| --- | --- |
+| `sync_dungeon_hud` | S2C active flag; active payload adds session UUID, title string (limit `256`), difficulty string (limit `32`) and four game-time longs. Inactive carries only the flag. |
+| `open_dungeon_powerup_offer` | S2C session UUID and up to `3` choices: powerup/icon IDs, rarity string (limit `32`), current/max levels and stackability. |
+| `select_dungeon_powerup` | C2S session UUID and powerup ID; server validates active membership, pending choice and current level before granting. |
+| `open_dungeon_gateway_editor`, `configure_dungeon_gateway` | Editor snapshot and update; gateway ID string limit `256`, creative/operator and block-type checks. |
+| `open_dungeon_script_editor`, `configure_dungeon_script_trigger` | Editor snapshot/update for script ID, radius, activation, interval and sight flag; ID limit `256`. Snapshot radius is a double; update radius is text limited to `16` characters. Update also requires distance at most `8` blocks. |
+| `open_dungeon_unlock_controller_editor`, `configure_dungeon_unlock_controller` | Controller snapshot/update for timings, sounds and relative offsets; decode rejects target count outside `0–256`; update requires distance at most `8` blocks. |
+
+HUD handling and powerup-screen opening marshal to the client thread; ModernUI view changes then use the UI thread. Editor permissions are server-checked. The gateway update has no distance check, unlike the other two editor updates.
+
+## Extending it
+
+Definitions refer to code-registered `DungeonRoguePowerup` implementations. Register during common setup through `DungeonRoguePowerupRegistry.register`: null values, mismatched presentation ID and duplicate IDs reject. `DungeonPowerupProgression.unique()` means one level; `stackable(maxLevel)` requires at least `2`. Restoration clamps known IDs to their registered level limits and discards unknown IDs from the transient component.
+
+Implement `onGranted`, `onEvent` and `onRemoved` with the lifecycle in mind. Grant persists the advanced level before calling `onGranted`, and clears the pending offer only after a successful return. A throwing hook can therefore leave partially applied state. Reconnect/respawn restores levels without replaying `onGranted`; disconnect clears the mirror without `onRemoved`. Do not use those hooks as a guaranteed symmetric resource-acquisition pair.
+
+Events include effective damage taken/dealt, player-credited enemy defeat and the IsekaiCore second interval. Dispatch requires active membership in the correct dimension. The built-in effects and authored pool fields are listed in [dungeon data](/en/wiki/dungeon-data/).
+
+The script action vocabulary is an enum and switch, not a parser registry. Adding an action requires coordinated parser/record/runtime work and both language references. Adding a hazard side effect also needs saved-state and restart behaviour; a live entity UUID alone is not persistent encounter authority.
+
+### Operator commands
+
+Commands live under `/isekaiexpansion dev dungeon`, also available through `/ise dev dungeon`, and require permission level `2`. All except `list` require a player source.
+
+| Suffix | Operation |
+| --- | --- |
+| No suffix or `status` | Reports the bound session, including a resolved record awaiting departure. |
+| `list` | Lists persisted sessions in start-time order; console-compatible. |
+| `enter <dungeon>` | Uses the caller's current world/block position as the physical entrance and runs normal entry. |
+| `exit` | Forced return/departure, bypassing must-complete restrictions. |
+| `respawn` | Teleports the living active participant to the exact saved spawn; does not invoke death recreation. |
+| `complete` | Immediately completes the active session, bypassing extraction delay. |
+| `fail` | Fails the active session and runs its cleanup/return path. |
+
+## Verifying
+
+- Enter one physical gateway from unrelated parties, and a second gateway to the same definition; confirm the documented reuse and distinct allocation behaviour.
+- Check missing pools/connectors, layout/preload budgets, blocked arrival restoration and a failed return dimension without losing membership.
+- Restart during a delayed batch, with unloaded living entities, a partially unlocked gate, script cooldown and pending powerup choices.
+- Test timed expiry with everyone offline, extraction with nobody in the dungeon, and expiry before extraction finishes.
+- Complete with online/offline participants; confirm who receives advancement/quest credit and that resolved records survive until all departures succeed.
+- Test ordinary death, must-complete death, original spawn restoration on exceptions, wrong-dimension correction and queued void exit.
+- Round-trip every aggregate record; reject root-version drift, missing finite spawn, duplicate allocations/sessions, mismatched slots and malformed nested records. Check newest-session duplicate-member repair.
+- Exercise duplicate/late powerup submissions and throwing grant/listener hooks; verify persisted state and pending offers instead of assuming rollback.
+- Check HUD and powerup UI across disconnect, pause/lag and changing language, with server deadlines as the reference.
+
+## Related
+
+- [Dungeon data and authoring](/en/wiki/dungeon-data/) — every definition and authoring field.
+- [Persistent state storage](/en/dev/persistent-state/) — shared storage keys and world scope.
+- [Quest runtime](/en/dev/quest-system/) — completion credit dispatch.
+- [NPC followers](/en/dev/npc-followers/) — squad transfer and arrival placement.

@@ -1,0 +1,133 @@
+---
+title: "NPC 模型、服装与市民资源"
+description: "将 NPC 表现接入共享人形部件、服装覆盖层和动画集。"
+category: assets
+order: 40
+updated: 2026-09-27
+---
+
+NPC 身体与穿戴层使用共享人形部件系统。NPC 自有资源是动画集，角色外观和衣柜由预设提供；市民使用同一渲染器及生成的外观配置。
+
+## 你要做的东西
+
+| 资源 | 位置 |
+| --- | --- |
+| 部件目录项 | `data/<namespace>/humanoid_parts/<slot>/<part>.json` |
+| NPC 角色与衣柜 | `data/<namespace>/npc_presets/<entity-type-path>.json` |
+| 部件网格 | `assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json` |
+| 可选性别网格 | 同一路径以 `.male.geo.json` 或 `.female.geo.json` 结尾 |
+| 纹理样式 | `assets/<namespace>/textures/entity/humanoid/<slot>/<part>/<style>.png` |
+| 可选染色 / 发光遮罩 | 同目录的 `<style>_mask.png` / `<style>_glowmask.png` |
+| 可选部件动画 | `assets/<namespace>/animations/entity/humanoid/<slot>/<part>.animation.json` |
+| NPC 动画集 | `assets/<namespace>/animations/entity/npc/<entity-type-path>.animation.json` |
+| 共享动画回退 | `assets/isekaiexpansion/animations/entity/npc/base.animation.json` |
+
+NPC 默认以实体类型 ID 查找预设。子类可覆盖 `getNpcPresetId()` 共用其他预设。身体模型和纹理由 `HumanoidRenderResolver` 从选定的 `body` 部件解析，不再从旧的 NPC 专用网格目录取得。
+
+## 前置要求
+
+### 资源发现与缺失处理
+
+客户端按小写的槽位相对路径索引部件，目前查找键**不保留命名空间**。不同命名空间提供相同相对路径时可能冲突，发现过程没有排序以保证某一方胜出。纹理发现也会跨命名空间搜索对应文件夹。编写不同部件时应使用不同相对路径。
+
+网格没有发现任何基础 PNG 样式时会记录警告并跳过；只有遮罩不算样式，嵌套纹理子文件夹被忽略。匹配性别的网格优先，否则用基础网格。只有性别网格时先以男性网格补基础模型，仍无基础模型才使用女性网格。因此缺少另一性别变体时，也可能使用这个被补为基础的网格。
+
+未知样式只回退到 `default`，不会任意选择首张纹理。请求样式与 default 都不存在时跳过该部件。需要回退显示时保留 `default.png`；可选染色或发光遮罩缺失是允许的。
+
+显示需要目录项、选定引用和已发现资源同时存在。未知目录项、缺少资源/样式及被抑制槽位都会跳过。没有解析出身体时，保留共享骨架模型和纹理。部件声明的 `hides_slots` 在资源解析前就参与隐藏，因此资源损坏的部件仍可能隐藏其他层。
+
+NPC动画查找保留实体类型的命名空间与路径。`BaseNpcEntity.getNpcAnimationResource()`提供可选的实体文件；覆盖此方法可共用其他文件。GeckoLib 4.8.4先在该文件查找请求的片段，再查找`isekaiexpansion:animations/entity/npc/base.animation.json`。专属文件或单个片段缺失时使用基础套件；两个文件都未定义的自定义片段仍然缺失，不会自动生成角色动作。
+
+### 骨架与变换
+
+使用共享人形骨架的层级和锚点。下表是当前模板变换，不代表运行时会校验每个枢轴。姿态按名称复制；缺少名称会失去相应姿态，枢轴错误则可能使层或手持物品偏移。
+
+| 锚点 | 父级 | 模板枢轴 |
+| --- | --- | --- |
+| `body` | 根 | `[0, 0, 0]` |
+| `head`、`torso` | body | `[0, 24, 0]` |
+| `right_arm` | body | `[-5, 22, 0]` |
+| `left_arm` | body | `[5, 22, 0]` |
+| `right_leg` | body | `[-1.9, 12, 0]` |
+| `left_leg` | body | `[1.9, 12, 0]` |
+| `main_item` | right_arm | `[-5.625, 14.2, -0.3]` |
+| `off_item` | left_arm | `[5.625, 14.2, -0.3]` |
+
+两个物品锚点的编写旋转均为 `[90, 0, 0]`。渲染器先进行附着补偿，再通过矩阵施加一次 Player Animator 物品偏移。位置使用 `1/16` 模型单位，旋转顺序为 Z/Y/X，不要把运行时偏移再烘焙一份进网格。
+
+玩家部位增量映射到 Gecko 的位置为 `(x, -y, z)`，旋转为 `(-pitch, -yaw, roll)`。自主武器动画以当前 Gecko 通道回退；变身显示使用宿主采样姿态。应用宿主部位前先恢复 Gecko `body` 骨骼，宿主 body 通道则走独立外层矩阵。
+
+## 步骤
+
+1. 将身体和穿戴件制作成共享人形部件。可替换服装放在独立槽位，使角色保留其基础配置。
+2. 将网格与纹理样式导出到上述路径，确认选定样式存在，需要回退时包含 `default`。
+3. 在人形目录声明部件，并在 NPC 预设中引用。内置 `data/isekaiexpansion/npc_presets/mahoutsukai_evelina.json` 是完整具名角色示例；`citizen.json` 只提供衣柜，不声明编写的角色外观。
+4. 专属动画文件只需包含要覆盖或新增的片段，名称与请求键保持一致；未填写的基础片段逐个回退。
+5. 定义修改后重载数据包，网格、纹理与动画修改后重载客户端资源，两者是不同路径。在游戏中核对已加载 NPC 的显示部件、当前服装和属性。
+
+### 市民
+
+`CitizenNpcEntity` 将实体 UUID、解析后的性别、身份种族及生成标签传给 `HumanoidProfileGenerator`。即使预设包含外观字段，该覆盖实现仍生成初始外观，不使用基础实现来采纳手写外观；衣柜仍来自 NPC 预设。`setCitizenIdentity`会在服务器上重新生成外观。生成性别使用实体UUID，不依赖显示名称。[命名API](/zh-cn/dev/naming/)在实体加载时，按种族、性别和市民文化为无名的非独特NPC取名；市民身份应在生成前设置。
+
+生成标签包含城镇、文化、职业，以及存在时的种族路径；性别不属于标签。生成器选择 BODY、EYES、EYEBROWS、HAIR、UNDERWEAR_TOP、UNDERWEAR_BOTTOM、OUTFIT_TOP、OUTFIT_BOTTOM、SHOES。先按性别锁定与种族筛选，只保留始终解锁、且目录 `gender` 与市民相同或为通用的候选，再优先选择至少命中一个请求标签的部件。如果没有这种候选，必需槽取目录首个候选，可选槽保持空。标签只是偏好，不是强制条件；`gender` 匹配则是强制条件。为某个槽位选中的链式部件会同时填满其他成员的槽位，生成器会跳过已经填好的槽位。
+
+随机种子取决于 UUID、性别和种族，候选目录及标签也会改变结果，因此修改目录后相同 UUID 不保证外观不变。无需制作独立的市民变体目录。
+
+## 声明它
+
+### Java 接入与动画
+
+仅按所需行为选择战斗或具名子类，战斗能力不引入另一种模型格式。模型继承`GeoHumanNpcModel`，动画通过实体资源方法查找，与模型名称分开；渲染器继承 `GeoHumanNpcRenderer` 并提供 `HumanoidDimensions`，最后在客户端初始化中通过 `EntityRendererRegistry` 注册。可参考 `HumanoidNpcRenderer` 和 `MahoutsukaiEvelinaRenderer`。
+
+`NpcAnimationController`只读取当前NPC及其管理器。选择顺序为死亡、睡眠、骑乘、物品使用、专属战斗、游泳、悬停、飞行、POI活动、攀爬、地面移动、表情动作、待机。市民、简单NPC、战斗NPC和独特角色共用此控制器。`NpcAnimationKit`声明从伊芙琳提取的12个基础片段；她的原文件与角色动作均保留。
+
+飞行与悬停需要显式启用：`BaseNpcEntity.canNpcFly()`默认返回`false`。NPC子类须返回`true`，并在自身动画文件中提供`fly`与`hover`；共享后备文件不包含这两个片段。控制器仅为具备飞行能力的NPC选择它们。伊芙琳显式启用飞行，继续使用原有动画。市民、简单NPC和冒险者默认不能飞行，仍可游泳。飞行参数见[NPC移动](/zh-cn/dev/npc-locomotion/)。
+
+共享 NPC 渲染器安装 `HumanoidPartGeoLayer`，并在 `main_item`/`off_item` 渲染手持物品。示例渲染器还会隐藏建模时的物品代理几何，这与隐藏真实手持物品是两回事。真实物品路径会跳过睡眠、使用物品、空物品、粒子化可见性不允许，以及距摄像机超过 32 方块的情况。
+
+| 动画组 | 请求键 |
+| --- | --- |
+| 地面 | `idle`、`walk`、`run` |
+| 水中 | `swim_idle`、`swim` |
+| 攀爬 | `climb_idle`、`climb` |
+| 休息 / 骑乘 | `sleep`、`mount` |
+| 可选的实体专属飞行 | `fly`、`hover` |
+| 死亡 | `death`，播放并保持 |
+| 默认物品类别 | `drink`、`eat` |
+| 自定义战斗的默认键 | `charge_<action_id>`、`charge_loop_<action_id>`、`release_<action_id>` |
+| 动作标识缺失或为空时回退 | `charge`、`charge_loop`、`release` |
+| 表情动作 / POI | 运行时定义声明的键 |
+
+持续武器近战由 Better Mob Combat 在 Gecko 动作时序之外驱动，无须逐动作编写 Gecko 攻击动画，启动与时序见 [NPC 战斗](/zh-cn/dev/npc-combat/)。可选部件次级动画查找 `idle`、`run`，接受精确名称，或忽略大小写后以 `.idle`/`_idle`、`.run`/`_run` 结尾的名称；无效或缺失资源使次级动画禁用。
+
+### 衣柜组合与重载
+
+实体分别保存基础外观与显示外观。服装按槽位顺序覆盖声明的槽位，`none` 在该服装下移除对应槽。被覆盖的槽位遵循[部件链](/zh-cn/dev/humanoid-parts/)：写出一个成员就会穿上整条链，替换或清除某个成员会卸下其他成员。**包括 body 在内的所有槽位均可被覆盖**。切换不破坏底层基础配置，但显示出来的身体并不保证不变。
+
+通过 `tryEquipOutfit` 选择服装会检查可选性及请求玩家的解锁规则；直接 `setOutfitId` 只解析 ID、刷新外观与属性，不执行这些玩家资格检查。服装授予记录按玩家保存，键为预设 ID 加归一化服装 ID，因此为一个 NPC 实例解锁，也适用于同预设的其他实例。
+
+数据包成功重载后，已加载 NPC 重新解析预设。基础实现替换手写的基础外观；生成外观通常保留，除非子类的解析路径重新生成。当前服装被删除后回退到新默认项。属性刷新移除**当前**目录声明的修饰符 ID，再添加生效服装的授予，并将生命限制到新上限。
+
+若重载删除旧服装或属性授予，已加载 NPC 可能保留旧的临时修饰符，因为清理仅枚举新声明。不能将此路径描述为无条件删除全部旧授予，评审衣柜重载修改时须专门检查属性移除。
+
+服装显示键为 `npc_outfit.<namespace>.<preset-path-with-dots>.<outfit-id>`。授予是按预设、服装、属性生成键的临时修饰符；同一服装对同一属性重复授予会共用修饰符 UUID，不是可以独立叠加的条目。
+
+## 检查清单
+
+- 确认预设和部件 ID 可解析，逐项检查选定纹理样式及性别网格。
+- 在闲置、行走、奔跑、游泳、攀爬、睡眠与战斗中检查身体、头、四肢和物品锚点。
+- 从专属文件移除`walk`，确认仍播放基础行走；保留自定义`idle`以检查覆盖优先级。
+- 在添加、清除及替换槽位的服装之间切换，再恢复基础外观。
+- 检查玩家独立解锁记录，以及共享预设的另一个 NPC。
+- 修改和删除授予后重载，检查实际属性，不只看服装菜单。
+- 用不同身份和目录标签检查生成市民，不要把标签偏好理解为强制筛选。
+- 从另一客户端观察基础与分层几何，包含手持物品、遮罩和缺失资源情况。
+
+## 相关页面
+
+- [玩家与 NPC 预设数据](/zh-cn/wiki/humanoid-presets/)
+- [人形部件](/zh-cn/dev/humanoid-parts/)
+- [Blockbench 插件](/zh-cn/dev/blockbench-plugin/)
+- [NPC 基础](/zh-cn/dev/npc/)
+- [NPC 战斗](/zh-cn/dev/npc-combat/)
+- [NPC 情绪与身体表情动作](/zh-cn/dev/npc-emotion/)

@@ -1,0 +1,171 @@
+---
+title: "命运天平 API"
+description: "注册选项与效果、评估草稿，并提交服务器权威命运天平档案。"
+category: api
+order: 145
+updated: 2026-09-27
+---
+
+`FateBalanceAPI` 是命运天平注册、查询和服务器验证提交的公共门面。定义属于公共端内容，供预览与验证共用；效果单独注册，由运行时统一协调。
+
+## 入口
+
+使用 `net.kzeroko.isekaiexpansion.api.fatebalance.FateBalanceAPI`。门面委托给 `internal.fatebalance`；当前作为门面参数或返回值公开的注册器、不可变定义、结果记录和效果接口仍位于该内部包，不应直接调用注册表或服务。
+
+通过 `FateBalanceEntrypoint` 注册公共内容。初始化先安装内置分类和内容，再调用附属模组入口，最后安装效果分发器。某个入口抛出运行时异常会记录日志并继续下一个；该入口此前成功的注册不会回滚。
+
+## 常见用法
+
+### 注册选项和效果
+
+在附属模组已有的 `fabric.mod.json` 中加入：
+
+```json
+{
+  "entrypoints": {
+    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `entrypoints` | `object` | 缺省 | Fabric 入口映射，与已有入口合并。 |
+| `entrypoints.isekaiexpansion:fate_balance` | `array<string>` | 缺省 | 实现 `FateBalanceEntrypoint` 的完整类名，在公共端注册。 |
+
+示例添加选项及乘算经验效果，翻译键由标识符派生：
+
+```java
+public final class ExampleFateBalance implements FateBalanceEntrypoint {
+    @Override
+    public void register(FateBalanceRegistrar registrar) {
+        Identifier choice = new Identifier("example", "quick_learner");
+        registrar.registerChoice(FateBalanceChoice.builder(
+                choice, FateBalancePolarity.BLESSING, 2)
+                .category(FateBalanceSystem.MENTAL_CATEGORY_ID)
+                .tags("experience")
+                .build());
+        registrar.registerEffect(choice, FateBalanceEffects.experience(1.1, 1.1));
+    }
+}
+```
+
+仅注册选项不会自动产生游戏效果。由所属系统自行计算的机制，也可以在计算处使用 `FateBalanceAPI.isSelected(player, choiceId)`。
+
+### 评估和提交
+
+评估不会保存档案。可信服务器代码可以通过与网络请求相同的验证提交：
+
+```java
+static FateBalanceCommitResult applyProfile(
+        ServerPlayerEntity player, Collection<Identifier> choices) {
+    return FateBalanceAPI.commit(player, choices);
+}
+```
+
+检查 `success()`、`evaluation()` 和可空的 `problem()`。拒绝结果提供首个问题，完整评估保留全部问题。提交服务没有“确认后禁止编辑”的锁或权限判断，调用方负责决定何时允许修改。重复提交相同的已确认集合会成功，但不再同步或触发变化事件。
+
+### 注册预设和规则
+
+`FateBalancePreset.builder(id)` 支持 `nameKey`、`choices`（可变参数或集合）、`order`、`availableWhen`。默认选项为空、排序 `0`、始终可用，名称键为 `fate_balance_preset.<namespace>.<path-with-dots>`。注册时不验证选项 ID 或点数平衡；预设提供可编辑草稿。
+
+`FateBalanceRule` 接收玩家、不可变的选项/注册快照、基础点数、祝福消耗、负担收益与剩余点数。返回 `FateBalanceProblem` 列表，不应修改玩家。空列表引用和空项被忽略，运行时异常加入 SERVER_ERROR。内置负担上限本身也是注册规则。
+
+## 方法一览
+
+### 门面方法
+
+| 方法 | 端 / 阶段 | 返回或修改 |
+| --- | --- | --- |
+| `registrar()` | 公共初始化 | 提供下列注册方法的注册器。 |
+| `registerCategory(category)` | 公共初始化 | 添加分类。 |
+| `registerChoice(choice)` | 公共初始化 | 添加不可变选项。 |
+| `registerEffect(choiceId, effect)` | 公共初始化 | 追加效果，同一选项允许多个效果。 |
+| `registerPreset(preset)` | 公共初始化 | 添加可编辑起始档案。 |
+| `registerRule(id, rule)` | 公共初始化 | 添加验证规则。 |
+| `categories()`、`choices()`、`presets()` | 初始化后双端 | 按排序值、标识符文本排序的不可变列表。 |
+| `findCategory(id)`、`findChoice(id)` | 双端 | Optional 查询结果，拒绝空 ID。 |
+| `evaluate(player, selections)` | 玩家所属游戏线程 | 不可变评估，玩家必填。 |
+| `commit(serverPlayer, selections)` | 服务器线程 | 重新评估，替换并同步有效档案，再触发变化事件。 |
+| `selections(player)` | 玩家所属游戏线程 | 当前不可变集合，可能含存档中的未知 ID。 |
+| `isSelected(player, id)` | 玩家所属游戏线程 | 查询是否选中，不验证可用性。 |
+| `isConfirmed(player)` | 玩家所属游戏线程 | 已保存的确认标志。 |
+| `maxPoints()` | 双端 | 配置起始点数限制到 `0–64`，默认配置为 `10`。 |
+| `maxBurdenPoints()` | 双端 | 内置上限 `6`。 |
+
+注册写入使用同步锁并发布不可变快照。分类、选项、预设、规则的 ID 重复会抛出异常；效果则追加。注册时不检查效果 ID、分类、前置或冲突目标是否存在。这不是数据包重载注册表。
+
+### 选项构建器约定
+
+| 输入 | 默认值 | 验证与含义 |
+| --- | --- | --- |
+| `builder(id, polarity, points)` | 必填 | ID/极性非空，点数须为 `1–64`，否则异常。BLESSING 消耗，BURDEN 提供点数。 |
+| `nameKey`、`descriptionKey` | `fate_balance.<namespace>.<path-with-dots>`，描述再加 `.description` | 覆盖键不得为空白，ID 路径中的斜杠转为点号。 |
+| `category` | `isekaiexpansion:fate_balance/general` | ID 非空，此处不检查是否存在。 |
+| `severity` | STANDARD | MINOR、STANDARD、MAJOR，非空；仅为表现元数据，不乘算点数。 |
+| `iconItem` | null | 物品注册ID；缓存GUI模型图像，缺失或空气物品以纸张代替。 |
+| `order` | `0` | 任意整数，较小值在前。 |
+| `requires`、`conflictsWith` | 空 | 可变参数/集合并去重；忽略空容器，拒绝空项；构建时拒绝自引用。 |
+| `exclusiveGroup` | null | 可选分组 ID，同时选中多个组成员会冲突。 |
+| `tags` | 空 | 忽略空/空白项，去首尾空白、转小写并去重。 |
+| `availableWhen(predicate, reasonKey)` | 始终可用，无原因 | 谓词非空，空白原因转 null；评估时异常视为不可用。 |
+
+`FateBalanceCategory` 要求 ID 非空、名称键非空白，排序不限。`FateBalancePair.register` 增加双向冲突，检查 ID 不同且构建器 ID/极性匹配，然后依次注册祝福、负担和可选效果。后续注册失败时不保证原子性。
+
+### 验证与持久化
+
+选择集合可为空引用（空档案），空 ID 和重复项会忽略。评估最多保留 `128` 个唯一 ID，超出则加入 TOO_MANY_CHOICES。检查未知/不可用选项、缺失前置、冲突、互斥组及负余额。剩余点数为 `base + burden − blessing`，允许保留正余额；内置规则拒绝超过 `6` 的负担收益。
+
+问题类型为 UNKNOWN_CHOICE、UNAVAILABLE、MISSING_REQUIREMENT、CONFLICT、EXCLUSIVE_GROUP、NEGATIVE_BALANCE、CUSTOM、TOO_MANY_CHOICES、SERVER_ERROR。对称冲突/互斥组按排序后的对象 ID 和问题元数据去重。自定义消息键在线路传输中上限为 `192` 字符，构造器不检查该长度。
+
+| 存储字段 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `selections` | `list<string>` | 空 | 只读取前 `128` 项，跳过错误标识符并去重，不检查注册存在性；写入按标识符字典序排列。 |
+| `confirmed` | `boolean` | false | 首次有效提交设为 true，空档案也可以确认。 |
+| `revision` | `int` | `0` | 读取时负值限制为 `0`；每次有变化的有效提交递增。 |
+
+玩家组件自动同步并在重生时复制。读取 NBT 不会按变更后的内容/配置重新评估。有效替换先同步，再发变化事件。监听器异常在保存后记录，不会回滚。管理员重放命令 `/ise charactercreate` 会清空选择与确认状态并同步，再以空的当前集合触发同一个变化事件，因此所有效果都会按未启用重新协调。
+
+提交包只发送标识符意图。声明数量为负或超过 `128` 会拒绝，解码最多读取 `128` 个 ID。服务器重新评估并返回成功标志及可选问题，权威档案状态另由组件同步。
+
+### 效果生命周期
+
+| 钩子或工厂 | 约定 |
+| --- | --- |
+| `reconcile(serverPlayer, active)` | 幂等地应用或移除自有状态，默认无操作。命谱变化协调前后ID，登录和重生协调全部已注册效果。 |
+| `experienceMultiplier(player, reason)` | 默认`1`；协调器只接收LOOT与QUEST。乘积限制在`0–4`，非有限值恢复`1`，奖励取整且不为负。COMBAT跳过全部效果。 |
+| `dailyLootCapMultiplier(player)` | 默认`1`，所选倍率相乘并使用相同范围。 |
+| `foodComfortBonus(player, stack)` | 默认`0`；只对正基础值累加带正负号的加值，限制在整数范围。 |
+| `mealRepetitionMultiplier(player)`, `sleepComfortMultiplier(player)` | 默认`1`；乘积限制在`0–4`，非有限值恢复`1`。 |
+| `FateBalanceEffects.attributes(modifiers...)` | 至少一个非空修饰；用固定UUID管理社交属性临时修饰。 |
+| `experience(loot, quest)`, `dailyLootCap(multiplier)` | 工厂倍率须为`0–4`内的有限值。 |
+| `foodTaste(meals, restrictive)` | 非空物品标签。普通口味：匹配食物+4；限制性口味：其他食物−3。 |
+| `mealRepetition(multiplier)`, `sleepComfort(multiplier)` | 工厂倍率须为`0–4`内的有限值。 |
+
+`FateBalanceAPI.foodComfort(player, stack, base)`应用饮食加值；玩家为null时返回基础值。`mealRepetitionMultiplier(player)`与`sleepComfortMultiplier(player)`要求已有玩家，并查询所选效果。组件初始化后，在玩家所属游戏线程调用，双端均可读取。
+
+每日上限在每秒以及命谱变化、登录、重生事件后协调。协调器分别追踪家园战斗上限与命运天平战利品上限，使用当前等级的IsekaiCore默认值，等级至少为`1`。某上限最后一项修饰移除后，该上限单独恢复一次。两条路径都不清除已消耗经验，战利品特质不能刷新战斗额度。
+
+经验使用`ICPlayerExpEvents.MODIFY_GRANT`；异界扩展的`XpRewardLogic`与`TypeBLevelPotion`直接调用`PLAYER_LEVELER.addExperience`并绕过该事件。同一命途内按效果注册顺序执行，不逐项隔离异常，也不保证跨命途顺序。
+
+### 图标合成
+
+`iconItem`解析物品GUI模型。`FateBalanceItemIcons`在Minecraft渲染线程通过`ModernUiCapture`生成64 × 64像素静态图，使用独立颜色与深度目标并恢复渲染状态。ModernUI在UI线程上传位图，作为普通图像合成；滚动、祖先裁剪、透明度与模态层级都由Canvas处理。模型图标不是实时动画预览。
+
+缓存最多128项。视图持有图像副本，脱离窗口时释放。资源重载会清空缓存并刷新已挂载视图，捕获失败时使用默认纹理。验证床、平面物品与自定义模型在滚动和确认浮层中的显示。
+
+## 事件
+
+`FateBalanceEvents.PROFILE_CHANGED` 在同步后提供服务器玩家和不可变的前后集合。监听器按顺序执行，不可取消。服务捕获整个事件调用的异常，因此某监听器抛错可能阻止后续监听器，但提交仍报告成功。需要登录/重生恢复的效果应使用 `registerEffect`。
+
+## 线程与生命周期
+
+在公共初始化阶段为双端注册相同定义。可用性和自定义验证会同时用于客户端预览和服务器评估，必须兼容双端。ModernUI 桥接会先把评估调度到 Minecraft 客户端线程，再把结果返回 UI 线程；直接调用门面不会自动调度。
+
+提交和效果修改须在服务器线程，且玩家/组件已经存在。注册快照安全不代表任意线程都能安全访问玩家或世界；谓词和规则评估应保持无副作用。
+
+## 相关页面
+
+- [命运天平](/zh-cn/wiki/fate-balance/)：玩家点数与内置选项。
+- [舒适度运行时](/zh-cn/dev/comfort-runtime/)：查询驱动的性格修正。
+- [声望运行时](/zh-cn/dev/reputation-runtime/)：面貌与通缉声望。

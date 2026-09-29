@@ -1,0 +1,146 @@
+---
+title: "Tutorials"
+description: "Client tutorial definitions, progress, input handling, targets and the bounds editor."
+category: systems
+order: 145
+updated: 2026-09-19
+---
+
+Tutorials combine guided steps, screen-specific guidance and short popups. Completion is versioned in one local file, so the same installation remembers a tutorial across worlds and servers; the server can request playback but does not own that progress.
+
+## What it does
+
+Use `api.tutorial.TutorialAPI` on the server and `api.client.tutorial.TutorialClientAPI` on the client. Definitions, steps, targets, bounds and images are public types under `api.client.tutorial`. The manager, registry, bounds reporters and editor under `client.tutorial` are implementation entry points, not public facades.
+
+Definitions are registered in Java during client initialisation. There is no tutorial JSON loader. The server packet `isekaiexpansion:trigger_tutorial` carries a tutorial identifier and replay boolean, without definitions or progress.
+
+## Runtime model
+
+### Definition kinds and built-ins
+
+| Kind | Trigger and completion |
+| --- | --- |
+| `GuidedTutorialDefinition` | Requested explicitly; a different active tutorial causes normal requests to queue. Finishing or skipping saves completion. |
+| `ScreenTutorialDefinition` | Discovered when its screen opens, provided no tutorial, queued request or bounds editor is active. Closing or changing away cancels without completion. |
+| `ShortTutorialDefinition` | Displays a popup immediately and records completion immediately, without waiting for its duration. |
+
+| Built-in identifier | Version | Content |
+| --- | --- | --- |
+| `isekaiexpansion:adventurer_basics` | 2 | 12 steps: welcome, forward movement, jump, vitals, level, comfort, active skills, skill selection, skill screen, quests, emoji and completion. Movement holds for 1200 ms; skill selection holds for 700 ms. Requested on joined data-pack synchronisation, not every reload. |
+| `isekaiexpansion:inventory_playerex_tabs` | 1 | 4 inventory steps: primary tabs, expansion tabs, purse and team. Tab bounds are reported; purse and team use relative rectangles. |
+| `isekaiexpansion:tutorial_restart_hint` | 1 | 5200 ms popup requested after a guided tutorial finishes, if unseen. |
+
+Only one interactive tutorial is active. Queued guided IDs are deduplicated; an already active ID is not queued again. A forced guided replay interrupts the active tutorial but does not clear the existing queue. An unknown ID logs a warning. A normal request for a screen tutorial is ignored; replay clears its completion and starts it immediately only if its screen is already open, a player exists and no other tutorial is active.
+
+The client ticks the manager at end tick. Losing focus, a cinematic input lock, an unavailable target context or the bounds editor hides guidance and resets held progress. HUD steps require no open screen; screen targets require a matching screen. A scheduled advance is processed before most context gates, after the bounds editor check; it is not a second validation of the original action.
+
+### Progress storage
+
+The game-directory file `isekaiexpansion-tutorials.txt` contains the following text format:
+
+```text
+format 1
+completed isekaiexpansion:adventurer_basics 2
+```
+
+| Token | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format` | Header plus integer | Writer emits 1 | Informational to the current reader; the reader ignores this line. |
+| `completed` | Record marker | Required for a completion record | Exactly 3 whitespace-separated tokens: marker, valid identifier, positive integer version. |
+| Tutorial identifier | Identifier | No completion | Unknown registered status is not checked while reading. Repeated records retain the highest version. |
+| Version | Positive integer | 0 when absent | A saved version at least as large as the current definition suppresses normal playback. |
+
+Blank lines, comments beginning with `#`, malformed records, invalid IDs and invalid versions are ignored. Writes sort IDs, write a sibling `.tmp` file and replace the destination atomically where supported, with a non-atomic replacement fallback. Read/write I/O failures log warnings. No active step or queue is persisted. Disconnect clears runtime state, while completion remains.
+
+## Contracts
+
+### Definition and step fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | Identifier | Required, non-null | Unique registry key. Duplicate IDs throw. |
+| `version` | Integer | Required, positive | Increase when previously completed clients should see the tutorial again. |
+| `steps` | List of steps | Required for interactive definitions | Non-empty immutable copy; null elements are rejected. |
+| `screenClassName` | String | Required for screen definitions | Nonblank fully qualified class name. Every step must have a screen target with exactly this class-name string. Duplicate screen triggers throw and roll back the new ID registration. |
+| `titleKey`, `bodyKey` | Translation-key strings | Required for steps and short definitions | Non-null and nonblank; translations are resolved at presentation time. |
+| `durationMs` | Long | Required for short definitions | At least 1 ms. |
+| `advanceMode` | Enum | Required for steps | `HOLD_CONFIRM`, `KEY_PRESS`, `KEY_HOLD` or `ACTION`. |
+| `keyBindingTranslationKey` | Nullable string | Null in hold factory | Nonblank for key modes. For an action step it is an optional input hint, not the completion signal. |
+| `keyHoldDurationMs` | Long | 0 outside key-hold mode | Positive for `KEY_HOLD`; every other mode requires 0. |
+| `actionId` | Nullable identifier | Null in non-action factories | Required for `ACTION`; completion requires a matching notification while that step is active. |
+| `target` | Nullable target | Null | Highlight and context. A null target is still a HUD-context step. |
+| `image` | Nullable image | Null | Optional illustration; `withImage` returns a new step and rejects null. |
+
+At runtime screen matching walks the actual class's superclass chain. Registration order selects the first matching screen tutorial, rather than the most specific class. Completion of that first match does not cause the registry to search for another matching tutorial.
+
+### Inputs and timing
+
+| Input | Duration | Result |
+| --- | --- | --- |
+| Hold E | 1150 ms | Advances `HOLD_CONFIRM`; also the fallback for a key step whose binding cannot be resolved. |
+| Press resolved binding | Immediate request | Advances `KEY_PRESS`. |
+| Hold resolved binding | Authored positive duration | Advances `KEY_HOLD`. |
+| `notifyAction(actionId)` | Immediate request | Advances only the currently matching `ACTION` step in its available context. Earlier actions are not replayed. |
+| Hold Escape | 1500 ms | Skips the whole interactive tutorial and saves it as completed. |
+| Hold restart binding, default F10 | 1650 ms | When idle in the world, clears all saved tutorial completion and restarts adventurer basics. |
+| Scheduled step transition | 130 ms | Delays an accepted advance; durations use wall-clock milliseconds. |
+
+E and Escape are consumed during guidance, including release protection across transitions. Resolved non-E bindings and matching mouse buttons can still reach gameplay after scheduling advancement. Holding Escape cancels pending advancement and other hold progress. An action step has no E fallback. Releasing a held binding resets its timer.
+
+### Targets and illustrations
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `reporterId` | Nullable identifier | Null for fixed rectangles | Requests current-frame bounds. At least this or fallback bounds must be supplied. |
+| `fallbackBounds` | Nullable relative rectangle | Null for reported-only targets | Used when no matching report exists. No report and no fallback means no highlight, not automatic completion. |
+| `screenClassName` | String | Required for screen targets | Nonblank; also controls when the step is available. |
+| `x`, `y` | Finite floats | Required for relative rectangles | Nonnegative fractions of the entire scaled screen. |
+| `width`, `height` | Finite floats | Required for relative rectangles | Positive; right and bottom edges must not exceed 1 + 0.00001. Pixel conversion rounds and clamps to at least 1 pixel. |
+| `texture` | Identifier | Required for images | Non-null texture resource. |
+| `aspectRatio` | Finite float | Required for full images | Positive; controls reserved layout size before the image loads. A region factory derives it from region dimensions. |
+| `maxHeightDp` | Integer | 92 in image factories | At least 8 dp. |
+| `region` | Nullable pixel region | Null | Optional crop with `left`, `top`, `right`, `bottom`; width and height must be positive. Negative origins and texture-edge overflow are not rejected by the record. |
+
+Internal `TutorialHudBounds` keeps the last valid report for the requested ID in a frame. `TutorialScreenBounds` accepts only the exact requested screen instance and unions its valid matching reports. Both ignore nonpositive sizes. Report in scaled GUI pixels after the corresponding frame reset; a screen report is not a persistent registration. Missing images retain their authored space and frame.
+
+## Extending it
+
+Register this example from a client initialiser; its keys must also exist in both language assemblies. Imports come from `api.client.tutorial`, Minecraft `Identifier` and `java.util.List`.
+
+```java
+public static void registerExampleTutorial() {
+    Identifier tutorialId = new Identifier("example", "first_jump");
+    TutorialClientAPI.register(new GuidedTutorialDefinition(
+            tutorialId, 1, List.of(
+                    TutorialStep.hold("tutorial.example.welcome.title",
+                            "tutorial.example.welcome.body"),
+                    TutorialStep.keyPress("tutorial.example.jump.title",
+                            "tutorial.example.jump.body", "key.jump")
+            )));
+}
+```
+
+| Call | Side | Effect |
+| --- | --- | --- |
+| `TutorialAPI.trigger(player, id)` | Server | Sends a normal request to that player; no server-side registry or completion check. |
+| `TutorialAPI.forceTrigger(player, id)` | Server | Sends a replay request. |
+| `TutorialClientAPI.register(definition)` | Client | Registers the definition; call during client initialisation. |
+| `TutorialClientAPI.show(id)` | Client | Requests playback respecting saved progress. |
+| `TutorialClientAPI.replay(id)` | Client | Replays a guided/short definition or resets screen eligibility. |
+| `TutorialClientAPI.notifyAction(id)` | Client | Reports a completed local action to the active step. |
+
+All facade arguments above are non-null. Playback and action calls mutate the client manager directly: invoke them on the client thread, using `MinecraftClient.execute` when dispatching from another thread. Register definitions before requesting them. Keep client definitions and classes out of dedicated-server initialisation; server code only needs the identifier and server facade.
+
+For relative targets, press Control + the restart binding to open the bounds editor, drag with the left mouse button, and press Enter to copy a Java target expression to the clipboard and chat. Escape cancels. Selections must be at least 4 × 4 scaled pixels. Screen mode captures the current screen's class and closes if that exact screen changes; HUD mode closes when a screen opens. Resizing preserves the normalised selection and ends a drag. The tool emits 6 decimal places and never edits source files.
+
+## Verifying
+
+Use permission level 2 commands `/ise dev tutorial show <id> [targets]` and `/ise dev tutorial replay <id> [targets]`. Omitted targets require a player source. Suggestions contain only the 3 built-in IDs, but any identifier can be typed; success counts packet recipients, not actual displays.
+
+Check normal versus forced playback, a version increase, skipping, disconnect, and a new world on the same installation. Check screen close/reopen, subclass trigger ordering, an absent bounds reporter, GUI scaling, unavailable key bindings and an action notification delivered before its step. Confirm E/Escape releases do not open inventory or pause immediately after guidance. Test a dedicated server with definitions registered only on clients, and inspect the progress file after completion or restart.
+
+## Related
+
+- [Fate Balance API](/en/dev/fate-balance-api/) — another client presentation with server-owned gameplay state.
+- [Persistent state](/en/dev/persistent-state/) — world storage, distinct from tutorial completion.
+

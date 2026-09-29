@@ -1,0 +1,147 @@
+---
+title: "Skill-tree Runtime"
+description: "The Puffish graph bridge, authoritative gates, learnable-power rewards and snapshot-based client screen."
+category: systems
+order: 70
+updated: 2026-09-24
+---
+
+The skill-tree integration adds local unlock conditions and learnable-power rewards to Puffish Skills, then presents its state through a Modern UI screen. These are internal integration points under `internal.skills`, `util.skills`, `util.origins` and `client.screen.skilltree`; this subsystem does not expose an IsekaiExpansion public API facade.
+
+## What it does
+
+Puffish Skills owns graph configuration, player category state, point sources, dependency checks and unlock packets. IsekaiExpansion supplies the following bridges:
+
+| Owner | Responsibility |
+| --- | --- |
+| `SkillRequirementLoader` / `SkillRequirementRegistry` | Load one local condition per category/node lookup; maintain category identity and active-power gates |
+| `SkillsModMixin` | Reject a server unlock before Puffish processes it when a local gate fails |
+| `LearnablePowerReward` / `SkillPowerUtil` | Translate reward counts into an Apoli power source and upgrade level |
+| `CommonEventFactory` | Feed IsekaiCore level changes into main-tree points |
+| `SkillTreeScreenController` | Capture dependency client state on the Minecraft client thread and submit unlock requests there |
+| `SkillTreeScreenFragment` / graph and texture views | Own interface selection, search, hold, pending state and rendering |
+
+The dependency contracts below were checked against the locally resolved `net.puffish:skillsmod:0.18.2+1.20` source archive. Its `SkillsAPI` is a third-party API, not a facade owned by this repository. See [Wheel of Fate](/en/wiki/skill-tree/) for the shipped graph and [Skill-tree data](/en/wiki/skill-tree-data/) for the local JSON contracts.
+
+## Runtime model
+
+### Server state and points
+
+Puffish's category state stores unlocked node IDs, point amounts keyed by source, category availability and experience. Its category NBT uses `unlocked`, `experience`, `unlocked_skills` and `points`; this bridge does not create a separate persistent-state file for tree unlocks. Reused definition IDs share a reward count equal to the number of unlocked nodes referring to that definition.
+
+`SkillsUtil.MAIN_CATEGORY` is `isekaiskills:main`, and `AUTO_LEVEL_SOURCE` is `isekaiexpansion:auto`. The bundled category starts with 1 point, opens by default and limits normal spending to 100.
+
+| Level callback | Server-side change |
+| --- | --- |
+| Level up | Add `newLevel - oldLevel` to the automatic source |
+| Revert level | Reset main-tree skills, then set the automatic source to `newLevel - 1` |
+| Reset level | Erase the main category |
+
+These callbacks require a server player in a non-client world. They are not a join-time repair that continually forces the stored total to equal player level. Other sources remain relevant; normal points left are `min(total points, spent-point limit) - spent points`.
+
+### Requirements and reload
+
+Server data reload clears the local requirement set before parsing files. A failure aborts the remainder of its resource, retains earlier entries from it and continues with other resources. The set stores requirement object identities; category/node lookup returns its first match. Duplicate definitions therefore have no stable winner and are not a condition composition mechanism.
+
+Origins loading separately rebuilds the category identity map from registered IDs in `isekaiorigins`, `isekaiclasses` and `isekaiprofessions`. Requirement reload rebuilds the category-power gate list from `ClassDisciplineUtil.limitPowerIds()`. Keep these registries separate when changing reload order.
+
+`IsekaiEvents` sends `SyncSkillRequirementPacket` on server-play join. The packet replaces the receiving client's requirement set; current reload wiring does not send it again to connected players.
+
+| Wire field, in order | Encoding |
+| --- | --- |
+| Entry count | Integer |
+| Node ID, category ID, condition name | String, identifier, string |
+| Condition value | Identifier as string, integer or double according to the condition type |
+| Optional target present | Boolean |
+| Target ID when present | Identifier |
+
+The decoder has no explicit count bound; it uses the same condition constructor validation as the loader and rejects unknown condition names. Do not change enum names or value types on one side only. Client UI refresh does not replace missing network synchronisation.
+
+Puffish's own reload hides old categories, resets their rewards, loads configuration and updates players. Its category removal and reward reset are distinct from the local requirement sync. A disconnected player retains saved unlock IDs through dependency persistence; dependency leave handling resets applied rewards, and joining updates them from saved state.
+
+### Learnable rewards
+
+`LearnablePowerReward` registers `isekaiexpansion:learnable_power` through the dependency's `SkillsAPI`. Its data parser requires a `power` identifier and rejects unused data keys. `update` forwards the dependency's count; `dispose` itself is empty, so actual removal relies on the normal count-reset lifecycle.
+
+`SkillPowerUtil.editLearnablePowerFromId` resolves the power type and returns silently if it is missing. It uses the source `isekaiexpansion:learnables`, adds the power when the new count exceeds the stored skill level, and removes that source when the count reaches 0. For `IUpgradableSkillPower`, it updates the stored level against the power's maximum, synchronises the holder and reconciles the learned loadout. Intermediate rank reductions retain the power.
+
+Do not reuse a shared learnable power across unrelated reward definitions and assume their counts will aggregate: each reward update supplies its own definition count to the same local power-level entry and source.
+
+## Contracts
+
+### Authoritative unlock order
+
+The server HEAD injection checks, in order:
+
+1. A category listed as a power gate requires an **active** Apoli power whose ID equals the category ID.
+2. A mapped race, class or profession category must match the player's current non-empty identity. A null identity or `Origin.EMPTY` does not reject at this step.
+3. A matching node requirement must pass its current-value comparison.
+
+The `force` argument does not bypass these local checks. After they pass, Puffish decides whether the node exists, is already unlocked, excluded, connected and affordable. Its normal default is `required_skills = 1`, so the bundled multi-input junctions are alternatives. Normal affordability requires enough remaining points for both the node cost and any required-points floor, plus the required-spent-points floor. Dependency force can bypass those normal graph and budget restrictions.
+
+Conditions do not spend their checked values. Failure after an earlier unlock does not itself revoke that unlock; client snapshots preserve `UNLOCKED` and `EXCLUDED` states even when the additional condition is currently false.
+
+### Client ownership and lifecycle
+
+`SkillsClientModMixin` intercepts dependency screen opening and toggles the replacement screen on its key. `open` captures on the client side, retains the previous screen as parent, and refuses to open without a player. Refresh and submit hop to the Minecraft client executor; snapshots reach the Modern UI thread through `MuiModApi.postToUiThread`.
+
+Snapshots copy sorted node and edge lists, localised text, point state and eligibility. The graph does not read the mutable Puffish client catalogue while drawing. Category experience-level presentation is hidden when the category ID string starts with `isekai`; this does not change dependency experience storage.
+
+| Interface rule | Current implementation |
+| --- | --- |
+| Snapshot refresh | 150 milliseconds |
+| Search debounce | 180 milliseconds; localised title/description substring |
+| Unlock hold | 1.2 seconds on a monotonic clock |
+| Drag threshold | 5 interface units |
+| Pending unlock timeout | 5 seconds |
+| Confirmation effect | 900 milliseconds, after observing the server's unlocked state |
+| Geometry transition | 210 milliseconds |
+
+`SkillTreeHold` consumes a press once. Completion clears its target but leaves the pressed latch set until release; auto-repeat cannot submit another unlock. Changing category, dragging, zooming, losing focus, leaving the graph or losing eligibility cancels a hold. Directional selection is spatial, not a traversal of prerequisite edges.
+
+`submit` rechecks the active screen, current category, category eligibility, dependency `AFFORDABLE` state and local condition before sending the existing `SkillClickOutPacket`. The client hold is not a server security boundary. Pending state clears when the node is observed unlocked, disappears or exceeds the timeout; the timeout does not cancel server processing.
+
+The screen does not pause or blur the world. Destruction removes refresh/search callbacks, cancels animations, disposes graph resources and detaches only if it is still the active fragment. Texture frames, reveal passes and icons are batched through one Minecraft surface; the renderer restores its depth state, matrix and shader colour after drawing. Exclusion edges are shown only for the selected endpoint.
+
+## Extending it
+
+### Main-tree authoring
+
+The generator is `tools/puffish_main_tree/generate_main_tree.mjs`. Edit its branch specifications and construction rules, then run it from the repository root. It overwrites the generated category, graph definitions, node/connection data, requirement file, passive and active power files, and Puffish language category files. Review those diffs before accepting them; manual edits to those generated files are not a separate merge input.
+
+```powershell
+node tools/puffish_main_tree/generate_main_tree.mjs
+./gradlew.bat assembleLanguageFiles
+node tools/puffish_main_tree/validate_main_tree.mjs
+```
+
+Generated balance, missing-asset and SVG reports go to `build/puffish-main-tree/`. They are local generator output, not authored documentation. The balance report's proposed active-skill targets do not describe implemented effects.
+
+Keep stable node IDs when changing layout: saved progress is keyed by node ID. Reusable definitions describe rewards; repeated active nodes intentionally reuse a definition so the reward count becomes rank. The current graph has 379 nodes, 140 definitions, 525 directional connections and 7 exclusion pairs. Its 42 confluence nodes have no outgoing connection.
+
+The validator checks reachability, definitions, resource textures, power registration, bilingual language assembly, player attribute registration, stage budgets, capstone exclusions, active rank counts and node spacing. Connection crossings are warnings. It does not simulate all server reloads, multiplayer unlock races or combat effects.
+
+### Active effect implementation
+
+The current handlers are `AegisDomainSkill`, `HeroicRushSkill`, `StarfallVolleySkill`, `ThousandfoldEdgeSkill`, `ProvidenceMarkSkill`, `AstralNovaSkill` and `SanctuarySkill`. Each extends `LearnableActiveSkillSkeleton`; each `execute(SkillTriggerContext)` body is empty.
+
+The base class assigns `isekaiexpansion:learnable_active_<path>` and forwards `onTrigger` to `execute`. The matching Origins resources use type `isekaiorigins:triggerable_skill`, side `ACTIVE`, category `LEARNED` and that handler ID. Their `meta` carries `max_level = 3`, `cooldown = "0"` and `energy = "0"`. Cooldown and energy expressions must evaluate as non-negative integers through `SkillUpgradeMeta`; the resource does not use legacy top-level upgrade keys.
+
+Implement effects inside the registered handler and read rank/cost context through the existing trigger path. `SkillPowerUtil.tryTriggerSkill` checks activation policy, cooldown and energy; after an accepted execution it charges energy and sets the haste-adjusted cooldown. The empty skeleton still returns through that accepted path, so changing only the metadata could charge a player for an empty effect. Update the handler, generated metadata, validator assumptions and player documentation together.
+
+The frame names used by the generator match the shipped `circle_rank_1`, `circle_rank_2`, `circle_rank_3`, `hexagon_rank_2` and `hexagon_rank_3` texture families, with corresponding dark variants. Adding a reward or icon must pass asset and translation validation before publishing the regenerated graph.
+
+## Verifying
+
+- Run the validator after language assembly. Check all nodes remain reachable and confluences do not bypass stage gates.
+- Start a fresh player, unlock Appraisal, then test each gate immediately below and at its level/spending threshold. Confirm a multi-input junction needs only the configured predecessor count.
+- Choose either capstone and verify its partner is excluded. Compare ordinary unlocks with a trusted dependency force call: local requirements must still apply.
+- Unlock the same active definition at its 3 rank nodes, reduce ranks through dependency reset flows and verify the learned loadout reconciles.
+- Reload a valid requirement edit while connected, compare server rejection with the stale client view, then reconnect and compare again. Test a bad entry after a good entry in the same file and a duplicate in another file.
+- Hold, drag, zoom, change category, lose focus, close and reopen while a request is pending. Confirm only an observed server unlock starts the confirmation effect and old fragments stop receiving updates.
+- Test on a dedicated server as well as an integrated server. Source verification and the static graph validator do not establish multiplayer or rendering behaviour by themselves.
+
+## Related
+
+[Wheel of Fate](/en/wiki/skill-tree/) is the player guide. [Skill-tree data](/en/wiki/skill-tree-data/) specifies local condition and reward payloads. [Progression runtime](/en/dev/progression/) covers identity changes, and [Talents runtime](/en/dev/talents/) covers talent condition state.
+

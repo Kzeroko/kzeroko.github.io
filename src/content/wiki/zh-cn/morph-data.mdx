@@ -1,0 +1,181 @@
+---
+title: "变身能力与属性数据"
+description: "变身能力字段、技能元数据、形态使用条件、属性配置与资源重载行为。"
+category: data
+order: 115
+updated: 2026-09-19
+---
+
+变身能力选择形态及其动作，属性配置则在指定阶段修改使用者的属性。本页说明可编写字段及重载行为，运行时扩展约定另见关联开发文档。
+
+## 文件位置
+
+变身能力位于 `data/<namespace>/powers/<path>.json`，属性配置位于 `data/<namespace>/morph_attributes/<path>.json`。相对路径决定各自资源 ID。能力还需通过数据包的起源或其他授予机制交给玩家。能力中的 `id` 选择已注册的技能执行行为，新增标识符不会创建执行逻辑。
+
+保留玩家控制的形态包括本模组的基础 NPC 家族，以及 `isekaiexpansion:morph_player_rigs` 中的实体类型。此类形态保留玩家操作，并将两个配置的鼠标能力替换为 `isekaiexpansion:none`。只有第三方人形渲染器支持玩家骨架约定时，才应把它加入该标签。
+
+## 最小示例
+
+将下列内容放在 `data/isekaiorigins/powers/kitsune_active_fox_form.json`，可覆盖现有狐狸能力。它使用已注册的执行与能力 ID；仅有此文件不会授予能力。
+
+```json
+{
+  "type": "isekaiorigins:morphing_skill",
+  "id": "isekaiexpansion:kitsune_active_fox_form",
+  "meta": {
+    "max_level": 1,
+    "cooldown": "240",
+    "energy": "0"
+  },
+  "entity_type": "minecraft:fox",
+  "primary_ability": "isekaiexpansion:entity_primary",
+  "secondary_ability": "isekaiexpansion:kitsune_fox_pounce",
+  "transition_ticks": 18
+}
+```
+
+独立配置 `data/example/morph_attributes/fox_speed.json` 为处于激活狐狸形态的玩家添加速度修饰符：
+
+```json
+{
+  "forms": [
+    "minecraft:fox"
+  ],
+  "phases": [
+    "ACTIVE"
+  ],
+  "modifiers": [
+    {
+      "attribute": "minecraft:generic.movement_speed",
+      "operation": "multiply_total",
+      "value": 0.2,
+      "scale": {
+        "attribute": "isekaiexpansion:dexterity",
+        "factor": 0.002,
+        "max": 0.1
+      }
+    }
+  ]
+}
+```
+
+示例的修饰量为 `0.2 + min(0.1, dexterity × 0.002)`，上限只作用于换算项。此配置会与内置狐狸配置叠加；若要替换，应使用内置配置的资源 ID。
+
+## 字段
+
+### 变身能力
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | identifier | 必填 | 使用 `isekaiorigins:morphing_skill`。 |
+| `category` | string | `ORIGIN` | 严格使用大写 `NONE`、`LEARNED`、`ORIGIN`、`CLASS`、`PROFESSION` 或 `ULTIMATE`；未知值或大小写不符会失败。 |
+| `id` | identifier | 必填 | 已注册的执行 ID，与能力文件 ID 不同。新增 JSON ID 不会注册行为。 |
+| `meta` | object | 必填 | 下表所述的等级序列；必须包含 `cooldown` 和 `energy`。 |
+| `entity_type` | identifier | 必填 | 激活时目标必须能解析为生物实体；不存在或非生物类型会拒绝变身。 |
+| `primary_ability` | identifier | 必填 | 主槽位执行行为，实体专用覆盖可替换它；未知能力 ID 无法解析出动作。 |
+| `secondary_ability` | identifier | 必填 | 副槽位执行行为，覆盖规则相同。`isekaiexpansion:none` 明确拒绝使用。 |
+| `skin_id` | identifier | 无 | 可选专用纹理选择器。显式皮肤缺失时不会继续查找默认实体覆盖纹理。 |
+| `transition_ticks` | int | 18 | 最小限制为 4，进入和退出分别使用；没有上限钳制。 |
+| `morph_able` | object | 无 | 按下方共享规则解析，但变身子类型忽略它。用于普通触发技能或终极技能。 |
+| `sound_id` | identifier | 无 | 成功触发后的可选声音；无法解析的声音事件跳过。 |
+| `animation_id` | identifier | 无 | 成功触发后请求的可选玩家动画；解析时不验证动画资源。 |
+| `effek` | object | 无 | 成功触发后的可选特效，字段见下表。 |
+| `disabler` | object | 无 | 成功触发后的可选临时动作限制。 |
+
+变身能力固定为主动侧，不提供可编写的 `side` 字段。数据定义的形态没有稳定阶段时长限制，此处也没有 `duration_ticks` 字段。限时形态由程序化请求提供，包括护符。
+
+### 等级元数据
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `max_level` | int | 必填 | 1–256，必须为有限整数；拒绝数字字符串。 |
+| `cooldown` | 字符串序列 | 必填 | 非负整数 tick，最大 2147483647。变身处理器进入时使用 0，成功返回时使用配置值；技能急速会调整最终冷却。 |
+| `energy` | 字符串序列 | 必填 | 非负整数星界能量消耗，最大 2147483647。只在成功触发时扣除，包括成功返回；创造模式不支付。 |
+| `<custom_key>` | 字符串序列 | 无 | 由处理器定义。最多 256 个序列，键匹配 `[a-z][a-z0-9_]*`，最多 64 字符；`max_level` 保留。 |
+
+每个序列为斜杠分隔的字符串：可以只有一个有限数值用于全部等级，也可以恰好包含 `max_level` 个数值。`"10/20/30"` 有 3 项；空项、非有限值或数量不符均失败。解析数字前会去除首尾空白，查询时将等级限制到支持范围。其他合法键会保留，但只有读取它的处理器才能赋予行为。
+
+核心能力支持以下可选序列：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `pounce_velocity` | number series | 1.15 | 狐狸扑击水平速度；处理器不限制范围。 |
+| `pounce_damage` | number series | 4.0 | 狐狸扑击基础火焰伤害。 |
+| `pounce_coefficient` | number series | 0.55 | 狐狸扑击火焰强度系数。 |
+| `foxfire_multiplier` | number series | 1.45 | 消耗一个附着狐火时的扑击倍率。 |
+| `secondary_cooldown` | integer series | 取决于处理器 | 狐狸扑击 100、监守者音爆 200、女巫治疗药水 120 tick。 |
+| `primary_cadence` | integer series | 18 | 监守者主攻击间隔；运行时间隔最小为 1 tick。 |
+| `melee_damage` | number series | 形态攻击伤害，最小为 1 | 覆盖监守者近战伤害；显式值不受处理器范围限制。 |
+| `sonic_damage` | number series | 10 | 覆盖监守者音爆伤害。 |
+| `primary_potion_cooldown` | integer series | 30 | 女巫攻击药水冷却。 |
+| `native_hold_ticks` | integer series | 30 | Saints Dragons 技能栏原生动作保持时间；最小为 1。 |
+
+整数查询遇到小数或超出 int 范围的值时，使用处理器回退值。成功能力的负冷却限制为 0。其他自定义序列在解析时只要求有限值；速度和伤害应选用有实际意义的数值。
+
+### 使用条件与触发效果
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `morph_able.normal_form` | boolean | true | 允许在非变身状态使用。 |
+| `morph_able.entity_types` | 标识符数组 | `[]` | 精确形态白名单；空数组允许全部已激活形态。重复项合并，不能用标签代替。 |
+| `effek.id` | identifier | 无 | 特效资源 ID。启用 `effek` 时应提供；可选默认值不构成可用特效声明。 |
+| `effek.bind` | boolean | false | 将特效绑定到触发实体。 |
+| `effek.to_head` | boolean | false | 绑定特效时使用头部。 |
+| `effek.offset` | vector | (0, 0, 0) | 传入特效构建器的偏移；此处不限制范围。 |
+| `effek.scale` | float | 0 | 直接传给特效构建器的缩放；此序列化器不钳制，具体见特效构建器校验约定。 |
+| `disabler.duration_ticks` | int | 0 | 仅为正值时施加限制；此处没有上限钳制。 |
+| `disabler.use_item` | boolean | false | 临时禁止使用物品。 |
+| `disabler.attack` | boolean | false | 临时禁止攻击。 |
+| `disabler.move` | boolean | false | 临时禁止移动。 |
+| `disabler.jump` | boolean | false | 临时禁止跳跃。 |
+
+普通 `isekaiorigins:triggerable_skill` 和 `isekaiorigins:ultimate_skill` 省略 `morph_able` 时只允许正常形态。空对象允许正常形态及所有已激活变身；显式 `entity_types` 列表限制激活形态。进入和退出过程中，普通技能无论此规则如何配置都被阻止。变身子类型始终通过这项使用条件检查，以便所属技能请求返回，但其他检查仍可拒绝请求。
+
+声音、动画、特效和动作限制都在执行成功后发生。特效资源及构建器细节见 [Effekseer 集成](/zh-cn/dev/effekseer-particles/)。
+
+### 属性配置
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `forms` | identifier / identifier array | `[]` | 精确目标实体类型；形态或形态标签至少提供一个。非法标识符导致文件失败。 |
+| `form_tags` | identifier / identifier array | `[]` | 不带 `#` 的实体类型标签，与 `forms` 为或关系。没有匹配时不产生效果。 |
+| `phases` | string / string array | `["ACTIVE"]` | 不区分大小写的 `NONE`、`ENTERING`、`ACTIVE`、`EXITING`，不去除空白。缺失或为空时使用 `ACTIVE`，未知值失败。`NONE` 可解析，但运行时在该阶段不应用修饰符。 |
+| `priority` | int | 0 | 按升序排列，再按配置 ID 排序；应用所有匹配项，并非仅采用最高优先级。 |
+| `modifiers` | 对象数组 | `[]` | 必须至少有一个修饰符；任一条目错误导致整个文件失败。 |
+| `modifiers[].attribute` | identifier | 必填 | 目标玩家属性。合法但未注册的 ID，或玩家没有的属性，在应用时跳过。 |
+| `modifiers[].operation` | string | `addition` | 不区分大小写，不去除空白。加法：`addition` / `add` / `add_value`；基础乘算：`multiply_base` / `multiply_base_value`；总量乘算：`multiply_total` / `multiply` / `multiply_total_value`。未知值失败。 |
+| `modifiers[].value` | double | 0 | 固定贡献；解析器不检查范围或是否有限。 |
+| `modifiers[].scale` | object | 无 | 可选属性换算贡献，与 `value` 相加。显式 null 无效。 |
+| `scale.attribute` | identifier | 必填 | 源玩家属性。注册项或玩家属性实例缺失时，整个换算贡献为 0，包括偏移。 |
+| `scale.factor` | double | 1 | 当前源属性值的乘数。 |
+| `scale.offset` | double | 0 | 乘算后、钳制前加上的值。 |
+| `scale.min` | double | −1.7976931348623157e308 | 只限制换算贡献的下界；上下界反转时自动交换。 |
+| `scale.max` | double | 1.7976931348623157e308 | 只限制换算贡献的上界，不限制固定 `value`；没有显式有限性检查。 |
+
+最终量为 `value + clamp(source_attribute × factor + offset, min, max)`。换算读取玩家当前有效属性，包括当前已安装修饰符。计算发生在移除旧变身修饰符之前，因此受其他变身修饰符影响的源属性，可能反馈到下一次刷新。这不是依赖图，也不是持续重算公式。
+
+所有匹配配置都会贡献临时玩家修饰符。稳定修饰符身份由配置 ID 和数组索引生成，因此不同索引下的相同属性条目仍是独立贡献。优先级决定解析顺序，不排除其他配置；玩家不存在的属性会跳过。
+
+## 验证
+
+属性根必须是对象。选择器接受转换成文本的基本值，或由可转换为文本的条目组成的数组；对象或 null 形状会失败。应明确使用字符串：数字基本值也可能变成看似合法的标识符。非法阶段、操作、必填 ID 或修饰符对象会使整个配置失败。未知字段忽略。失败配置会记录并跳过，随后以全部成功解析项替换注册表，不保留其旧值。
+
+属性配置必须同时具有非空选择器集合和非空修饰符列表。合法但未匹配的形态或标签不产生修饰符。属性数值字段没有显式有限性或游戏范围检查。
+
+能力构造拒绝无效分类或元数据，并要求提供上表标记的必填字段。实体和能力是否可用在稍后解析。变身目标必须是生物，空间必须容纳目标尺寸，且玩家不能正在骑乘。返回要求能容纳站立玩家。执行被拒绝时，不扣除触发消耗，也不施加触发效果。成功返回可能支付与进入相同的能量，不能默认认为返回免费。
+
+实体专用能力覆盖优先于配置 ID。内置监守者和女巫覆盖会选择对应主副动作；能力 JSON 中的 `isekaiexpansion:none` 无法抑制已安装的实体覆盖。专用变体也可接管形态纹理，绕过通用变身纹理覆盖。
+
+## 重载
+
+属性配置随服务端数据包重载。成功重载后刷新在线玩家的临时修饰符；阶段变化、加入和重生也会刷新。源属性变化本身不会触发刷新，组件不会每 tick 重算换算值。离开形态会移除已应用修饰符。
+
+能力定义遵循所安装能力加载器的行为。当前变身保存已解析的形态和能力 ID，不能假定编辑能力会改写正在运行的形态。重载后重新进入形态，再检查变化。
+
+纹理属于客户端资源。未提供 `skin_id` 时，候选路径为 `assets/isekaiexpansion/textures/morphs/entities/<entity-namespace>/<entity-path>.png`；提供时为 `assets/isekaiexpansion/textures/morphs/skins/<skin-namespace>/<skin-path>.png`。候选缺失时沿用渲染器正常纹理。修改 PNG 后重载客户端资源；JSON 不定义原生形态变体。
+
+## 相关页面
+
+- [人形预设数据](/zh-cn/wiki/humanoid-presets/)
+- [属性与效果](/zh-cn/wiki/attributes-and-effects/)
+- [Effekseer 集成](/zh-cn/dev/effekseer-particles/)

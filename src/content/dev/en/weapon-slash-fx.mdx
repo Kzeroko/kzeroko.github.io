@@ -1,0 +1,223 @@
+---
+title: "Weapon slash FX"
+description: "Better Combat attack ribbons, complete resource-pack profiles, geometry, materials and client events."
+category: client
+order: 155
+updated: 2026-09-26
+---
+
+Weapon slash FX builds a two-pass ribbon from the rendered weapon's motion. It observes Better Combat attack animations on players and mobs, classifies each attack, and draws only eligible slashes; the start event remains available even when the built-in ribbon is disabled.
+
+## What it does
+
+`client.fx.weaponslash` owns the implementation. It is client presentation, with no damage calculation, server gameplay state or save data. Profiles live in client resources at `assets/<namespace>/weapon_slash_fx/<path>.json`; their identifier is `<namespace>:<path>`. Textures are normal resource-pack assets.
+
+`api.client.fx.WeaponAttackFxEvents.ATTACK_ANIMATION_START` is the public event. The implementation classes `WeaponSlashFx`, `WeaponSlashPoseCapture` and the registry are not public API facades. Better Combat supplies player attack animation data; the Better Mob Combat bridge calls the same path for mobs. This checkout uses Better Mob Combat 1.3.1 and Satin 1.14.0.
+
+## Runtime model
+
+### Attack and render lifecycle
+
+Each animation start resolves the attacked hand's stack, Better Combat category, profile and visual kind, then fires the event. Duration is positive finite ticks or 0; upswing is finite and clamped to 0–1, otherwise 0. The event runs before entity enablement, duration, exclusion and slash-kind checks. It fires once for the attack, not again for a second-hand ribbon. A throwing event listener is not caught locally and can interrupt later listeners and ribbon setup.
+
+Starting an attack stops old collection for that entity, leaving its existing samples to fade. A ribbon requires a matched profile, kind `SLASH`, a non-excluded weapon, an enabled player/mob and a positive duration. The effective collection end must exceed the start. If the animation enables both `leftItem` and `rightItem`, the attack is not `TWO_HANDED`, and both held weapons have non-two-handed Better Combat attributes, each hand resolves its own profile and exclusion.
+
+World-render start captures the inverse view and camera; after entities it draws world ribbons, and render end closes that capture window. First-person hand ribbons use their own pass and direct main target; Player Animator's first-person player-model pass is distinguished from ordinary third-person rendering. Iris shadow passes are ignored. Join, disconnect and world change clear trails; disabling both entity groups clears the system.
+
+Capture respects the profile and local perspective flags and the smaller configured/profile distance. Humanoid morph render proxies resolve back to their host. World samples are stored relative to the moving entity anchor, so the retained ribbon moves with that entity rather than remaining behind in world space.
+
+### Geometry and sampling
+
+Automatic anchors prefer a flat generated model's visible sprite outline, then rendered vertex capture. Flat-model analysis uses nontransparent pixels across animation frames and caches a convex outline; built-in/depth models use the vertex path. Vertex capture keeps up to 32 farthest distinct candidates, then averages candidates whose squared reach is at least 0.98 times the maximum and whose direction similarity is at least 0.9. If detection is unavailable, transformed model-space root/tip coordinates are used; without a usable item transform there is no sample.
+
+Sampling interval is `max(0.0001, min(duration × (end − start), lifetime) / (max_samples − 2))` ticks. Each track reserves capacity for a tail clipping neighbour and the replaceable live head. Slow attacks sample within the visible lifetime instead of spreading the whole budget across the attack. Repeated captures at the same time do not add samples.
+
+Capture retains the last pose before the collection window and accepts a pose up to 1 tick (0.05 seconds) after its end. The track interpolates the exact start and end boundaries from those observations. Windup poses do not draw. A window with no pair of usable observations cannot reconstruct a stroke.
+
+Ordinary swings interpolate the blade direction as a rotation, interpolate its length separately and carry the hand along the corresponding circular path. Motion along the rotation axis stays linear. This preserves reach between sparse captures. Invalid or zero-length spans clear the history; backward time, a gap longer than the selected lifetime, excessive root relocation or blade-length change, or an unexplained direction change above 150 degrees starts a new stroke. `max_segment_distance` applies to root relocation and blade-length change, so a long blade can sweep farther than that limit without being discarded.
+
+World-space spin reconstruction examines enabled body/torso yaw channels with at least 2 keyframes. It selects the stronger unwrapped sweep; a spin requires at least π radians (180 degrees) net sweep and net/total angular travel at least 0.75. Same-tick authored full turns are preserved. The shared pose interpolator removes the authored yaw, interpolates the remaining motion and reapplies the yaw easing. The spin guide follows Better Combat's attack mirroring: off-hand selection and a left-handed main arm each invert it, and both weapon tracks share that direction. First-person tracks use measured rotation and the slash style. Switching between hand and player-model coordinates clears the first-person history.
+
+The mesh smooths interior poses using time-weighted neighbours, then restores each measured blade length. It subdivides curves towards 6-degree or 0.12-block sections, with at least 8 segments for a sparse two-pose stroke and an absolute cap of 129 sections. Sheet and edge share this mesh: at most 128 quads per material, or 1024 submitted vertices per track. Endpoints stay attached to the measured or window-clipped poses.
+
+Taper and longitudinal UV use cumulative swept distance: each interval contributes the larger of its root and tip travel. The complete mask spans the visible stroke regardless of attack duration. Short strokes grow in width with travelled distance before reaching the configured inner radii. Expiry retains one neighbour before the lifetime boundary and clips the mesh at that boundary, so the tail moves continuously. Fade remains smoothstep of remaining lifetime and continues after collection stops. The configured trail cap prefers removing finished trails before active ones.
+
+## Contracts
+
+### Local configuration
+
+These `IsekaiConfig` fields are read from `IsekaiExpansion.localConfig()`, under category `weapon_slash_fx`. They control ribbon generation and rendering; they do not suppress the attack event.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `weaponSlashFxPlayersEnabled` | `boolean` | true | Enables player ribbons. |
+| `weaponSlashFxMobsEnabled` | `boolean` | true | Enables mob ribbons. |
+| `weaponSlashFxFirstPerson` | `boolean` | true | Allows first-person capture together with the profile flag. |
+| `weaponSlashFxThirdPerson` | `boolean` | true | Allows third-person capture together with the profile flag. |
+| `weaponSlashFxOpacityPercent` | `integer` | 100 | Clamped to 0–100%; multiplies material alpha. |
+| `weaponSlashFxRenderDistance` | `integer` | 64 | Clamped to 8–256 blocks; capture uses the smaller of this and profile distance. |
+| `weaponSlashFxMaxActiveTrails` | `integer` | 64 | Clamped to 8–128 trails; removes an old finished trail first, otherwise the oldest active trail. |
+| `weaponSlashFxExcludedItems` | `array<string>` | ["isekaiexpansion:crescent_rose"] | Exact item IDs, trimmed; blank/null entries ignored, invalid IDs warned and ignored. Changes rebuild the exclusion snapshot on lookup. |
+
+### Profile selection and inheritance
+
+Profiles sort by descending priority, then descending specificity, then ascending profile ID. The first match wins. Specificity adds 1000 for item IDs, 500 for tags, 200 for exact animations, 100 for animation regexes and 50 for categories. Nonempty selector groups combine with AND, while entries within a group combine with OR; exact animations and regexes form one shared OR group.
+
+Inheritance deep-merges objects. Arrays, primitives and null replace the parent's value; arrays are not appended. The `extends` field is removed before parsing. An empty child object preserves inherited nested keys, while a null/wrong-type nested object can fall back to loader defaults. Inherited selectors and priority remain unless overridden.
+
+A minimal accepted profile is `{}`, but it matches everything with priority 0 and would outrank the bundled fallback. Use a targeted child for an intentional override:
+
+```json
+{
+  "extends": "isekaiexpansion:default_hybrid",
+  "priority": 100,
+  "selector": { "items": ["minecraft:diamond_sword"] },
+  "sheet": { "color": "#5CCBFFE0" }
+}
+```
+
+The tables below describe loader defaults before resource inheritance. They are not the bundled fallback's final values.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `extends` | `identifier` | Absent: no parent | Recursively inherits another profile ID, not a file path. Missing parent or a cycle rejects the child. |
+| `priority` | `integer` | 0 | Higher values win before selector specificity. |
+| `selector` | `object` | {} | Empty selector matches every item/animation/category. See selector table. |
+| `kind` | `enum(auto, slash, stab, slam, other, none)` | auto | Trimmed, case-insensitive; unknown value rejects the profile. Only slash produces a built-in ribbon. |
+| `root` | `array<number>` | [0.28, 0.18, 0.5] | Model-space fallback root, 3 finite coordinates; no range clamp. |
+| `tip` | `array<number>` | [0.76, 0.92, 0.5] | Model-space fallback tip, same parsing as root. |
+| `anchors` | `object` | {} | Automatic tip detection or explicit model coordinates. |
+| `anchors.mode` | `enum(auto, model_space)` | auto | Unknown strings fall back to auto. Auto uses the hand origin and detected visible tip when available. |
+| `anchors.root_inset` | `number` | 0 | Clamped to 0–0.9 of detected hand-to-tip length; auto mode only. |
+| `anchors.tip_inset` | `number` | 0 | Clamped to 0–0.9; endpoint is at least root inset + 0.01, then clamped to 0.01–1. |
+| `window` | `object` | {} | Normalised attack-progress collection window. |
+| `window.use_upswing_start` | `boolean` | true | Starts from synchronised upswing instead of authored start. |
+| `window.start` | `number` | 0.35 | Clamped to 0–1; used only when upswing start is false. |
+| `window.start_offset` | `number` | -0.02 | Clamped to −1–1 and added to the chosen start, whose result is clamped to 0–1. |
+| `window.end` | `number` | 0.96 | Clamped to 0–1; no ribbon if end is not greater than effective start. |
+| `max_samples` | `integer` | 28 | Clamped to 4–64, including the replaceable live head. |
+| `min_sample_distance` | `number` | 0.004 | Positive finite distance in blocks; suppress a committed sample only if both endpoints moved less than this. |
+| `max_segment_distance` | `number` | 3 | Positive finite distance in blocks; larger root relocation or blade-length change resets history. Authored spin yaw is removed before this check. |
+| `geometry` | `object` | {} | Contains separate slash and spin styles. |
+| `geometry.slash` | `object` | Default slash style | Used by measured-rotation tracks, including every first-person track. |
+| `geometry.spin` | `object` | Default spin style | Used by eligible world-space body/torso spin tracks. |
+| `max_distance` | `number` | 64 | Positive finite value, then clamped to 4–256 blocks. |
+| `first_person` | `boolean` | true | Profile permission for first-person capture. |
+| `third_person` | `boolean` | true | Profile permission for third-person capture. |
+| `sheet` | `object` | Default sheet material | Wide ribbon material; see material table. |
+| `edge` | `object` | Default edge material | Narrow outer ribbon material; see material table. |
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `selector.items` | `string or array<string>` | [] | Exact item IDs; any listed item matches. Invalid ID rejects profile. |
+| `selector.item_tags` | `string or array<string>` | [] | Item tag IDs without #; any matching tag passes. |
+| `selector.animations` | `string or array<string>` | [] | Exact, case-sensitive animation IDs. |
+| `selector.animation_patterns` | `string or array<string>` | [] | Java regex matched against the entire animation ID; invalid regex rejects profile. |
+| `selector.categories` | `string or array<string>` | [] | Trimmed lowercase Better Combat categories; a missing runtime category cannot pass a nonempty list. |
+
+Selector null/missing values become empty sets. Primitive values are converted to strings, arrays are deduplicated and empty strings removed; only categories are trimmed/lowercased. A syntactically valid but unregistered item/tag ID is accepted and may never match. Patterns use full-string matching, not substring search.
+
+### Geometry fields
+
+Apply each row under either `geometry.slash` or `geometry.spin`. Non-finite values fall back to that style's default; nonpositive lifetime falls back before clamping.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `inner_radius` | `number` | slash 0.28; spin 0.42 | Clamp 0–0.98; root-to-tip fraction where the sheet's inner edge starts. |
+| `edge_inner_radius` | `number` | slash 0.72; spin 0.76 | Clamp from inner_radius to 0.995; narrow edge inner boundary. |
+| `tail_taper` | `number` | slash 0.22; spin 0.10 | Clamp 0.01–0.49; smooth narrowing at old end. |
+| `head_taper` | `number` | slash 0.10; spin 0.08 | Clamp 0.01–0.49; smooth narrowing at live end. |
+| `smoothing` | `number` | slash 0.16; spin 0.08 | Clamp 0–0.45; blend towards time-weighted neighbours by 2s, then restore blade length. Endpoints stay fixed. |
+| `lifetime_ticks` | `number` | slash 4.5; spin 12 | Positive finite, clamped 0.25–40 ticks (0.0125–2 seconds). Defaults are 0.225 and 0.6 seconds; controls expiry, fading, sampling density and the maximum capture gap. |
+
+### Material fields and masks
+
+Apply each row under `sheet` or `edge`. Both materials draw the same sampled ribbon with different inner radii.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `texture` | `identifier` | minecraft:textures/misc/white.png | Full texture path. Invalid identifier falls back; existence is not validated by the profile loader. |
+| `color` | `string or array<number>` | sheet #BDEBFF8F; edge #ECFAFFFF | RGB/RGBA hex or 3–4 component array; colour rules below. |
+| `opacity` | `number` | sheet 1; edge 0.92 | Clamp 0–1; non-finite becomes 0. |
+| `blend` | `enum(translucent, additive)` | sheet translucent; edge additive | Case-insensitive; unknown string uses material default. |
+| `shader` | `enum(auto, vanilla, satin)` | auto | Vanilla forces entity shader; auto and satin use Satin only without an active Iris shader pack. |
+| `blur` | `boolean` | true | Texture filtering flag. |
+| `mipmap` | `boolean` | false | Texture mipmap flag. |
+| `flip_u` | `boolean` | false | Reverses longitudinal coordinate before scale/scroll. |
+| `flip_v` | `boolean` | false | Swaps inner and outer transverse coordinates. |
+| `depth_test` | `boolean` | true | LEQUAL when true, always-pass when false. |
+| `depth_write` | `boolean` | false | Writes depth together with colour when true; colour only otherwise. |
+| `uv` | `object` | {} | Texture scale and scroll. |
+| `uv.u_scale` | `number` | 1 | Positive finite longitudinal scale; otherwise fallback. |
+| `uv.v_scale` | `number` | 1 | Positive finite transverse scale; otherwise fallback. |
+| `uv.u_scroll` | `number` | 0 | Finite UV units per game tick along U; non-finite fallback. |
+| `uv.v_scroll` | `number` | 0 | Finite UV units per game tick along V; non-finite fallback. |
+
+Hex colour accepts 6 RGB or 8 RGBA digits, optionally prefixed with `#`; RGB implies full alpha. Arrays accept 3 or 4 components. If any supplied component exceeds 1, all channels are divided by 255; otherwise they are normalised values. Missing array alpha remains fully opaque in either mode. Channels clamp to 0–1. Malformed colour strings, wrong array lengths and conversion exceptions use the material default.
+
+U runs from 0 at the visible tail to 1 at the live head, using cumulative swept distance divided by total visible distance. V is 0 at the pass's inner boundary and 1 at the weapon-tip boundary before flips. Scroll uses world time plus tick delta modulo 10000 ticks (500 seconds), multiplied by the per-tick scroll value. Author transparent regions in the PNG alpha channel; black RGB with opaque alpha is not a transparent mask.
+
+Final vertex alpha combines colour alpha, material opacity, smooth lifetime fade and local opacity percentage. Satin multiplies sampled RGBA by vertex colour and `ColorModulator`, discarding alpha below 0.003. Sheet and edge both disable culling. With an active Iris shader pack, even `shader: satin` takes the entity-format fallback, using full-bright light and camera-facing normals. This fallback routes through the item-entity target; the Satin world pass uses the translucent target. Texture filtering, depth test and depth write follow each material.
+
+### Bundled profiles
+
+`isekaiexpansion:default_hybrid` has no selector, priority −10000, root inset 0.04, window offset −0.015, end 0.98, 32 samples, minimum distance 0.003 and maximum segment distance 2.5. It retains the default geometry styles, distance and perspective flags. Its sheet uses `isekaiexpansion:textures/weapon_slash/dcsd_slashtrail_003.png`, colour `#5CCBFFE0`, opacity 0.68; its edge uses `isekaiexpansion:textures/weapon_slash/dcsd_slashlead_001.png`, colour `#E8FBFFFF`, opacity 0.88. Both flip V.
+
+| Child ID | Item selector | Priority | Sheet colour | Edge colour |
+| --- | --- | --- | --- | --- |
+| `isekaiexpansion:demon_sword` | `isekaiexpansion:demon_sword` | 100 | `#f200b5` | `#b80089` |
+| `isekaiexpansion:demon_spear` | `isekaiexpansion:demon_spear` | 100 | `#1ed4c4` | `#0cb0a2` |
+| `isekaiexpansion:crescent_rose` | `isekaiexpansion:crescent_rose` | 100 | `#ac0000` | `#870303` |
+
+Each child extends `isekaiexpansion:default_hybrid`. Crescent Rose's profile does not bypass the default local item exclusion.
+
+### Validation and reload
+
+Read/parse failures warn and skip that profile. Missing/cyclic/invalid parents, invalid selector IDs or regexes, unknown kind and strict typed-field errors can reject a profile. An empty file is a parse error; an empty object is valid. Unknown fields are ignored except removed top-level `edge_start` and `lifetime_ticks`, whose presence rejects the profile even if null.
+
+Missing or wrong-type nested objects become empty objects. Root/tip that are absent, not arrays or not length 3 use the whole fallback; non-finite coordinates use per-coordinate defaults, while unconvertible coordinate elements reject the profile. Positive-distance fields fall back for zero, negatives or non-finite values. Material enum typos fall back, unlike a kind typo. Texture existence and item/tag registration are not checked here.
+
+Client resource reload rebuilds the immutable sorted profile list and clears animation metadata, flat-model outline and render-layer caches. It does not clear active trails; each retains the profile captured when its attack began. Server data-pack `/reload` is not this resource listener.
+
+## Extending it
+
+Register a client listener during client initialisation. This example adapts a caller-provided effect callback to stab starts; imports are `WeaponAttackFxEvents`, `WeaponAttackFxContext` and `java.util.function.Consumer`.
+
+```java
+public static void registerStabEffect(
+        Consumer<WeaponAttackFxContext> effect) {
+    WeaponAttackFxEvents.ATTACK_ANIMATION_START.register(context -> {
+        if (context.isStab()) {
+            effect.accept(context);
+        }
+    });
+}
+```
+
+| Context member | Contract |
+| --- | --- |
+| `entity()` | Live entity reference, not a snapshot. |
+| `weapon()` | Defensive copy of the stack snapshot taken at event creation. |
+| `animationId()`, `animatedHand()` | Non-null animation identifier string and Better Combat hand. |
+| `durationTicks()`, `upswing()` | Sanitised by the controller as described above; the public record constructor itself does not clamp them. |
+| `kind()` | Non-null resolved visual kind; `isStab()` checks `STAB`. |
+| `slashProfileId()` | Nullable selected profile ID, including profiles that will not draw. |
+| `isLocalPlayer()`, `isMob()` | Identity with the local player, or `MobEntity` membership. |
+
+Auto classification lowercases the animation ID. It checks stab terms first (`stab`, `thrust`, `pierce`, `lunge`, `poke`), then slam (`slam`, `smash`, `ground`), then slash (`slash`, `sweep`, `swing`, `spin`, `uppercut`, `upperslash`, `_lr`, `_rl`, `_lrl`, `_rlr`); otherwise `OTHER`. `NONE` requires an explicit profile override. This is visual classification, not hit confirmation.
+
+Callbacks run synchronously on the client animation call path. They cannot cancel the attack or replace its profile. Handle your own exceptions and apply your own effect policy: the event still fires for locally excluded/disabled ribbons. Keep registration and rendering code client-only. Custom item render integration must bracket capture with a session, forward its consumer and call `end()` in `finally`; the session is idempotent and its nested contexts are thread-local.
+
+## Verifying
+
+Run `./gradlew.bat compileJava`. Between observed poses, reconstruction assumes a continuous rotation; it cannot recover an unseen reversal.
+
+Check local/remote players, mobs, each hand, left-handed main arms, dual wield and two-handed animations. Compare first-person hand rendering, Player Animator's first-person pass, third person and a humanoid morph. Test ordinary slashes, stab/slam exclusions, a body spin, moving attackers, low frame rate and a segment discontinuity.
+
+For profiles, test an inherited colour-only override, array replacement, selector AND/OR, priority ties, bad regex, a cycle, removed geometry keys and a missing texture. Reload during an attack to distinguish retained active profiles from new attacks. Check Iris on/off, shadow passes, depth flags, opacity zero, exclusion changes and cap eviction. Confirm event delivery still occurs when ribbon switches are off; confirm your listener cannot accidentally throw into the animation path.
+
+## Related
+
+- [Effekseer particles](/en/dev/effekseer-particles/) — client effect creation for custom attack listeners.
+- [Morph client integration](/en/dev/morph-client/) — player/proxy presentation.
+- [Shaders and materials](/en/dev/shaders-and-materials/) — other client shader contracts.

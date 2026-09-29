@@ -1,0 +1,162 @@
+---
+title: "问路 API"
+description: "服务端线程上的目的地搜索、工作上限、结果处理、对话集成与指南针状态。"
+category: api
+order: 130
+updated: 2026-09-26
+---
+
+`WayfindingAPI` 搜索当前维度中的群系、地形家族或结构，不接管调用方的交互。回调给出受工作预算限制的搜索结果；使用前仍须验证玩家、世界与当前交互是否有效。
+
+## 入口
+
+门面为 `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`。公开记录 `LocateTarget`、`LocateRequest`、`LocateResult` 位于同包，实现位于 `internal.wayfinding` 与 `world.terrain.runtime`。
+
+在逻辑服务端线程使用已存在的 `ServerWorld`。`locate` 与 `cancel` 在其他线程会抛出 `IllegalStateException`；惰性目录没有线程断言，但使用未同步的映射，因此也须遵守同一要求。世界创建前没有可用入口。
+
+## 常见用法
+
+### 发起搜索并拒绝过期玩家上下文
+
+```java
+static void findDesert(ServerPlayerEntity player) {
+    var world = player.getServerWorld();
+    var target = new LocateTarget(LocateTarget.Kind.BIOME,
+            new Identifier("minecraft", "desert"));
+    var request = new LocateRequest(target, player.getBlockPos(), 512, 8192);
+    WayfindingAPI.locate(world, player.getUuid(), request, result -> {
+        if (world.getServer().getPlayerManager().getPlayer(player.getUuid()) != player
+                || player.getWorld() != world) return;
+        player.sendMessage(Text.literal(result.status().name()), false);
+    });
+}
+```
+
+示例使用上述 API 包，以及 Minecraft 的 `ServerPlayerEntity`、`Identifier` 与 `Text`。界面调用还应像内置村民适配器一样，捕获并比较会话和 token。提交时可能同步调用回调，因此必须先建立上下文，再调用 `locate`。
+
+### 读取目录或取消
+
+```java
+static List<LocateTarget> biomeChoices(ServerWorld world) {
+    return WayfindingAPI.destinations(world, LocateTarget.Kind.BIOME);
+}
+
+static void cancelSearch(ServerPlayerEntity player) {
+    WayfindingAPI.cancel(player.getServerWorld(), player.getUuid());
+}
+```
+
+示例使用 `java.util.List` 和 Minecraft 的 `ServerWorld`、`ServerPlayerEntity`。取消依据所有者 UUID，不依据维度；传入世界用于服务端线程检查。所有者没有任务时不执行任何变更。
+
+## 方法一览
+
+### 门面与记录
+
+| 签名 | 返回或效果 |
+| --- | --- |
+| `destinations(ServerWorld, LocateTarget.Kind)` | 按目标 ID 排序、去重的不可变列表；按世界对象与类别惰性缓存。 |
+| `locate(ServerWorld, UUID, LocateRequest, Consumer<LocateResult>)` | 返回 void；接收任务或立即回调终态结果。 |
+| `cancel(ServerWorld, UUID)` | 移除所有者任务，取消存在的地形 future，并回调 `CANCELLED`。 |
+| `new LocateTarget(Kind, Identifier)` | 两字段不可为空；类别为 `TERRAIN`、`BIOME`、`STRUCTURE`。 |
+| `LocateTarget.name()` | 带回退的可翻译标签，规则见下文。 |
+| `new LocateRequest(target, origin, minimumDistance, radius)` | 目标不可为空，起点保存不可变副本；水平格数须满足 128 ≤ minimumDistance < radius ≤ 64000。 |
+| `new LocateResult(status, target, dimension, position)` | 位置保存不可变副本；`FOUND` 必须有位置，其余状态不能有。构造器仅检查此约定，不检查世界安全或目标注册。 |
+
+请求起点的 Y 是群系采样输入之一，不是唯一采样高度。半径为水平距离，候选检查包含边界。搜索顺序与粗粒度采样不保证返回最近的目的地。
+
+| 状态 | 含义 |
+| --- | --- |
+| `FOUND` | 存在已确认位置。 |
+| `NOT_FOUND` | 搜索按当前算法完成但未命中；稀疏采样不等于遍查世界。 |
+| `UNAVAILABLE` | 目标不在该维度和类别目录中。 |
+| `BUSY` | 所有者已有任务、全局上限、同类专用搜索忙，或执行器拒绝。 |
+| `CANCELLED` | 显式取消或生命周期重置。 |
+| `LIMIT_REACHED` | 真实时间或探测预算耗尽、结构候选被截断、不支持的放置类型，或区块结果不完整。 |
+| `FAILED` | 准备或搜索抛出异常，详见服务端日志。 |
+
+被禁用的地形家族仍可能存在于目录。管理命令会在提交前检测禁用状态；直接调用 API 则可能返回 `NOT_FOUND`。群系源兼容但地形引擎不可用时，准备阶段返回 `FAILED`。
+
+### 目录与名称
+
+| 类别 | 目录来源 | 搜索实现 |
+| --- | --- | --- |
+| `BIOME` | 当前维度群系源的条目，而非全局群系注册表。 | 采样生成器群系，不请求区块。 |
+| `TERRAIN` | 群系源为 `TerrainBiomeSource` 时的全部 `TerrainFamily` ID。 | 专用工作线程执行已准备的地形引擎任务，不请求区块。 |
+| `STRUCTURE` | 当前世界中拥有非空放置列表的实时结构注册项。 | 候选放置与实际结构起点。 |
+
+群系与地形使用 ID 的 `biome` 翻译键，缺失时回退为 ID。结构使用 `structure.<namespace>.<path>`，路径中的斜杠改为点。英文回退名称按斜杠、下划线、点和连字符分词，再将每词首字母大写。目录按 ID 排序，翻译后界面的排序由展示层负责。
+
+### 工作预算
+
+| 限制 | 数值与范围 |
+| --- | --- |
+| 活动任务 | 全局最多 8 个，每个所有者 UUID 最多 1 个；新请求不会替换该所有者旧任务。 |
+| 结构搜索 | 全局最多 1 个活动结构任务。 |
+| 地形搜索 | 全局最多 1 个活动地形 future；使用单个守护工作线程，队列容量为 1。 |
+| 共享刻预算 | 2,000,000 纳秒（2 ms），任务轮换起始顺序。 |
+| 群系工作量 | 共享截止时间内，每任务每刻最多 1024 步；每任务最多 300000 个唯一探测点。 |
+| 结构工作量 | 每刻最多 1 次提交或轮询步骤；最多 512 个候选探测，已等待中的候选可继续完成。 |
+| 任务期限 | 群系和结构为真实时间 30 秒，地形为真实时间 120 秒。 |
+| 结构候选 | 随机分布候选映射阈值 16384，枚举最多检查 32768 个偏移后截断。 |
+
+这些是调度预算，不是整次服务端刻耗时的硬上限：候选准备发生在提交期间，回调内联执行，Minecraft 自行调度区块工作。等待中的结构可以在共享截止时间之后轮询，以刷新请求票据。已完成的地形 future 会在期限检查前读取。
+
+### 搜索语义
+
+群系使用相对请求起点的 64 格 X/Z 网格。高度包含截断到世界边界的起点 Y，以及世界底部 +16 起每隔 32 格、低于世界顶部的高度，最后去重排序。先标记 minimumDistance +64 内命中的种子，再沿 8 方向按 64 和 128 格及相邻采样高度扩展，最后从内向外寻找未被排除的命中点。128 格连接可以跨过一格采样缝隙。采样受世界边界限制。这是保守的采样连通区排除，不是精确群系拓扑。
+
+结构搜索支持同心环与随机分布放置。起始区块去重，按定位点的水平范围和世界边界过滤，再按距离排序。候选须通过 `shouldGenerate`，随后通过调度器请求 `STRUCTURE_STARTS` 并用 `getNow` 轮询，不在服务端刻线程 join。实际起点必须有子结构，且包围盒上最近的水平点距起点至少为 minimumDistance。返回放置规则的定位点，不将结构标记为已探索。不支持的放置类型或区块结果失败会使搜索不完整，耗尽此类候选时返回 `LIMIT_REACHED`。同心环候选不使用随机分布映射阈值，但仍受服务的探测数和期限限制。
+
+地形准备在服务端线程捕获引擎、采样器与边界，再提交采样任务。世界树相关家族检查共享区域，平原检查规划区域。其他家族先检查确定性加权顺序中目标家族排首位的分区，避免构造无关几何；首轮未找到结果时，再完整枚举分区并保留正常竞争规则。这只改变搜索顺序，不改变生成归属，也不保证返回最近结果。使用 64 格环形采样、对齐到 4 格的坐标、家族与群系确认及请求水平范围；区域采样还要求权重大于 0.6。返回位置的 Y = 0，仅供方向或指南针引用，不是已验证的传送安全点。枚举与确认期间检查线程中断。
+
+## 线程与生命周期
+
+`LocateService` 在 `END_SERVER_TICK` 推进任务。回调位于服务端线程，包括立即返回的 `BUSY`、`UNAVAILABLE` 与准备失败。通常的任务完成会捕获并记录回调异常；最初的所有者已忙或全局上限分支直接调用回调，异常会传播给调用方。
+
+数据重载成功与服务器停止时，会将当前任务以 `CANCELLED` 结束，中断地形任务、关闭工作线程并清空目录。失败重载不重置此服务。没有持久任务队列。内置对话适配器之外的调用方须自行处理断线或交互取消。完成回调应能在停服期间安全执行，避免在重置回调中启动替代任务。
+
+### 村民适配器与指南针写入
+
+`WayfindingDialogue` 是内部 Blabber 适配器。菜单为 `isekaiexpansion:wayfinding/villager`，问路、交易和告别分别处理。交易处理器在铁匠路由之后，仅为符合条件且受到欢迎的交易对话选择它。重大与轻微负面流言合计绝对值至少为 50 时，不进入问路路由。
+
+资格要求成年、清醒且村民等级至少为 2。制图师了解全部 3 类；农民、渔夫和牧羊人仅在 `floorMod(uuid.hashCode(), 3) == 0` 时符合条件，了解群系与地形。两类搜索半径分别为 16384 与 6144 格。继续交互要求双方存活、同世界、距离平方不超过 64（8 格），村民没有攻击者。
+
+开始搜索时，适配器设置基于 `nanoTime` 的 30 秒冷却，排除距离为 512。它捕获世界、screen handler、对话会话 UUID 和阻塞对象 token。结果到达时，重新检查全部上下文与村民可用性，再替换面板。取消搜索对象会取消 API 任务。无位置的各类结果共用同一“不知道”答复。
+
+方向由 `atan2(dx, -dz) / (π / 4)` 四舍五入映射到 8 个扇区。距离带为少于 1500、少于 4000、少于 9000 与其余距离，均从捕获起点计算。对话选项携带目的地 ID 与标签，已找到坐标保留在服务端回调中。
+
+指南针选项检查快捷栏 0–8 格，复制 `Items.COMPASS` 物品堆作为报价快照。写入前，适配器检查活动村民，并用 `ItemStack.areEqual` 比较当前物品与原副本；写入器还检查格子、目标位置与当前维度。数量大于 1 时拆出一枚放到第一个空快捷栏格，没有空格则失败。
+
+| NBT 键 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `LodestonePos` | `object` | 标记前可不存在 | 含整数 `X`、`Y`、`Z` 的目标方块位置，覆盖旧位置。 |
+| `LodestonePos.X` | `integer` | 从结果写入 | 目标 X。 |
+| `LodestonePos.Y` | `integer` | 从结果写入 | 目标 Y；地形结果为 0。 |
+| `LodestonePos.Z` | `integer` | 从结果写入 | 目标 Z。 |
+| `LodestoneDimension` | `identifier` | 从结果写入 | 维度 ID。 |
+| `LodestoneTracked` | `boolean` | 写入 `false` | 对此标记禁用实体磁石校验。 |
+| `IsekaiDestination` | `identifier` | 从结果写入 | 目标 ID；没有单独保存目的地类别。 |
+
+这些是物品存档字段，不是编写格式。修改后将背包标记为 dirty 并同步 screen handler 内容。玩家没有提供指南针时，不会凭空创建指南针。
+
+## 管理工具与验证
+
+规范根命令为 `/isekaiexpansion`，`/ise` 为别名。以下分支要求权限等级 2。
+
+| 命令 | 行为 |
+| --- | --- |
+| `/ise find <biome/terrain/structure> <destination> [radius] [exclude]` | 默认半径 8192、排除距离 512 格。显式半径为 1024–64000，排除距离为 128–63999 且小于半径。补全使用当前维度目录。 |
+| `/ise find cancel` | 取消命令所有者的任务。 |
+| `/ise dev dumpStructure` | 用全部实时结构注册表的有序 ID 覆盖 `config/isekaiseries/ktm2structuredump.json`。 |
+| `/ise dev dumpStructureTranslations` | 覆盖 `config/isekaiseries/structure_translations/en_us.json` 与 `zh_cn.json`，生成英文标签与空白中文翻译模板。 |
+
+实体命令来源使用实体 UUID，所有无实体来源共享零 UUID。因此玩家命令与该玩家的问路对话共用任务槽。命令输出坐标，并提供 `/execute in <dimension> run tp @s <x> ~ <z>` 建议，不执行传送，也不选择安全 Y。翻译导出包含全部已注册结构，与维度中过滤后的目的地列表不同。
+
+检查同所有者拒绝、8 个任务上限、专用任务上限、取消与重载、回调上下文变化、禁用地形、边界排除、多层或洞穴群系及结构边界。确认叠放指南针只拆到快捷栏，报价变化会失败，满快捷栏保留原物品，只覆盖所选指南针。分别在普通生成器与兼容地形生成器中验证；有限搜索失败不能证明目标不存在。
+
+## 相关页面
+
+- [问路](/zh-cn/wiki/wayfinding/)——玩家资格、方向与指南针流程。
+- [对话对象与界面](/zh-cn/dev/dialogue-ui/)——阻塞 token、取消与展示约定。
+- [NPC 对话](/zh-cn/dev/npc-dialogue/)——外围对话准入和路由。
+- [对话数据](/zh-cn/wiki/dialogue-data/)——对话定义编写。

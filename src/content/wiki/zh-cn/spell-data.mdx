@@ -1,0 +1,353 @@
+---
+title: "法术数据"
+description: "当前法术阶段、弹射物、表现、绑定池、物品分配与星界能量映射。"
+category: data
+order: 40
+updated: 2026-09-24
+---
+
+Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行提供星界能量费用映射。本页以 Spell Engine 1.10.7+1.20.1 为核对版本，说明本集成使用的主动法术、弹射物、表现及物品格式。
+
+## 文件放在哪里
+
+| 资源 | 路径 | 身份 |
+| --- | --- | --- |
+| 法术 | `data/<namespace>/spell/<path>.json` | 法术 ID 为 `namespace:path`。 |
+| 绑定池 | `data/<namespace>/tags/spell/<path>.json` | 法术注册表标签；容器 pool 使用不带 # 的 ID。 |
+| 物品分配 | `data/<namespace>/spell_assignments/<item-path>.json` | 命名空间与路径共同确定物品 ID。 |
+| 星界能量 | `data/<namespace>/spell_energy/<path>.json` | 每个文件将法术 ID 字符串映射到费用。 |
+
+同路径法术及分配资源按数据包优先级选取，不逐字段合并。能量文件按未显式排序的迭代顺序合并；避免在多个文件重复定义同一法术费用。仓库中的法术参考目录位于实际 `spell/` 路径之外，其中嵌套的示例不会注册为可施放法术。
+
+## 最小示例
+
+这是随仓库提供的奥术冲击参考数据的精简形态，采用瞄准目标及直接伤害，不要求额外物品或声音。将其保存到数据包的实际法术路径；现有参考文件夹本身不会作为法术加载。
+
+```json
+{
+  "school": "spell_power:arcane",
+  "active": {
+    "cast": {}
+  },
+  "target": {
+    "type": "AIM",
+    "aim": {}
+  },
+  "deliver": {
+    "type": "DIRECT"
+  },
+  "impacts": [
+    {
+      "action": {
+        "type": "DAMAGE",
+        "damage": {}
+      }
+    }
+  ]
+}
+```
+
+## 字段
+
+下列默认值适用于字段省略，不适用于显式 null。依赖的 JSON 模型较宽松；默认值为 null 不代表它对所选执行分支可用。
+
+### 施法、选敌、影响与费用
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `school` | `identifier` | `null` | 有效魔法法术必须提供；选择已注册的法强学派。 |
+| `type` | `enum` | `ACTIVE` | ACTIVE、PASSIVE 或 MODIFIER；示例为主动法术。 |
+| `tier` | `integer` | `1` | 目录及绑定的主要阶级；JSON 模型不作范围校验。 |
+| `sub_tier` | `integer` | `1` | 同阶内的次级排序。 |
+| `group` | `string` | `""` | 目录排序中的关联分组。 |
+| `range` | `number` | `50` | 运行时修正前的目标距离，单位为格。 |
+| `learn` | `object` | `null` | 提供对象后参与法术绑定。 |
+| `learn.level_cost_per_tier` | `integer` | `3` | 每阶绑定等级费用倍率。 |
+| `learn.level_requirement_per_tier` | `integer` | `10` | 每阶绑定等级要求倍率。 |
+| `active` | `object` | `null` | 主动法术配置；有施法时长的主动法术须提供。 |
+| `active.cast` | `object` | `{}` | 施法阶段；省略的子字段采用下列默认值。 |
+| `active.cast.duration` | `number` | `0` | 秒；0 为瞬发。需要施法过程时使用有限正数。 |
+| `active.cast.type` | `enum` | `STANDARD` | STANDARD、CHANNEL 或 CHARGE。时长为 0 时仍为瞬发。 |
+| `active.cast.haste_affected` | `boolean` | `true` | 允许依赖的急速处理。 |
+| `active.cast.movement_speed` | `number` | `0.2` | 施法期间移动速度倍率。 |
+| `active.cast.channel` | `object` | `null` | CHANNEL 使用；对其他施法类型不生效。 |
+| `active.cast.channel.ticks` | `integer` | `0` | 整个时长内的总投递次数，不是游戏刻间隔。应使用正数。 |
+| `active.cast.channel.release_fx` | `boolean` | `false` | 引导投递是否重播释放效果。 |
+| `active.cast.animation` | `object` | `null` | 下文所述的玩家动画对象。 |
+| `active.cast.start_sound` | `object` | `null` | 开始施法的声音。 |
+| `active.cast.sound` | `object` | `null` | 施法声音对象。 |
+| `active.cast.particles` | `array<object>` | `[]` | 持续粒子组，字段见下文。 |
+| `target` | `object` | `{}` | 目标搜索配置。 |
+| `target.type` | `enum` | `CASTER` | NONE、CASTER、AIM、BEAM、AREA 或 FROM_TRIGGER；按类型提供对应子对象。 |
+| `target.cap` | `integer` | `0` | 正数限制目标数量；0 不限。 |
+| `target.aim` | `object` | `null` | AIM 选取选项。 |
+| `target.aim.required` | `boolean` | `false` | 要求瞄准实体才能施法。 |
+| `target.aim.sticky` | `boolean` | `false` | 施法期间保持已选实体。 |
+| `target.aim.use_caster_as_fallback` | `boolean` | `false` | 未找到瞄准实体时回退到施法者。 |
+| `target.aim.reposition_vertically` | `number` | `0` | 瞄准位置的垂直调整；实体目标忽略此值。 |
+| `deliver` | `object` | `{}` | 投递阶段。 |
+| `deliver.type` | `enum` | `DIRECT` | DIRECT、PROJECTILE、METEOR、CLOUD、SHOOT_ARROW、AFFECT_ARROW、MELEE、STASH_EFFECT 或 CUSTOM。 |
+| `deliver.delay` | `integer` | `0` | 投递延迟，单位为刻。 |
+| `deliver.custom` | `object` | `null` | 有效 CUSTOM 投递需要此对象。 |
+| `deliver.custom.handler` | `identifier` | `null` | 已安装处理器 ID；找不到处理器时，自定义投递不成功。 |
+| `impacts` | `array<object>` | `[]` | 由所选投递应用的影响；空列表不提供影响。 |
+| `impacts[].chance` | `number` | `1` | 该影响触发概率；编写时使用 0–1。 |
+| `impacts[].school` | `identifier` | `null` | 覆盖当前影响的根学派；null 表示继承。 |
+| `impacts[].action` | `object` | `null` | 每个有效影响所需的动作对象。 |
+| `impacts[].action.type` | `enum` | `null` | 动作类型；下列 DAMAGE 与 HEAL 使用对应对象。 |
+| `impacts[].action.apply_to_caster` | `boolean` | `false` | 将该动作转向施法者。 |
+| `impacts[].action.allow_on_center_target` | `boolean` | `true` | 允许范围影响作用于中心目标。 |
+| `impacts[].action.min_power` | `number` | `1` | 动作强度下界。 |
+| `impacts[].action.max_power` | `number` | `999999` | 动作强度上界。 |
+| `impacts[].action.damage` | `object` | `null` | DAMAGE 设置。 |
+| `impacts[].action.damage.spell_power_coefficient` | `number` | `1` | 已解析法强的伤害系数。 |
+| `impacts[].action.damage.knockback` | `number` | `1` | 击退倍率。 |
+| `impacts[].action.damage.bypass_iframes` | `boolean` | `true` | 允许穿过普通伤害无敌帧。 |
+| `impacts[].action.heal` | `object` | `null` | HEAL 设置。 |
+| `impacts[].action.heal.spell_power_coefficient` | `number` | `1` | 已解析法强的治疗系数。 |
+| `impacts[].visuals` | `object` | `{}` | 影响粒子与模型；不是根级 particles 字段。 |
+| `impacts[].sound` | `object` | `null` | 影响声音。 |
+| `release` | `object` | `{}` | 法术释放时的表现。 |
+| `release.animation` | `object` | `null` | 玩家动画对象。 |
+| `release.visuals` | `object` | `{}` | 释放粒子与模型组合。 |
+| `release.sound` | `object` | `null` | 释放声音。 |
+| `release.pitch_shift` | `number` | `0` | 依据蓄力比例增加的释放音调。 |
+| `cost` | `object` | `{}` | 依赖费用，与星界能量独立。 |
+| `cost.batching` | `boolean` | `false` | 为批量触发将费用处理推迟到刻末。 |
+| `cost.exhaust` | `number` | `0.1` | 扣费时增加的疲劳值。 |
+| `cost.durability` | `integer` | `1` | 承载物品耐久费用。 |
+| `cost.effect_id` | `identifier` | `null` | 支付费用时移除的状态效果。 |
+| `cost.cooldown` | `object` | `{}` | 冷却设置。 |
+| `cost.cooldown.group` | `string` | `null` | 共享冷却组。 |
+| `cost.cooldown.attempt_duration` | `number` | `0` | 尝试施法的冷却秒数。 |
+| `cost.cooldown.duration` | `number` | `0` | 成功施法后的冷却秒数。 |
+| `cost.cooldown.proportional` | `boolean` | `false` | 根据施法或引导进度缩放冷却。 |
+| `cost.cooldown.haste_affected` | `boolean` | `true` | 允许急速改变冷却。 |
+| `cost.cooldown.hosting_item` | `boolean` | `true` | 同时对承载物品施加冷却。 |
+| `cost.item` | `object` | `null` | 物品支付或检查；缺省时没有物品费用。 |
+| `cost.item.id` | `string` | `null` | 物品 ID 或 #标签；须提供有效且已安装的物品或标签。 |
+| `cost.item.amount` | `integer` | `1` | 所需物品数量。 |
+| `cost.item.consume` | `boolean` | `true` | false 只检查数量，不消耗。 |
+
+其他动作类型包括 STATUS_EFFECT、FIRE、SPAWN、SUMMON、TELEPORT、COOLDOWN、AGGRO、DISRUPT、IMMUNITY、VELOCITY 及 CUSTOM，各自需要对应分支的数据。被动触发、修正器、蓄力加成及这些动作负载由[固定版本 Spell Engine 格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)负责，不是异界扩展新增字段。
+
+### 弹射物与陨落投递结构
+
+弹射物及陨落投递的发射设置与飞行数据分开。`models[]` 开头的行相对于 `client_data.composite_model.models[]`。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `deliver.projectile` | `object` | `null` | PROJECTILE 发射配置。 |
+| `deliver.projectile.launch_properties` | `object` | `{}` | 发射速度与重复发射设置。 |
+| `deliver.projectile.launch_properties.velocity` | `number` | `1` | 弹射物初速度。 |
+| `deliver.projectile.launch_properties.extra_launch_mod` | `integer` | `-1` | 引导中，投递索引对该值取模为 0 时才额外发射。使用 −1 关闭筛选，或提供正除数；0 可能导致除零。 |
+| `deliver.projectile.launch_properties.extra_launch_count` | `integer` | `0` | 首次发射后的额外弹射物数量。 |
+| `deliver.projectile.launch_properties.extra_launch_delay` | `integer` | `2` | 额外发射间隔：2 刻（0.1 秒）。 |
+| `deliver.projectile.launch_properties.sound` | `object` | `null` | 发射声音；使用公共声音字段。 |
+| `deliver.projectile.projectile` | `object` | `null` | 飞行、碰撞及表现数据；PROJECTILE 须提供。 |
+| `deliver.projectile.projectile.divergence` | `number` | `0` | 弹射物方向散布。 |
+| `deliver.projectile.projectile.homing_angle` | `number` | `1` | 追踪转向参数。 |
+| `deliver.projectile.projectile.client_data` | `object` | `null` | 客户端表现。 |
+| `deliver.projectile.projectile.client_data.composite_model` | `object` | `null` | 组合显示模型。 |
+| `deliver.projectile.projectile.client_data.composite_model.models` | `array<object>` | `[]` | 模型部件列表。 |
+| `models[].orientation` | `enum` | `TOWARDS_MOTION` | TOWARDS_CAMERA、TOWARDS_MOTION 或 ALONG_MOTION；弹射物模型朝向。 |
+| `models[].rotate_degrees_per_tick` | `number` | `2` | 每刻持续旋转角度。 |
+| `models[].rotate_degrees_offset` | `number` | `0` | 静态旋转偏移角度。 |
+| `models[].use_held_item` | `boolean` | `false` | 使用手持物品模型来源代替 fx.model_id。 |
+| `models[].fx` | `object` | `{}` | 模型效果；字段如下。 |
+| `models[].fx.model_id` | `identifier` | `null` | 模型资源 ID。 |
+| `models[].fx.scale` | `number` | `1` | 模型缩放。 |
+| `models[].fx.light_emission` | `enum` | `GLOW` | NONE、GLOW、GLOW_TRANSLUCENT 或 RADIATE。 |
+| `deliver.meteor` | `object` | `null` | METEOR 发射配置。 |
+| `deliver.meteor.launch_height` | `number` | `10` | 高于目标的发射高度，单位为格。 |
+| `deliver.meteor.launch_radius` | `number` | `0` | 围绕目标的水平发射散布。 |
+| `deliver.meteor.launch_properties` | `object` | `{}` | 与弹射物 launch_properties 共用字段。 |
+| `deliver.meteor.projectile` | `object` | `null` | 与 PROJECTILE 共用弹射物数据结构。 |
+| `area_impact` | `object` | `null` | 命中后的二次范围影响；不放在 deliver 内。 |
+| `area_impact.radius` | `number` | `1` | 基础半径，单位为格。 |
+| `area_impact.extra_radius` | `object` | `{}` | 由法强缩放的额外半径。 |
+| `area_impact.extra_radius.power_coefficient` | `number` | `0` | 额外半径 = 系数 × min(上限, 法强)。 |
+| `area_impact.extra_radius.power_cap` | `number` | `0` | 额外半径计算使用的法强上限。 |
+| `area_impact.visuals` | `object` | `{}` | 范围中心的粒子与模型组合。 |
+| `area_impact.sound` | `object` | `null` | 范围影响声音。 |
+
+飞行运动、碰撞特性、实体放置、云或近战投递及模型动画变换，均在[同版本完整格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)中继续扩展此结构。不要直接搬用旧版扁平弹射物格式的字段。
+
+### 公共动画、声音与粒子对象
+
+这里采用相对路径：`animation` 与 `sound` 可出现在施法、释放或影响位置；`particles[]` 表示粒子组列表中的一项。持续施法粒子直接使用列表，影响及释放效果则使用 `visuals` 组合。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `animation.id` | `identifier` | `""` | 动画资源 ID；使用对象，不使用裸字符串。 |
+| `animation.speed` | `number` | `1` | 播放速度倍率。 |
+| `animation.overrides` | `array<object>` | `[]` | 按顺序检查的条件替代项；首个匹配项决定 ID。 |
+| `animation.overrides[].id` | `identifier` | `""` | 替代动画 ID。 |
+| `animation.overrides[].equipment` | `object` | `null` | 装备条件；使用时同时提供 slot 与 item。 |
+| `animation.overrides[].equipment.slot` | `enum` | `null` | MAINHAND、OFFHAND、FEET、LEGS、CHEST 或 HEAD。 |
+| `animation.overrides[].equipment.item` | `string` | `null` | 在指定槽位检查的物品选择器。 |
+| `animation.overrides[].two_handed_weapon` | `boolean` | `null` | 检查手持武器是否双手使用的另一条件。 |
+| `sound.id` | `identifier` | `null` | 已注册声音 ID。 |
+| `sound.volume` | `number` | `1` | 音量。 |
+| `sound.pitch` | `number` | `1` | 基础音调。 |
+| `sound.randomness` | `number` | `0.1` | 正值在基础音调 ± 此值间随机；非正值使用基础音调。 |
+| `visuals.particles` | `array<object>` | `[]` | 粒子组列表。 |
+| `visuals.models` | `array<object>` | `[]` | 模型效果列表；与下文弹射物 fx 共用模型效果字段。 |
+| `particles[].id` | `identifier` | `null` | 已注册粒子 ID。 |
+| `particles[].appearance` | `object` | `{}` | 单粒子外观设置，由 Spell Engine 自身粒子工厂支持。 |
+| `particles[].appearance.color` | `integer` | `-1` | 打包 RGBA 色值；−1 不染色。 |
+| `particles[].appearance.motion` | `enum` | `null` | 继承粒子条目的运动，或使用 STATIC、FLOAT、ASCEND、DECELERATE、BURST、DRIFT。 |
+| `particles[].batch` | `object` | `{}` | 生成几何形状及速度设置。 |
+| `particles[].batch.shape` | `enum` | `CIRCLE` | 批次形状；示例使用 CIRCLE、PIPE 或 SPHERE。完整枚举见下方链接。 |
+| `particles[].batch.count` | `number` | `1` | 生成数量或速率；低于 1 时，持续逐刻效果按周期发射。 |
+| `particles[].batch.vertical_origin` | `number` | `0.5` | 以实体高度比例表示的生成高度。 |
+| `particles[].batch.min_speed` | `number` | `0` | 初速度下界。 |
+| `particles[].batch.max_speed` | `number` | `0` | 初速度上界。 |
+
+[粒子格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java)还定义寿命、不透明度、缩放、附着与批次几何控制。[模型效果](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java)定义变换及定时动画。这些由依赖拥有；扩展上表之外的字段时请使用链接中的相同版本。
+
+### 物品分配与绑定池
+
+此分配示例取自随仓库提供的法杖法术列表的一部分：
+
+```json
+{
+  "spell_container": {
+    "access": "CONTAINED",
+    "pool": "isekaiexpansion:tier1",
+    "spell_ids": [
+      "isekaiexpansion:healing"
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spell_container` | `object` | `absent` | 容器覆盖；{} 可显式禁用物品默认施法能力。 |
+| `spell_container.access` | `enum` | `NONE` | ANY、NONE、MAGIC、ARCHERY、CONTAINED 或 TAG；区分大小写，使用大写。 |
+| `spell_container.access_param` | `string` | `""` | TAG 访问使用的法术标签 ID，不带 #。 |
+| `spell_container.pool` | `string` | `""` | 绑定池标签 ID，不带 #。 |
+| `spell_container.slot` | `string` | `""` | 装备来源槽位限制；空字符串不限制。 |
+| `spell_container.max_spell_count` | `integer` | `0` | 绑定容量；编解码器不限制范围。 |
+| `spell_container.spell_ids` | `array<string>` | `[]` | 持有的法术 ID。转为小写，并删除 a–z、0–9、/ . _ : - 以外字符；构建时不去重。 |
+| `spell_container.extra_tier_binding` | `integer` | `0` | 每阶额外绑定数量；有效互斥数量为 max(0, 值 + 1)。 |
+| `spell_choice` | `object` | `absent` | 独立于容器的可选法术选择覆盖。 |
+| `spell_choice.pool` | `string` | `""` | 选择池标签 ID；空字符串表示没有选择。 |
+
+解析顺序为物品堆存档数据、数据包分配、物品默认值、回退。分配提供容器时，还会抑制物品的默认法术选择，除非分配自身也提供选择。显式物品堆选择数据仍优先。NONE 访问的容器可保存供装备来源提供的法术，但自身不作为施法解析入口。
+
+绑定池使用[注册表标签格式](https://wiki.fabricmc.net/tutorial:tags)：
+
+```json
+{
+  "values": [
+    "isekaiexpansion:healing",
+    "isekaiexpansion:clarity"
+  ]
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `values` | `array<string>` | 必需 | 法术 ID 或 #标签引用，此处使用示例中的字符串条目形式。 |
+| `replace` | `boolean` | `false` | true 替换同标签中较低优先级的贡献；false 合并。 |
+
+### 星界能量
+
+随仓库提供的治疗费用条目为：
+
+```json
+{
+  "isekaiexpansion:healing": 12
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `isekaiexpansion:healing` | `integer` | 解析后映射中缺失时为 `0` | 动态法术 ID 键的示例，此处基础费用为 12。所有非空键都会接受，不检查法术是否存在；仅正数值会写入。 |
+
+没有包装或元数据字段，其他键表示其他法术 ID 字符串。最终费用还受卷轴、天赋、种族及滞空修正影响；引导按每次成功投递扣费。
+
+## 完整示例
+
+此例加入绑定、施法时长、施法粒子、释放动画及冷却。施法为 1 秒，冷却为 3 秒。
+
+```json
+{
+  "school": "spell_power:arcane",
+  "tier": 1,
+  "range": 24,
+  "learn": {},
+  "active": {
+    "cast": {
+      "duration": 1,
+      "animation": {
+        "id": "spell_engine:one_handed_projectile_charge"
+      },
+      "particles": [
+        {
+          "id": "spell_engine:magic_spell",
+          "appearance": {
+            "color": 4278190335,
+            "motion": "FLOAT"
+          },
+          "batch": {
+            "shape": "CIRCLE",
+            "count": 4,
+            "min_speed": 0.05,
+            "max_speed": 0.1
+          }
+        }
+      ]
+    }
+  },
+  "target": {
+    "type": "AIM",
+    "aim": {}
+  },
+  "deliver": {
+    "type": "DIRECT"
+  },
+  "impacts": [
+    {
+      "action": {
+        "type": "DAMAGE",
+        "damage": {
+          "spell_power_coefficient": 1
+        }
+      }
+    }
+  ],
+  "release": {
+    "animation": {
+      "id": "spell_engine:one_handed_projectile_release"
+    }
+  },
+  "cost": {
+    "cooldown": {
+      "duration": 3
+    }
+  }
+}
+```
+
+使用引导时，将施法类型设为 CHANNEL，并提供包含正数总投递次数的 channel 对象。使用自定义投递时，将投递类型设为 CUSTOM，并将 custom handler 设为已安装处理器的 ID。数据本身不能创建新的自定义处理器。
+
+## 校验
+
+法术定义使用依赖的通用 JSON 解码器。未知字段被忽略，缺省字段保留模型默认值。不存在覆盖整个格式的统一范围限制，也不会统一校验所有资源、学派、处理器及嵌套对象是否可用。结构类型错误可能使解码失败；未知枚举字符串或显式 null 可能保留为 null，直到对应分支执行时才出错。因此空对象即使解码成功，也不是可用法术。使用有限数值、有效且已安装的标识符及完全一致的大写枚举值。
+
+分配文件须为含 `spell_container` 或 `spell_choice` 的对象。空文本、非对象根、裸容器或两个成员都解码失败的包装对象，会记录警告并跳过。成员独立解码，有效选择可在容器错误时保留。显式空容器被接受，可覆盖并禁用物品默认能力。未知字段被忽略，access 枚举拼写错误会使该成员失败。启动时，分配映射由成功解析的条目整体替换。
+
+能量应用先清空旧映射。空对象不贡献条目。空键及非正数会记录错误并跳过该项。数值使用整数转换而非严格整数验证；编写时应使用整数 JSON 数值。转换异常会记录错误并停止该文件剩余处理，保留此前已写入条目，其他文件继续。加载器不解析或检查法术 ID，因此拼写错误可能静默留在映射中但不被使用。
+
+## 重载
+
+在此固定依赖版本中，法术定义属于世界注册表数据，物品分配属于服务器启动数据；修改后重启服务器或重新打开世界。依赖在客户端加入时同步法术注册表与分配数据。图片、模型及动画仍需提供匹配的客户端资源包。
+
+异界扩展能量文件随服务端数据重载，但解析后的费用映射目前仅在加入时发送给客户端。`/reload` 后重新连接，以刷新客户端能量检查及提示。这与成功重载后主动广播的表情贴纸数据等格式不同。
+
+## 相关页面
+
+[法术集成](/zh-cn/dev/spell-integration/)说明自定义处理器、扣费及物品存档数据。[元素](/zh-cn/wiki/elements/)说明玩家使用的学派。

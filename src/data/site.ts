@@ -43,6 +43,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { key: 'ktm2', label: { en: 'KTM2', 'zh-cn': 'KTM2' }, path: 'ktm2' },
   { key: 'wiki', label: { en: 'Wiki', 'zh-cn': '维基' }, path: 'wiki' },
   { key: 'codex', label: { en: 'Codex', 'zh-cn': '设定集' }, path: 'codex' },
+  { key: 'dev', label: { en: 'Dev', 'zh-cn': '开发' }, path: 'dev' },
   { key: 'blog', label: { en: 'Devlog', 'zh-cn': '开发日志' }, path: 'blog' },
   { key: 'about', label: { en: 'About', 'zh-cn': '关于' }, path: 'about' },
 ];
@@ -56,8 +57,8 @@ export const KTM2 = {
   subtitle: 'The Chronicles of Urdas',
   minecraft: '1.20.1',
   loader: 'Fabric',
-  modCount: 268,
-  packVersion: '0.4.0',
+  modCount: 255,
+  packVersion: '0.5.0',
   moduleVersion: '1.20.1-0.4.0',
 } as const;
 
@@ -120,9 +121,9 @@ export const PILLARS: Pillar[] = [
       'zh-cn': '有自己人生的同伴',
     },
     body: {
-      en: 'Every travelling companion has duties, old debts and choices of her own. Getting closer changes what she lets you see — it does not solve her problems for her.',
+      en: 'Friendship, trust and romance grow alongside each companion’s duties, old debts and choices. The Engage Ring lets you propose and, when accepted, become partners.',
       'zh-cn':
-        '每位同行者都有自己的职责、旧债和选择。关系变近改变的是她愿意让你看见的部分，而不是替她把问题解决掉。',
+        '同行者有自己的职责、旧债与选择，也能与你发展友谊、信任和恋爱。感情成熟后，可以用誓约之戒求婚，在对方接受后结为伴侣。',
     },
   },
 ];
@@ -195,8 +196,8 @@ export const ISEKAI_MODULES: IsekaiModule[] = [
     icon: 'wrench',
     accent: 'violet',
     tagline: {
-      en: 'Mixin work that makes 268 mods behave like one game.',
-      'zh-cn': '用 Mixin 让 268 个模组表现得像同一个游戏。',
+      en: `Mixin work that makes ${KTM2.modCount} mods behave like one game.`,
+      'zh-cn': `用 Mixin 让 ${KTM2.modCount} 个模组表现得像同一个游戏。`,
     },
     body: {
       en: 'Cross-mod patches, balance corrections and the fixes that belong to no single mod. If a change needs to touch two mods at once, it lives here.',

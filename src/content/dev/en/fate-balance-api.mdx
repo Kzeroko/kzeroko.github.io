@@ -1,0 +1,171 @@
+---
+title: "Fate Balance API"
+description: "Register choices and effects, evaluate drafts, and commit authoritative Fate Balance profiles."
+category: api
+order: 145
+updated: 2026-09-27
+---
+
+`FateBalanceAPI` is the public facade for Fate Balance registration, queries and validated server commits. Definitions are common-side content shared by preview and validation; effects are separately registered and reconciled through the runtime.
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.fatebalance.FateBalanceAPI`. The facade delegates to `internal.fatebalance`; its registrar, immutable definitions, result records and effect interfaces currently live in that internal package and are exposed as facade types. Do not call the registry or service directly.
+
+Register common content through `FateBalanceEntrypoint`. Initialization installs built-in categories/content first, calls add-on entrypoints, then installs the effect dispatcher. A runtime exception in an entrypoint is logged and the next entrypoint continues; earlier registrations from the failing entrypoint remain.
+
+## Common tasks
+
+### Register a choice and its effect
+
+Add this entry to the add-on's existing `fabric.mod.json`:
+
+```json
+{
+  "entrypoints": {
+    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
+  }
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `entrypoints` | `object` | absent | Fabric entrypoint map; merge with existing entries. |
+| `entrypoints.isekaiexpansion:fate_balance` | `array<string>` | absent | Fully qualified classes implementing `FateBalanceEntrypoint`; common-side registration. |
+
+This example adds a choice and a multiplicative experience effect. Its translation keys derive from the identifier:
+
+```java
+public final class ExampleFateBalance implements FateBalanceEntrypoint {
+    @Override
+    public void register(FateBalanceRegistrar registrar) {
+        Identifier choice = new Identifier("example", "quick_learner");
+        registrar.registerChoice(FateBalanceChoice.builder(
+                choice, FateBalancePolarity.BLESSING, 2)
+                .category(FateBalanceSystem.MENTAL_CATEGORY_ID)
+                .tags("experience")
+                .build());
+        registrar.registerEffect(choice, FateBalanceEffects.experience(1.1, 1.1));
+    }
+}
+```
+
+Choice registration alone adds no gameplay effect. Query-driven systems can instead use `FateBalanceAPI.isSelected(player, choiceId)` where they calculate their own result.
+
+### Evaluate and commit
+
+Evaluation does not store a profile. Trusted server code can commit through the same validation used by the packet:
+
+```java
+static FateBalanceCommitResult applyProfile(
+        ServerPlayerEntity player, Collection<Identifier> choices) {
+    return FateBalanceAPI.commit(player, choices);
+}
+```
+
+Inspect `success()`, `evaluation()` and nullable `problem()`. A rejection returns the first evaluation problem; the full evaluation retains all problems. The commit service has no “already confirmed” edit lock or permission predicate: callers are responsible for when changing a profile is allowed. Recommitting an identical confirmed set succeeds without sync or change event.
+
+### Register presets and rules
+
+`FateBalancePreset.builder(id)` supports `nameKey`, `choices` (varargs or collection), `order` and `availableWhen`. Defaults are empty choices, order `0`, always available and `fate_balance_preset.<namespace>.<path-with-dots>`. It does not validate the selected IDs or point balance at registration. A preset supplies an editable draft.
+
+A `FateBalanceRule` receives player, immutable selection/registration snapshots, base points, blessing cost, burden gain and remaining points. Return a list of `FateBalanceProblem` values without mutating the player. Null lists/items are ignored; runtime exceptions add SERVER_ERROR. The built-in burden limit is itself a registered rule.
+
+## Reference
+
+### Facade methods
+
+| Method | Side / phase | Result or mutation |
+| --- | --- | --- |
+| `registrar()` | Common initialization | Registrar for the following registration methods. |
+| `registerCategory(category)` | Common initialization | Adds a category. |
+| `registerChoice(choice)` | Common initialization | Adds an immutable choice. |
+| `registerEffect(choiceId, effect)` | Common initialization | Appends an effect; multiple effects per choice are allowed. |
+| `registerPreset(preset)` | Common initialization | Adds an editable starting profile. |
+| `registerRule(id, rule)` | Common initialization | Adds a validation rule. |
+| `categories()`, `choices()`, `presets()` | Either side after initialization | Immutable lists sorted by order, then identifier text. |
+| `findCategory(id)`, `findChoice(id)` | Either side | Optional match; null ID rejected. |
+| `evaluate(player, selections)` | Player's game thread | Immutable evaluation; player required. |
+| `commit(serverPlayer, selections)` | Server thread | Re-evaluate, replace/sync accepted profile, then emit change event. |
+| `selections(player)` | Player's game thread | Immutable current set, including persisted unknown IDs. |
+| `isSelected(player, id)` | Player's game thread | Membership query, not availability validation. |
+| `isConfirmed(player)` | Player's game thread | Stored confirmation flag. |
+| `maxPoints()` | Either side | Configured starting points clamped to `0–64`; default config is `10`. |
+| `maxBurdenPoints()` | Either side | Built-in limit `6`. |
+
+Registration writes use a lock and publish immutable snapshots. Duplicate category, choice, preset or rule IDs throw; effects append instead. Registration does not validate whether effect IDs, categories, prerequisites or conflict targets exist. This is not a data-pack reload registry.
+
+### Choice builder contract
+
+| Input | Default | Validation and meaning |
+| --- | --- | --- |
+| `builder(id, polarity, points)` | Required | Nonnull ID/polarity; points `1–64`, otherwise exception. Polarity BLESSING spends, BURDEN supplies points. |
+| `nameKey`, `descriptionKey` | `fate_balance.<namespace>.<path-with-dots>`, then `.description` | Nonblank overrides; slash in ID path becomes dot. |
+| `category` | `isekaiexpansion:fate_balance/general` | Nonnull ID; existence not checked here. |
+| `severity` | STANDARD | MINOR, STANDARD or MAJOR; nonnull. Presentation metadata, not a points multiplier. |
+| `iconItem` | null | Item registry ID; cached GUI model capture, with paper as the fallback for missing or air items. |
+| `order` | `0` | Any integer; lower sorts first. |
+| `requires`, `conflictsWith` | Empty | Varargs/collection, de-duplicated; null container ignored, null entries rejected. Self-reference rejected by build. |
+| `exclusiveGroup` | null | Optional group ID; multiple selected members conflict. |
+| `tags` | Empty | Ignore null/blank entries; trim, lowercase and de-duplicate. |
+| `availableWhen(predicate, reasonKey)` | Always available, no reason | Nonnull predicate; blank reason becomes null. Exceptions during evaluation make the choice unavailable. |
+
+`FateBalanceCategory` requires a nonnull ID and nonblank name key; order is unrestricted. `FateBalancePair.register` adds reciprocal conflicts, verifies distinct IDs and matching builder ID/polarity, then registers blessing, burden and optional effects in that order. It is not atomic if a later registration fails.
+
+### Validation and persistence
+
+Input selection collections may be null (empty profile); null IDs and duplicates are ignored. Evaluation retains at most `128` unique IDs and adds TOO_MANY_CHOICES if more were requested. It reports unknown/unavailable choices, missing prerequisites, conflicts, exclusive groups and negative balance. Remaining points are `base + burden − blessing`; unused positive points are allowed. The built-in rule rejects burden gain over `6`.
+
+Problem types are UNKNOWN_CHOICE, UNAVAILABLE, MISSING_REQUIREMENT, CONFLICT, EXCLUSIVE_GROUP, NEGATIVE_BALANCE, CUSTOM, TOO_MANY_CHOICES and SERVER_ERROR. Symmetric conflict/group reports are de-duplicated by ordered subject IDs plus problem metadata. Custom message keys are limited to `192` characters on the wire; constructors do not enforce that length.
+
+| Stored field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `selections` | `list<string>` | Empty | Read only the first `128` entries, skip malformed identifiers, de-duplicate. Registry existence is not checked. Writes sort identifiers lexically. |
+| `confirmed` | `boolean` | false | First accepted commit sets true, including an empty profile. |
+| `revision` | `int` | `0` | Read clamps negative to `0`; each changed accepted commit increments. |
+
+The player component is automatically synchronised and copied on respawn. Loading NBT does not re-evaluate the profile against changed content/config. Accepted replacement syncs before the change event. A listener exception is logged after persistence; there is no rollback. The operator restart `/ise charactercreate` clears the selections and the confirmation, syncs, then fires the same change event with an empty current set, so every effect reconciles to inactive.
+
+The commit packet sends identifier intent only. Negative or greater-than-`128` declared counts reject; decoding reads at most `128` IDs. Server handling re-evaluates and replies with success plus an optional problem. The component supplies authoritative profile state separately.
+
+### Effect lifecycle
+
+| Hook or factory | Contract |
+| --- | --- |
+| `reconcile(serverPlayer, active)` | Idempotently apply/remove owned state; default no-op. Profile changes reconcile previous/current IDs; login and respawn reconcile every registered effect. |
+| `experienceMultiplier(player, reason)` | Default `1`; dispatcher accepts LOOT and QUEST only. Products clamp to `0–4`, nonfinite becomes `1`, then the grant is rounded and nonnegative. COMBAT bypasses every effect. |
+| `dailyLootCapMultiplier(player)` | Default `1`; selected multipliers combine with the same bounds. |
+| `foodComfortBonus(player, stack)` | Default `0`; signed additions apply only to a positive food base and saturate to the integer range. |
+| `mealRepetitionMultiplier(player)`, `sleepComfortMultiplier(player)` | Default `1`; products clamp to `0–4`, nonfinite becomes `1`. |
+| `FateBalanceEffects.attributes(modifiers...)` | At least one nonnull modifier; stable UUID temporary modifiers for social attributes. |
+| `experience(loot, quest)`, `dailyLootCap(multiplier)` | Finite factory multipliers in `0–4`. |
+| `foodTaste(meals, restrictive)` | Nonnull item tag. Ordinary palate: matching food +4; restrictive palate: other food −3. |
+| `mealRepetition(multiplier)`, `sleepComfort(multiplier)` | Finite factory multipliers in `0–4`. |
+
+`FateBalanceAPI.foodComfort(player, stack, base)` applies meal bonuses; a null player returns the base. `mealRepetitionMultiplier(player)` and `sleepComfortMultiplier(player)` query the selected effects with an existing player. Use these on the player's game thread, on either side, after component initialization.
+
+Daily caps reconcile each second and after profile, login and respawn events. The dispatcher tracks home combat caps and Fate Balance loot caps separately, using current-level IsekaiCore defaults with level at least `1`. Removing a cap's last modifier restores that cap once. Neither route clears consumed experience. Loot traits cannot refresh the combat budget.
+
+Experience uses `ICPlayerExpEvents.MODIFY_GRANT`; Expansion's `XpRewardLogic` and `TypeBLevelPotion` call `PLAYER_LEVELER.addExperience` directly and bypass it. Effects run in registration order within a choice, with no per-effect exception isolation. Do not rely on cross-choice order.
+
+### Icon composition
+
+`iconItem` resolves an item GUI model. `FateBalanceItemIcons` captures a still at 64 × 64 pixels on the Minecraft render thread through `ModernUiCapture`, with an independent colour/depth target and restored render state. ModernUI uploads the bitmap on its UI thread and composes it as an ordinary image: scrolling, ancestor clipping, alpha and modal ordering all follow Canvas. Models are not live animated previews.
+
+The cache holds at most 128 entries. Views own image clones and release them when detached. Resource reload invalidates the cache and refreshes attached views. Missing captures use the default texture. Verify beds, generated items and custom item models while scrolling and opening confirmation overlays.
+
+## Events
+
+`FateBalanceEvents.PROFILE_CHANGED` supplies the server player and immutable previous/current sets after sync. Listeners run sequentially, with no cancellation. The service catches around the whole event invocation, so one throwing listener can prevent later listeners from running while the commit still reports success. Use `registerEffect` for effects that also need login/respawn reconciliation.
+
+## Threading and lifecycle
+
+Register identical definitions on both logical sides during common initialization. Availability and custom validation run in client previews as well as server evaluation and must be side-safe. The ModernUI bridge schedules evaluation onto the Minecraft client thread before returning the result to the UI thread; direct facade calls do not schedule work.
+
+Perform commits and effect mutations on the server thread with an existing player/component. Registry snapshot safety does not make player/world access safe from arbitrary threads. Keep predicate/rule evaluation free of side effects.
+
+## Related
+
+- [Fate Balance](/en/wiki/fate-balance/) — player budget and built-in choices.
+- [Comfort runtime](/en/dev/comfort-runtime/) — query-driven temperament modifiers.
+- [Reputation runtime](/en/dev/reputation-runtime/) — countenance and wanted standing.

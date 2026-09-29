@@ -1,0 +1,137 @@
+---
+title: "Forgery runtime"
+description: "Anvil state, recipe matching, smithing outcomes, persistence and the forged-item event."
+category: systems
+order: 182
+updated: 2026-09-26
+---
+
+The forgery implementation owns an anvil's inventory, bound blueprint, batch progress and smith attribution. These are internal contracts around `ForgeryAnvilBlockEntity` and `internal.itemlevel.SmithingStoneUpgrade`, not a public API facade.
+
+## What it does
+
+The server ticker completes recipe steps or smithing upgrades; the client renders synchronised state. See [forgery](/en/wiki/forgery/) for controls and [recipe data](/en/wiki/forgery-recipes/) for authoring, including validation gaps.
+
+## Runtime model
+
+`ForgeryAnvilBlock.getTicker` installs `onCommonTick`. The client branch returns after its currently empty client tick. On the server, `tickSmithingStoneUpgrade` runs first; a recognised upgrade or cleanup of an invalidated upgrade suppresses ordinary recipe processing for that tick.
+
+| State | Transition |
+| --- | --- |
+| `PENDING` | Matching bound recipe or valid upgrade enters `FORGING`. |
+| `FORGING` | Enough strength and exact materials consume the inventory, then advance a step or produce a result. Loss of recipe matching returns to `PENDING` without clearing ordinary recipe progress. |
+| `COMPLETE` | Result stays in slot 0. Emptying it resets the batch while retaining its blueprint. |
+
+The block stores a recipe ID, not a recipe object. Each lookup resolves the current recipe catalogue. A removed recipe stops matching; a shortened step list or invalid saved index can throw before `matches` gets a chance to reject it.
+
+### Saved and synchronised fields
+
+The following defaults describe missing fields on read, except where a new-batch value is explicitly distinguished. Inventory and item-stack payload internals are delegated codecs, not extra custom forging fields.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Inventory` | `compound` | Core inventory codec | 9 slots delegated to IsekaiCore `ItemStackInventory`, which writes Minecraft inventory NBT beneath this compound. |
+| `Status` | `string` | Required on read | `PENDING`, `FORGING`, `COMPLETE`; constructor starts `PENDING`. Missing or invalid text throws through `valueOf`. |
+| `ForgeryStep` | `int` | 0 | Zero-based step; no bounds clamp when loading. |
+| `ForgeryProg` | `int` | 0 | Recipe strength or upgrade strike count; no load clamp. |
+| `ForgeryOriginality` | `int` | Read: 0; new batch: 10 | Mutations clamp to 0–10; `isOriginal()` tests at least 5. |
+| `LockedRecipe` | `string` | Absent: null | Parsed with `Identifier.tryParse`; invalid text becomes null. |
+| `Blueprint` | `compound` | Absent: empty | Stored item stack; includes blueprint research state. |
+| `ForgingPlayer` | `UUID int array` | Absent: null | Recorded first smith; present malformed UUID is not repaired locally. |
+| `ForgerySmithingUpgrade` | `boolean` | false | Whether an upgrade was in progress; rechecked from inventory on ticking. |
+| `RenderIngredients` | `boolean` | Read: false; new batch: true | Render hint. First step still renders ingredients regardless of this flag. |
+| `DisplayItem` | `compound` | Absent: empty | Work-in-progress stack; hidden on first step. Complete state displays slot 0 instead. |
+| `ise_smithupgrade_success` | `int` | 0 | On the equipment stack, not the block entity. Read at least 0; writes cap at 1000000. |
+| `ise_smithupgrade_failure` | `int` | 0 | On equipment; reads at least 0 and increments cap at 11. Warning at 9, destruction above 10. |
+
+
+`writeNbt` feeds both chunk initial data and block-entity update packets. Changes call `updateListeners`; there is no independent client-side forging state machine. The first step always shows materials; subsequent steps respect the render flag. Work-in-progress display items appear only after step 0, while a completed output always uses slot 0.
+
+### Display layers
+
+The central step/output renders once at `BASE_Y = 1.015`. Ingredients keep scale `0.25`; their generated-item thickness is `0.25 / 16` blocks. The first slot sits that thickness above the base. Copy spacing is `0.25 / 16 + 1 / 1024`, and each successive slot adds one ninth of that spacing. Each flat stack shows at most 16 copies; depth models show one.
+
+`ForgeryDisplayLayers` owns these values. The stagger separates generated-item face planes even where slots overlap. Custom resource-pack geometry can still intersect; check those models in game.
+
+## Contracts
+
+### Interactions, matching and attribution
+
+Main-hand interaction precedence is: completed output with empty hand; blueprint binding; sneaking empty-hand blueprint retrieval or stored review; empty-hand/hammer removal; dissolve reset; ordinary insertion except `TimedInventoryItem`.
+
+Binding copies exactly 1 blueprint into storage and decrements the held stack outside creative mode. Retrieval requires no inventory, no progress, step 0 and unfinished status. Review requires an advanced step, empty inventory and unfinished status. Reset preserves the stored blueprint and current inventory.
+
+Initial recipe matching compares nonempty stacks in order with exact quantities. Completion separately checks contiguous slots from index 0; do not introduce holes through automation. Successful steps clear the entire inventory rather than invoking the unused `consumeIngredients` helper.
+
+The first striker recorded while forging owns the batch. Another UUID reduces originality by 1 per strike but does not replace the owner. Originality starts at 10, clamps to 0–10 and is considered original at 5 or more. These accessors do not themselves roll output rarity.
+
+At final recipe completion, `PlayerForgeryEvents.ON_FORGED_ITEM` runs with the anvil, a nullable player looked up in that world and a mutable output stack. Callbacks run in registration order before slot assignment. The quest craft trigger then credits that resolved server player for 1 recipe completion. Smithing upgrades bypass this event and recipe trigger.
+
+### Strike packet boundary
+
+The normal Better Combat client callback performs a 1.5-block raycast, requires the top face and a relative hit height of at least 0.9, then sends `isekaiexpansion:hand_forgery`.
+
+| Packet field | Wire type | Meaning |
+| --- | --- | --- |
+| `blockPos` | `BlockPos` | Anvil position in the player's world captured by the handler. |
+| `attackSpeed` | `double` | Client-reported attack speed used for delayed execution. |
+| `hammerStrength` | `int` | Client-reported strength; multiplied by 1.5 and truncated with Hundredfold Hammering. |
+
+The delay is `int(int(1 / attackSpeed * 20) * 0.55)` ticks. The scheduled task rechecks the block and accessor, then calls `forge`. This handler does **not** independently verify reach, the held hammer, attack cadence or finite positive speed. Treat that as an existing validation gap, not a trusted server guarantee. Calls that mutate the anvil belong on its server/world task path.
+
+### Upgrade selection and outcome
+
+`SmithingStoneUpgrade.find` accepts exactly 1 eligible equipment stack of count 1 plus positive total stone experience; other nonempty stacks invalidate it. Equipment is copied into the session. Stone experience and units accumulate across all stone stacks. Qualifying gear categories and socket/attribute fallbacks live in `ItemLevelingBridge.canReceiveExperience`.
+
+Upgrade strikes increment progress by 1, not hammer strength. Completion needs 10 strikes or 5 for the recorded available smith's Hundredfold Hammering. A missing smith has no profession or luck bonus. Rarity prefers the currently held main-hand hammer, then offhand; without either it uses IsekaiCore's common rarity. Do not assume the original striking hammer is retained in state.
+
+Outcome probabilities use the following formulas. `hammerRarityLevel` is supplied by IsekaiCore's rarity enum.
+
+```text
+u = sum(max(1, floor(stoneExperience / 150)) * stoneCount)
+m = clamp(1 - exp(-max(0, u) / 32), 0, 1)
+r = max(0, hammerRarityLevel)
+l = clamp(playerLuck, -10, 20)
+b = 1 when Hundredfold Hammering is active, otherwise 0
+
+great = clamp(0.240 + 0.110*m + 0.045*r
+              + 0.015*max(0,l) + 0.100*b, 0.001, 0.700)
+luckReduction = l * (0.003 when l >= 0, otherwise 0.004)
+failureFloor = 0.012 when m >= 0.85, otherwise 0.035
+failure = clamp(0.135 - 0.105*m - 0.006*r
+                - luckReduction - 0.015*b, failureFloor, 0.160)
+```
+
+One random roll first selects great success, then failure over the next interval; the remainder is ordinary success. Thus great success and failure probabilities are not independent rolls.
+
+Success adds total stone experience through IsekaiCore's item leveler; Hundredfold Hammering applies × 1.15, rounded, with a minimum positive award of 1. Great success additionally uses `max(1, u)^0.62`: take the floor (at least 1), probabilistically round up by its fractional part, then clamp to 1–256. Stored great-success stacks cap at 1000000.
+
+Failure increments the permanent count without granting experience; count greater than 10 destroys the item, and count 9 starts the warning. Success does not reset failures. Every completed attempt clears the input inventory, consuming all stones. A surviving item becomes `COMPLETE`; destruction leaves `PENDING`. Removing a valid combination clears upgrade progress and smith ownership. Equipment stat bonuses are applied separately by `ItemLevelAttributeApplier`.
+
+## Extending it
+
+Add normal content through recipes and blueprint definitions. For internal final-output mutation, register during common initialisation:
+
+```java
+PlayerForgeryEvents.ON_FORGED_ITEM.register((anvil, player, output) -> {
+    if (player != null && anvil.isOriginal()) {
+        output.getOrCreateNbt().putBoolean("example_original", true);
+    }
+});
+```
+
+This internal callback changes the actual output stack; avoid world changes from a client renderer. If adding a new crafting mode, preserve the ticker precedence, result retrieval and blueprint-retention contracts, and define whether it should invoke recipe events explicitly.
+
+## Verifying
+
+- Bind and recover a blueprint in survival and creative modes; verify output collection takes priority and completed batches retain their plan.
+- Exercise top/side insertion, stack merging, exact counts and reversed materials. Test a gap inserted through developer tooling to expose the two matching passes.
+- Save/reload each state and inspect all fields; verify a missing or invalid `Status` is rejected rather than silently reset.
+- Finish a multistep recipe, then repeat with its first smith absent or another player striking. Check callback order and quest attribution.
+- Test upgrade success, great success, failure, warning at 9 and break on the 11th failure with controlled randomness; verify stones are always consumed and success keeps prior failures.
+- Change the stone combination and remove ingredients mid-upgrade; confirm progress resets. Verify a stored blueprint survives upgrades and resets.
+- Before hardening the packet, exercise invalid position, speed, strength and held-item cases in a controlled development server; the current handler is not an authority check.
+
+## Related
+
+[Blueprint runtime](/en/dev/blueprint-research/) owns research stored in the paper. [Forgery recipe data](/en/wiki/forgery-recipes/) owns the JSON contract, and [levels and experience](/en/wiki/leveling/) describes the equipment progression fed by upgrades.

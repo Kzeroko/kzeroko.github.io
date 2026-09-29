@@ -1,0 +1,103 @@
+---
+title: "My Home"
+description: "Housing contracts, shared access, furniture surveys and the rewards for sleeping at home."
+category: world
+order: 81
+updated: 2026-09-27
+---
+
+A home is a property made from a union of block regions, with shared resident capacity and separate guest permissions. Renting secures a bed and use of the facilities; permanent residence also grants control of the home and furniture-based rest rewards.
+
+## What a home gives you
+
+| Benefit | Active rental | Permanent residence |
+| --- | --- | --- |
+| Resident slot | Occupies a slot until expiry. | Occupies a slot without expiry. |
+| Guaranteed access | Use and sleep. | All home permissions and permission management. |
+| Rested after sleeping at home | 12000 ticks (10 minutes). | 24000 ticks (20 minutes). |
+| Rested bonuses | +5% maximum health and +10% daily combat XP cap. | Same. |
+| Hearthbound after sleeping at home | No new award. | 24000 ticks (20 minutes), if the furniture survey is complete and provides a tier. |
+
+Rested is `isekaiexpansion:home_rested`; Hearthbound is `isekaiexpansion:hearthbound`. Only an actual resident sleeping in the property's bed and eligible for the dawn wake-up receives these rewards. A guest's permission to sleep does not grant resident rewards.
+
+## Finding and acquiring a property
+
+The current built-in way to open **Property Registry** is `/ise dev structurespace`, requiring operator permission level 2. It lists properties associated with the player's current structure, or the standalone home containing the player. This checkout does not wire a property-registrar NPC to that catalogue; access through a server's own integration depends on that integration.
+
+Select a room, inspect its plan and occupancy, choose rent or purchase, then confirm the contract. IsekaiCore's Numismatic Overhaul bridge pays from inventory coins first and then the wallet. Prices are in copper units. The server rechecks current capacity, prices and funds when the request arrives.
+
+| Rental rule | Behaviour |
+| --- | --- |
+| Contract length | 1–120 in-game days in the catalogue. |
+| Billing | Each started 24000-tick day is charged in full. |
+| Renewal | Extends an active rental's existing expiry, even when every slot is occupied. |
+| Conversion to purchase | Uses your existing rental slot; previous rent is not refunded. |
+| Expiry | Rights end when the property's world time reaches the saved expiry. |
+| Catalogue offer | Valid for 1200 ticks (60 seconds) in its original dimension. An expired offer refreshes the catalogue. |
+
+The offer retains the room identity, not a locked price. A changed price can apply when confirming an otherwise valid offer.
+
+## Reading My Home
+
+Open **My Home** in the status screen or run `/ise home`; the long command root is `/isekaiexpansion`. The ledger lists your active rentals and permanent homes across server dimensions, up to 256 properties. Select a property to see its plan, anchor position and last-refreshed rental duration. **Refresh ledger** requests a new snapshot.
+
+**Show my boundaries** enables your personal world preview. Permanent homes are gold and rentals blue. The preview refreshes every 100 ticks (5 seconds), fades out by 96 blocks from the property's envelope, and hides an expired rental. Disconnecting turns it off. Empty gaps between the declared regions are outside the property, even when enclosed by its overall plan.
+
+## Sharing access
+
+Each permanent resident keeps full authority. Guests do not occupy resident slots and cannot acquire ownership through a permission grant.
+
+| Permission | Covered player actions |
+| --- | --- |
+| Use | Use blocks and open containers. |
+| Build | Place blocks or fluids; use flint and steel or fire charges at the placement position. |
+| Break | Break blocks and collect source fluids with an empty bucket. |
+| Entities | Directly use or attack entities inside the home. |
+| Sleep | Use beds and retain an allowed bed respawn point. |
+
+Renters always retain Use and Sleep while their contract is active. Other rights need a grant. Sneaking while placing a block avoids the separate use check on the clicked block; placement still requires Build.
+
+The Permissions tab lets owners add a known player by displayed name or UUID. Newly added guests receive Use. Up to 128 individual rules are stored. An individual rule takes precedence over the optional current-team rule, including a rule that denies every permission. Remove that rule to restore team inheritance.
+
+Team access follows the current team of any permanent resident through IsekaiCore's team provider, with allied-team matching disabled. Without an active team provider, that route grants no access. Removing the final permanent resident clears the old grants.
+
+Bed permission is checked again before respawning. Losing a rental or Sleep grant can invalidate the saved home bed; forced spawn points are excluded from that check. Creative operators with permission level 2 bypass the ordinary home interaction guards.
+
+These permissions cover the listed player interactions. Other protection rules still apply, and home permissions do not provide a general guarantee against automation or environmental damage.
+
+## Furnishing and sleeping
+
+Furniture supplies **coziness**, capped at 100. Each category contributes at most 20; each rule also limits repetitions. Every 20 points grants a Hearthbound tier, up to 5.
+
+| Hearthbound tier | Coziness required | Maximum health | Movement speed | Daily combat XP cap |
+| --- | --- | --- | --- | --- |
+| 1 | 20 | +2% | +1% | +2% |
+| 2 | 40 | +4% | +2% | +4% |
+| 3 | 60 | +6% | +3% | +6% |
+| 4 | 80 | +8% | +4% | +8% |
+| 5 | 100 | +10% | +5% | +10% |
+
+| Bundled furniture | Category | Points each | Count limit |
+| --- | --- | --- | --- |
+| Bed head | Rest | 10 | 2 |
+| Bookshelf | Study | 4 | 5 |
+| Flower pot tag | Greenery | 4 | 5 |
+| Lit campfire | Warmth | 10 | 2 |
+| Wool carpet tag | Textiles | 2 | 10 |
+| Barrel | Storage | 5 | 4 |
+
+Surveys only run for homes with permanent residents and never load missing chunks. Keep all the home's regions loaded and refresh the ledger when it reports a pending survey. A pending result cannot award Hearthbound. Overlapping regions inside the same home count a block only once.
+
+Changing furniture or reloading furniture rules invalidates the survey. Already-earned effects continue after leaving the home. A sleep that supplies no new Hearthbound award does not explicitly remove an existing one.
+
+| Interaction | Result |
+| --- | --- |
+| Rested plus Hearthbound | Their combat-cap additions share a multiplier: 1 + 0.10 + 0.02 × tier when both are active. |
+| Fate Balance | Loot-cap traits are tracked separately; home combat caps keep their own multiplier. |
+| Maximum-health bonuses | Increase the maximum; the award does not directly heal. Removing an effect clamps health to the new maximum if necessary. |
+| Repeated sleep | Adds another instance of the same effect through ordinary status-effect handling; no separate stack of housing rewards is created. |
+| Comfort | Has its own wake-up recovery; see [Comfort](/en/wiki/comfort/). |
+
+## Where the data lives
+
+Furniture rules live in `data/<namespace>/home_furniture/*.json`. Property regions and contracts are authored with structure-space anchors and stored with the world. See [structure-space data](/en/wiki/structure-space-data/) for the formats and authoring steps, and [structure-space runtime](/en/dev/structure-spaces/) for integration and persistence.

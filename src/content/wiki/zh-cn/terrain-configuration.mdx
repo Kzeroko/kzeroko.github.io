@@ -1,0 +1,368 @@
+---
+title: "地形配置"
+description: "KTM2 的全部地形设置、配色字段、默认值、有效范围与重载边界。"
+category: data
+order: 178
+updated: 2026-09-26
+---
+
+地形配置控制 KTM2 世界生成器的选址、几何、材料与局部气氛。生成过程读取服务端本地快照，修改运行中的配置对象不会重建已有世界，也不会移动已保存的世界树。
+
+## 文件放在哪里
+
+编辑 `config/isekaiexpansion.json` 中的 `terrain` 对象。`autoPatchExoticShaders` 是同一文件中独立的顶层客户端偏好。这些是配置项，不是带命名空间的数据包文件；资源包优先级不决定它们的值。
+
+模组内的 `data/isekaiexpansion/terrain/ktm2.json` 是随包提供的 ReTerraForged 预设，通过模组类路径读取。它不使用本文的配置格式，也不是通常可重载的数据包覆盖入口。集成方式见[地形运行时](/zh-cn/dev/terrain-generation/)。
+
+## 最小示例
+
+将此片段合并到现有配置，保留其他设置。缺失字段使用声明时的初始默认值；不要显式写入 null 对象。
+
+```json
+{
+  "terrain": {
+    "enabled": true
+  },
+  "autoPatchExoticShaders": true
+}
+```
+
+## 字段
+
+除首表外，下列路径均相对于 `terrain`。未特别标注单位的几何距离均为格。有限数值与范围检查会拒绝非法值，不会自动钳制。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `terrain` | `object` | 下表默认值 | 服务端拥有的世界生成设置，也发送到客户端供展示使用。 |
+| `autoPatchExoticShaders` | `boolean` | true | 客户端本地偏好：允许在光影包加载时叠加兼容的着色器源码补丁。 |
+| `terrain.enabled` | `boolean` | true | 启用自定义地形、地标选址与装饰；不会移除随包预设或已注册群系。 |
+
+以下对象字段使用对应的嵌套表。即使某个系列已关闭，显式 null 仍可能使快照或材料构建失败。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `landforms` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `haloCrown` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `sentinelIsles` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `verdantKnives` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `amberBasin` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `crystalLand` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `giantSkyLand` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `aquapolis` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `evernightTundra` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `abyssalVolcano` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `gardenOfTheFirmament` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `giantStoneValley` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `riftborneMonolith` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `infernalDeepCavern` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `sunkenAzureGrotto` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `viridianToxicDepths` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `worldrootHollow` | `object` | 下表系列默认值 | 服务端拥有的形状、配色与气氛设置。 |
+| `greatPlains` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `surfaces` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `decoration` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `worldTree` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `worldTree.placement` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `worldTree.geometry` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `worldTree.woodland` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+| `worldTree.materials` | `object` | 下表默认值 | 对应设置组；保留对象结构，不使用 null。 |
+
+### 选址与共享几何
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement.districtSpacing` | `integer` | 2304 | 区域网格间距，1024–16384 格。 |
+| `placement.districtChance` | `number` | 1 | 0–1；每个网格只做一次准入判定，不保证实际生成区域。 |
+| `placement.siteAttempts` | `integer` | 64 | 每个网格内、每个系列的分层候选点数，1–128。 |
+| `placement.biomeBlendWidth` | `number` | 0.05 | 0.005–0.25；影响过渡宽度预算，地势起伏还可扩大过渡。 |
+| `placement.replaceableBiomes` | `array` | 下列 33 个 ID | 允许选址的原始群系精确 ID；空列表不接纳普通区域。未知字符串无法匹配，null 无效。 |
+
+### 共享地形
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `landforms.radius` | `number` | 680 | 系列缩放前半径，128–min(2048, districtSpacing × 0.32) 格。 |
+| `landforms.relief` | `number` | 210 | 基础垂直起伏，32–512 格。 |
+| `landforms.rockRoughness` | `number` | 0.18 | 0–0.4；普通岩体的裂隙起伏。 |
+
+### 天环群峰
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `haloCrown.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `haloCrown.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `haloCrown.ringRadius` | `number` | 125 | 垂直缩放前为 32–256 格。 |
+| `haloCrown.ringThickness` | `number` | 22 | 8–48 格；必须小于 ringRadius 的一半，且 ringRadius + ringThickness 小于区域半径的 0.6 倍。 |
+| `haloCrown.ringChance` | `number` | 1 | 0–1；该系列的额外准入概率。 |
+| `haloCrown.haloCrownWeight` | `number` | 1 | 系列相对权重 0–100；0 停止选取。 |
+
+### 守望石群岛
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `sentinelIsles.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `sentinelIsles.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `sentinelIsles.islandChance` | `number` | 0.55 | 0–1；用作海洋区域的相对选取权重；0 停止选取。 |
+| `sentinelIsles.pillarHeight` | `number` | 260 | 垂直缩放前柱高 48–512 格。 |
+
+### 苍翠剑脊
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `verdantKnives.sizeMultiplier` | `number` | 1.15 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `verdantKnives.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `verdantKnives.verdantKnivesWeight` | `number` | 1 | 相对权重 0–100。 |
+| `verdantKnives.formationCount` | `integer` | 24 | 目标剑脊数量 8–48；完整性只要求至少 8 个，不保证达到目标数量。 |
+
+### 琥珀阶谷
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `amberBasin.sizeMultiplier` | `number` | 1.1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `amberBasin.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `amberBasin.amberBasinWeight` | `number` | 1 | 相对权重 0–100。 |
+| `amberBasin.terraceHeight` | `number` | 22 | 垂直缩放前阶高 8–48 格。 |
+
+### 风息原野
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `greatPlains.greatPlainsEnabled` | `boolean` | true | 启用独立的聚落平原选址。 |
+| `greatPlains.greatPlainsRadius` | `number` | 2200 | 半径 1024–3072 格；选址网格间距为半径 × 3.5。 |
+| `greatPlains.greatPlainsBuildRadius` | `number` | 768 | 理想可建造核心半径，512–0.55 × greatPlainsRadius 格。 |
+| `greatPlains.greatPlainsMinimumBuildRadius` | `number` | 512 | 最小核心半径，256–greatPlainsBuildRadius 格；选址可将核心缩减到此值。 |
+| `greatPlains.greatPlainsChance` | `number` | 0.65 | 每个平原选址网格的概率，0–1。 |
+
+### 晶棱荒原
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `crystalLand.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `crystalLand.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `crystalLand.weight` | `number` | 1 | 相对权重 0–100。 |
+| `crystalLand.crystalHeight` | `number` | 190 | 垂直缩放前晶体高度 24–240 格。 |
+| `crystalLand.stormMinimumSeconds` | `number` | 6 | 客户端气氛闪光的最短间隔，3–180 秒。 |
+| `crystalLand.stormMaximumSeconds` | `number` | 12 | 最长间隔为 stormMinimumSeconds–180 秒；不改变全局天气。 |
+| `crystalLand.stormIntensity` | `number` | 0.55 | 闪光强度 0–1。 |
+| `crystalLand.thunderVolume` | `number` | 0.25 | 雷声音量 0–1，另乘群系混合权重。 |
+| `crystalLand.palettes` | `array` | 见下方系列默认值 | 1–16 个具名配色对象，字段见下文。同系列内 ID 必须唯一。 |
+
+### 苍穹浮岛
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `giantSkyLand.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `giantSkyLand.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `giantSkyLand.weight` | `number` | 1 | 相对权重 0–100。 |
+| `giantSkyLand.islandAltitude` | `number` | 744 | 基础 Y 为 700–840；不受 scale 影响。 |
+| `giantSkyLand.tierHeight` | `number` | 42 | 垂直缩放前层间距 24–64 格；布局还按半径限制层差。 |
+| `giantSkyLand.vegetation` | `number` | 0.65 | 0–1；控制树木与地表植被密度，不等于固定面积覆盖率。 |
+| `giantSkyLand.cloudSeaDepth` | `number` | 112 | 光影云海位于 islandAltitude 下方 48–240 格；不改变地形或瀑布长度。 |
+| `giantSkyLand.palettes` | `array` | 见下方系列默认值 | 1–16 个具名配色对象，字段见下文。同系列内 ID 必须唯一。 |
+
+### 水都瀑境
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `aquapolis.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `aquapolis.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `aquapolis.weight` | `number` | 1 | 相对权重 0–100。 |
+| `aquapolis.terraceHeight` | `number` | 38 | 垂直缩放前台阶高度 12–48 格。 |
+| `aquapolis.vegetation` | `number` | 0.65 | 树木与地表植被密度控制值，0–1。 |
+| `aquapolis.palettes` | `array` | 见下方系列默认值 | 1–16 个具名配色对象，字段见下文。同系列内 ID 必须唯一。 |
+
+### 永夜极光冻原
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `evernightTundra.sizeMultiplier` | `number` | 1 | 0.6–2；乘以共享水平半径。缩放后半径 + 32 必须小于区域间距的一半。 |
+| `evernightTundra.scale` | `number` | 1 | 0.5–1.5；缩放起伏、环尺寸、柱体与台阶高度及奇境垂直特征；浮岛基础高度不变。 |
+| `evernightTundra.weight` | `number` | 1 | 相对权重 0–100。 |
+| `evernightTundra.chasmDepth` | `number` | 80 | 垂直缩放前裂谷深度 16–120 格。 |
+| `evernightTundra.fossilScale` | `number` | 2 | 乘以 scale 前的化石倍率，0.5–2.25。 |
+| `evernightTundra.auroraIntensity` | `number` | 0.8 | 客户端极光强度 0–2。 |
+| `evernightTundra.crystalHeight` | `number` | 57 | 垂直缩放前晶体高度 7.2–72 格。 |
+| `evernightTundra.palettes` | `array` | 见下方系列默认值 | 1–16 个具名配色对象，字段见下文。同系列内 ID 必须唯一。 |
+
+### 火山、高地与洞窟系列
+
+以下字段分别位于 `abyssalVolcano`, `gardenOfTheFirmament`, `giantStoneValley`, `riftborneMonolith`, `infernalDeepCavern`, `sunkenAzureGrotto`, `viridianToxicDepths`, `worldrootHollow` 对象内。缺失成员保留该系列的默认值，只写权重的部分对象也一样；显式 null 配色列表会被拒绝。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `sizeMultiplier` | `number` | 1 / 0.8 / 1.25 | 0.6–2；水平半径倍率，地下系列默认为 0.8，深渊火山默认为 1.25。 |
+| `scale` | `number` | 1 | 0.5–1.5；缩放岩体、阶地与洞室高度。 |
+| `weight` | `number` | 1 | 0–100；相对选址权重，0 关闭该系列选取。 |
+| `formationHeight` | `number` | 240 | 缩放前 80–520 格；控制地表岩体高度，系列覆盖值见下表。 |
+| `terraceHeight` | `number` | 18 / 28 | 缩放前 8–48 格；阶地间距控制；地下默认 28。 |
+| `chamberHeight` | `number` | 160 / 210 | 缩放前 80–240 格；地下默认为 210，控制洞室深度，维度底部余量不足时缩短。 |
+| `roofThickness` | `number` | 36 | 24–96 格；地下最小覆岩厚度，不开挖通向地表的入口。 |
+| `vegetation` | `number` | 0.08 | 0–1；稀疏植被控制，覆盖值见下表。 |
+| `poolCoverage` | `number` | 0.28 | 0–0.6；控制池塘与水道尺寸，并非固定地面覆盖率。巨石谷与裂隙巨岩不设置水池。 |
+| `formationCount` | `integer` | 12 | 4–32；岩体或根系数量控制，每组可包含多个片段。 |
+| `atmosphereStrength` | `number` | 0.8 | 0–1；光影气氛混合强度，不修改全局天气。 |
+| `viridianToxicDepths.toxicWater` | `boolean` | true | 仅翠毒深渊提供此字段，控制触水中毒。 |
+| `palettes` | `array` | 1 | 1–16 个命名配色对象，使用下文共用字段；系列内 ID 不得重复。 |
+
+| 系列 | formationHeight | terraceHeight | vegetation | poolCoverage | formationCount |
+| --- | --- | --- | --- | --- | --- |
+| `abyssalVolcano` | 310 | 18 | 0 | 0.28 | 12 |
+| `gardenOfTheFirmament` | 460 | 36 | 0.65 | 0.34 | 12 |
+| `giantStoneValley` | 260 | 18 | 0.08 | 0 | 12 |
+| `riftborneMonolith` | 430 | 18 | 0 | 0 | 9 |
+| `infernalDeepCavern` | 310 | 28 | 0 | 0.28 | 12 |
+| `sunkenAzureGrotto` | 240 | 28 | 0.4 | 0.42 | 12 |
+| `viridianToxicDepths` | 240 | 28 | 0.18 | 0.48 | 12 |
+| `worldrootHollow` | 240 | 28 | 0.5 | 0.12 | 18 |
+
+### 普通地表材料
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `surfaces.surfaceDepth` | `integer` | 4 | 表层下的土层深度，整数 1–12 格。 |
+| `surfaces.mountainRock` | `string` | `minecraft:stone` | 干燥、实心完整方块状态；天环群峰、苍翠剑脊与风息原野共用。 |
+| `surfaces.mountainTop` | `string` | `minecraft:grass_block` | 上述系列的表层方块；陡坡使用岩石。 |
+| `surfaces.mountainSoil` | `string` | `minecraft:dirt` | 上述表层下的土壤；也是林地地表规则的土壤。 |
+| `surfaces.islandRock` | `string` | `minecraft:andesite` | 守望石群岛的干燥实心完整岩石方块。 |
+| `surfaces.islandTop` | `string` | `minecraft:moss_block` | 守望石群岛表层材料。 |
+| `surfaces.islandSoil` | `string` | `minecraft:dirt` | 守望石群岛土壤。 |
+| `surfaces.basinRock` | `string` | `minecraft:calcite` | 琥珀阶谷岩石。 |
+| `surfaces.basinTop` | `string` | `minecraft:grass_block` | 琥珀阶谷表层。 |
+| `surfaces.basinSoil` | `string` | `minecraft:dirt` | 琥珀阶谷土壤。 |
+
+### 风化与林地
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `decoration.enabled` | `boolean` | true | 控制普通风化与林地树木；不关闭奇境装饰或世界树本体。 |
+| `decoration.mossCoverage` | `number` | 0.28 | 苔藓放置阈值，0–1。 |
+| `decoration.vineChance` | `number` | 0.055 | 0–1；还要通过湿度与后续概率判定。 |
+| `decoration.vineLength` | `integer` | 24 | 藤蔓长度控制值，整数 1–64；支撑检查可提前终止。 |
+| `decoration.weatheredRock` | `string` | `minecraft:tuff` | 干燥实心完整的风化岩石方块。 |
+| `decoration.moss` | `string` | `minecraft:moss_block` | 干燥实心完整的苔藓材料。 |
+| `decoration.vines` | `string` | `minecraft:vine` | 无流体、无方块实体，且具有 north/south/east/west 附着属性的方块状态。 |
+| `decoration.groveTreeChance` | `number` | 0.72 | 流光林地树木规划概率，0–1。 |
+| `decoration.gladeTreeChance` | `number` | 0.16 | 星辉林间地树木规划概率，0–1。 |
+| `decoration.woodlandTreeHeight` | `integer` | 42 | 林地树木基础高度，整数 18–64 格。 |
+
+### 世界树选址
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `worldTree.placement.enabled` | `boolean` | true | 启用唯一预留区域与世界树。 |
+| `worldTree.placement.searchRadius` | `integer` | 24000 | 相对所选搜索原点的范围，整数 4096–100000 格。已有区域文件可将原点移至已探索地形之外。 |
+| `worldTree.placement.searchAttempts` | `integer` | 256 | 全局采样次数，整数 16–2048，之后还有有界局部细化。 |
+
+### 世界树几何
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `worldTree.geometry.biomeRadius` | `number` | 1600 | 林地预留区域半径，800–2400 格。 |
+| `worldTree.geometry.crownRadius` | `number` | 560 | 树冠半径，192–0.45 × biomeRadius 格。 |
+| `worldTree.geometry.ceilingClearance` | `integer` | 8 | 距维度顶部的留空，整数 2–64 格。 |
+| `worldTree.geometry.foliageDepth` | `integer` | 6 | 每个空心树冠叶团外层叶壳的厚度，整数 2–16 格。 |
+| `worldTree.geometry.branchCount` | `integer` | 14 | 主枝数量，整数 8–24。 |
+| `worldTree.geometry.branchDepth` | `integer` | 3 | 递归分枝深度，整数 1–3。 |
+| `worldTree.geometry.barkRelief` | `number` | 0.18 | 树皮棱脊起伏，0–0.4。 |
+
+### 世界树林下装饰
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `worldTree.woodland.decorationAttempts` | `integer` | 3 | 每个符合条件区块的发光灌木尝试次数，整数 0–16；独立于 decoration.enabled。 |
+
+### 世界树材料
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `worldTree.materials.trunk` | `string` | `minecraft:dark_oak_log[axis=y]` | 主干方块状态。 |
+| `worldTree.materials.branches` | `string` | `minecraft:dark_oak_wood` | 枝条方块状态。 |
+| `worldTree.materials.roots` | `string` | `minecraft:mangrove_roots` | 树根方块状态。 |
+| `worldTree.materials.leaves` | `string` | `minecraft:azalea_leaves[persistent=true]` | 树叶状态；存在 persistent 属性时强制设为 true。 |
+| `worldTree.materials.floweringLeaves` | `string` | `minecraft:flowering_azalea_leaves[persistent=true]` | 开花树叶状态，使用相同持久规则；在树冠顶面成片点缀花斑。 |
+| `worldTree.materials.glow` | `string` | `minecraft:shroomlight` | 必须发出非零方块光；用于林下发光灌木，以及树冠下部分垂叶末端的灯果。 |
+| `worldTree.materials.ground` | `string` | `minecraft:moss_block` | 林地地面与地表规则顶层，因此还须通过实心完整方块校验。 |
+| `worldTree.materials.weatheredBark` | `string` | `minecraft:spruce_wood` | 风化树皮条带与树节。 |
+| `worldTree.materials.mossyBark` | `string` | `minecraft:moss_block` | 低处树根与平台上的苔藓树皮。 |
+
+### 具名奇境配色字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `palettes[].id` | `string` | `default` | 同系列内唯一，匹配 [a-z0-9_]+；用于组成持久群系 ID。 |
+| `palettes[].rock` | `string` | `minecraft:stone` | 干燥实心完整的基础岩石方块。 |
+| `palettes[].top` | `string` | `minecraft:grass_block` | 干燥实心完整的表层方块。 |
+| `palettes[].soil` | `string` | `minecraft:dirt` | 干燥实心完整的土壤方块。 |
+| `palettes[].crystal` | `string` | `minecraft:amethyst_block` | 干燥实心完整的晶体与屋顶材料。 |
+| `palettes[].weathered` | `string` | `minecraft:andesite` | 干燥实心完整的风化材料。 |
+| `palettes[].moss` | `string` | `minecraft:moss_block` | 干燥实心完整的苔藓材料。 |
+| `palettes[].ice` | `string` | `minecraft:blue_ice` | 干燥实心完整的冰冻材料。 |
+| `palettes[].bone` | `string` | `minecraft:bone_block` | 干燥实心完整的化石材料。 |
+| `palettes[].skeletalVariant` | `string` | `leviathan` | leviathan 或 serpent；所有系列配色都会检查。 |
+| `palettes[].structure` | `string` | `minecraft:quartz_block` | 干燥实心完整的建筑材料。 |
+| `palettes[].fluid` | `string` | `minecraft:water` | 流体源方块状态，不得有方块实体；流动状态被拒绝。 |
+| `palettes[].wood` | `string` | `minecraft:oak_log` | 奇境植被用干燥实心完整木材方块。 |
+| `palettes[].leaves` | `string` | `minecraft:oak_leaves[persistent=true]` | 无流体、无方块实体的树叶方块；persistent 强制为 true。 |
+| `palettes[].flower` | `string` | `minecraft:azure_bluet` | 无流体、无方块实体的单格花卉；地下系列还允许蘑菇与菌类。 |
+| `palettes[].vines` | `string` | `minecraft:vine` | 无流体、无方块实体的壁面附着藤蔓方块。 |
+| `palettes[].waterColor` | `integer` | 0x35B8BE | RGB 整数 0–16777215。 |
+| `palettes[].fogColor` | `integer` | 0xB5C9DA | RGB 整数 0–16777215。 |
+| `palettes[].auroraPurple` | `integer` | 0xA96DE8 | RGB 整数 0–16777215；冻原极光颜色。 |
+| `palettes[].auroraGreen` | `integer` | 0x51D6AE | RGB 整数 0–16777215；冻原极光颜色。 |
+| `palettes[].auroraCrimson` | `integer` | 0xD64C78 | RGB 整数 0–16777215；冻原极光颜色。 |
+
+### 默认白名单与配色
+
+`placement.replaceableBiomes` 默认包含以下 `33` 个精确 ID：
+
+`minecraft:plains`, `minecraft:forest`, `minecraft:birch_forest`, `minecraft:flower_forest`, `minecraft:meadow`, `minecraft:windswept_hills`, `minecraft:windswept_forest`, `minecraft:stony_peaks`, `minecraft:jagged_peaks`, `minecraft:stony_shore`, `minecraft:frozen_peaks`, `minecraft:snowy_slopes`, `minecraft:grove`, `minecraft:windswept_gravelly_hills`, `minecraft:ocean`, `minecraft:deep_ocean`, `minecraft:lukewarm_ocean`, `minecraft:deep_lukewarm_ocean`, `minecraft:cold_ocean`, `minecraft:deep_cold_ocean`, `minecraft:frozen_ocean`, `minecraft:deep_frozen_ocean`, `minecraft:taiga`, `minecraft:old_growth_pine_taiga`, `minecraft:old_growth_spruce_taiga`, `minecraft:old_growth_birch_forest`, `minecraft:dark_forest`, `minecraft:cherry_grove`, `minecraft:sunflower_plains`, `minecraft:snowy_plains`, `minecraft:snowy_taiga`, `minecraft:river`, `minecraft:frozen_river`
+
+原有四个奇境系列初始只有一套配色，覆盖值如下。其余成员使用上表 `palettes[]` 的通用默认值；四套配色的 `crystal` 均为 `minecraft:amethyst_block`。为便于阅读，RGB 使用十六进制展示；写入 JSON 时必须使用十进制整数。
+
+| 系列 | id | rock | top | soil | waterColor | fogColor |
+| --- | --- | --- | --- | --- | --- | --- |
+| `crystalLand` | `amethyst` | `minecraft:deepslate` | `minecraft:andesite` | `minecraft:deepslate` | `0x35B8BE` | `0xB5C9DA` |
+| `giantSkyLand` | `verdant` | `minecraft:stone` | `minecraft:grass_block` | `minecraft:dirt` | `0x35B8BE` | `0xB5C9DA` |
+| `aquapolis` | `calcite` | `minecraft:calcite` | `minecraft:grass_block` | `minecraft:dirt` | `0x35B8BE` | `0xB5C9DA` |
+| `evernightTundra` | `boreal` | `minecraft:deepslate` | `minecraft:snow_block` | `minecraft:packed_ice` | `0x596899` | `0x141E38` |
+
+配色 ID 生成 `isekaiexpansion:<family>_<id>`。浮岛配色还生成 `_grove` 与 `_wetland` 群系。默认浮岛 ID 为 `isekaiexpansion:giant_sky_land_verdant`、`isekaiexpansion:giant_sky_land_verdant_grove` 和 `isekaiexpansion:giant_sky_land_verdant_wetland`。这些 ID 会成为保存的群系源绑定的一部分；重命名或删除配色属于世界格式变更。
+
+### 新增系列的默认配色
+
+未列出的字段使用共用配色默认值。各行先以 soil `minecraft:deepslate`、weathered `minecraft:basalt`、crystal `minecraft:glowstone`、fluid `minecraft:water` 为基础，再应用表中覆盖值。地下配色还将 flower 设为 `minecraft:brown_mushroom`。
+
+| 系列 | id | rock | top | 其他覆盖值 |
+| --- | --- | --- | --- | --- |
+| `abyssalVolcano` | `basalt` | `minecraft:blackstone` | `minecraft:basalt` | `soil=minecraft:blackstone`, `weathered=minecraft:red_nether_bricks`, `crystal=minecraft:magma_block`, `fluid=minecraft:lava`, `fogColor=0x563444` |
+| `gardenOfTheFirmament` | `verdant` | `minecraft:stone` | `minecraft:grass_block` | `soil=minecraft:dirt`, `weathered=minecraft:andesite`, `fogColor=0xB6D6DD` |
+| `giantStoneValley` | `weathered` | `minecraft:andesite` | `minecraft:tuff` | `weathered=minecraft:stone`, `fogColor=0x939F9E` |
+| `riftborneMonolith` | `riftstone` | `minecraft:deepslate` | `minecraft:polished_basalt` | `crystal=minecraft:shroomlight`, `fogColor=0x487182` |
+| `infernalDeepCavern` | `basalt` | `minecraft:blackstone` | `minecraft:basalt` | `soil=minecraft:blackstone`, `weathered=minecraft:red_nether_bricks`, `crystal=minecraft:magma_block`, `fluid=minecraft:lava`, `fogColor=0x563444` |
+| `sunkenAzureGrotto` | `azure` | `minecraft:deepslate` | `minecraft:moss_block` | `weathered=minecraft:tuff`, `structure=minecraft:mossy_stone_bricks`, `crystal=minecraft:sea_lantern`, `waterColor=0x27C6CF`, `fogColor=0x254F65` |
+| `viridianToxicDepths` | `viridian` | `minecraft:blackstone` | `minecraft:tuff` | `crystal=minecraft:ochre_froglight`, `waterColor=0x39D65B`, `fogColor=0x245E43` |
+| `worldrootHollow` | `ancient` | `minecraft:deepslate` | `minecraft:moss_block` | `wood=minecraft:dark_oak_wood`, `crystal=minecraft:shroomlight`, `fogColor=0x365653` |
+
+## 校验
+
+方块字符串支持方块状态语法，例如 `minecraft:oak_leaves[persistent=true]`。普通地表字段，以及奇境的 rock/top/soil/crystal/weathered/moss/ice/bone/structure/wood 字段，要求非空气、无流体、无方块实体的实心完整方块。世界树材料使用较宽松的非空气、无流体、无方块实体规则，但 ground 还须通过实心地表校验，glow 必须发光。奇境树叶、花卉、藤蔓与流体另有各行所列的类型要求。
+
+几何校验涉及的数值均须有限且位于范围内。系列尺寸与垂直倍率先独立检查，组合后仍须满足环体容纳与网格边距要求。字段有效不代表区域一定获准生成：生境、可用高度、预留地标与完整形状检查仍可拒绝候选点。
+
+配色列表要求 `1–16` 项，同一系列内 ID 唯一；颜色范围为整数 `0–16777215`。将系列权重设为零或将 `enabled` 设为 false，并不免除构建阶段校验。null 分组、错误方块状态、不支持的骨架类型或非法几何可能中止注册表或世界初始化；不会逐字段静默修复为默认值。
+
+模组的校验器不报告任意未知 JSON 键，不能靠拼错设置名来可靠发现配置错误。空配色列表被拒绝；空替换白名单可被接受，但会阻止普通区域准入。
+
+## 重载
+
+在创建或加载世界前设置生成选项，然后重启以取得新的注册表与生成器快照。`/reload` 不会重新生成地形。这些路径不会重写已生成区块；已保存的世界树预留记录继续使用原坐标与几何。
+
+IsekaiCore `0.4.0-build61` 在登录时同步 `terrain` 对象。生成过程明确读取服务端本地值，气氛展示读取已叠加服务端同步值的活动配置。该桥接不会实时推送修改给已连接客户端。独立的光影开关保持本地控制；Iris 加载光影包时才准备源码覆盖，因此关闭开关会在后续光影包加载时生效。
+
+## 相关页面
+
+- [地形与地标](/zh-cn/wiki/terrain/)——各系列外观与寻找方式。
+- [地形生成](/zh-cn/dev/terrain-generation/)——注册表、密度、持久状态与光影扩展约定。
+- [寻路与定位](/zh-cn/wiki/wayfinding/)——有界搜索与结果限制。
+

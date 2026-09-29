@@ -1,0 +1,69 @@
+---
+title: "Damage numbers"
+description: "Packet delivery, hit-time positioning and the ModernUI damage-number overlay."
+category: client
+order: 40
+updated: 2026-09-18
+---
+
+Damage numbers use a bounded ModernUI overlay with at most 128 active hits. The server sends an immutable world position; the client projects it and animates the label against a monotonic clock. These are internal rendering entry points, not a public facade.
+
+## What it does
+
+`CommonEventFactory.OnApplyDamageEnd.sendDamageNumPacket` sends numbers only when `displayDamage` is enabled, the target is outside `DAMAGE_NUMBER_BLACKLIST`, the attacker is a server player and the target is alive at the check. The attacker receives a packet; `displayToNearbyPlayers` also sends it to other players in the attacker's bounding box expanded by 16 blocks.
+
+`DamageNumberPacket` uses `isekaiexpansion:damage_number`. Its wire order is the target entity ID as a VarInt, world X/Y/Z as doubles, damage as a float and colour as an int. The ID groups consecutive hits; rendering never looks up that entity to reposition the number.
+
+## Runtime model
+
+`DamageNumberAnchor.current` samples `EntityVisualBounds` at send time. It places the label at height ×0.82 plus clearance of height ×0.12, clamped to 0.06–0.18 blocks. Moving or removing the target later does not move this stored position.
+
+| Limit | Value | Effect |
+| --- | --- | --- |
+| Active hits | 128 | Inserting at capacity removes the oldest hit. |
+| Projection distance | 96 blocks | Further hits stay alive but do not enter the visible snapshot. |
+| Nominal tick | 50 milliseconds | Age uses `System.nanoTime()`, independently of world ticks. |
+| Burst interval | 6 ticks (0.30 seconds) | A matching recent group continues its deterministic cascade. |
+| Shaped labels | 256 | Access-ordered cache discards the oldest unused label. |
+| Flash gradients | 192 | Eviction releases the shader; intensity has 16 steps. |
+
+`DamageNumberManager` owns hits and projection on the Minecraft client thread. `DamageNumberPresentation` copies its entry list. `DamageNumberModernOverlay` replaces the pending snapshot atomically and queues a single UI delivery; it schedules another delivery if a newer snapshot arrived during the drain.
+
+`DamageNumberOverlayView` advances snapshot age on the UI thread and requests another animation frame while entries remain alive. It shapes each distinct label once per cache residency. The packaged `/assets/isekaiexpansion/uifonts/Cuprum-BoldItalic.ttf` precedes ModernUI's selected fallback families; a missing or unreadable font uses the selected typeface and logs a warning. Detaching releases flash gradients.
+
+## Contracts
+
+`show` reschedules off-thread calls onto the client thread. It rejects a missing world, negative group ID, disabled display, non-finite coordinates or non-finite damage. Finite negative damage is accepted. The amount uses `#.##` with root-locale decimal symbols.
+
+The ordinary overlay hides numbers while a screen is open, the HUD is hidden or debug information is visible. Cinematic rendering hides them too. Hiding publishes an empty snapshot but preserves the hit collection; elapsed real time still counts. Joining or disconnecting clears the collection and sequence. Publishing without a world/player, or with display disabled, also clears it.
+
+These options are fields of `IsekaiConfig`; consumers read the current config object, rather than a data-pack reload. The packet sender reads its server instance and the renderer reads its client instance.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `displayDamage` | `boolean` | `true` | Gates server delivery and client insertion/publication independently. |
+| `displayDamageName` | `boolean` | `false` | Adds the translated damage name on the client; publication reads the current value. |
+| `displayToNearbyPlayers` | `boolean` | `false` | Adds nearby recipients on the server; it does not increase projection distance. |
+| `displayLength` | `integer` | `25` | Lifetime of a newly received hit: 25 ticks (1.25 seconds). UI bounds are 20–40 ticks (1–2 seconds); insertion only clamps to at least 1 tick (0.05 seconds), with no runtime maximum here. Existing hits keep their captured lifetime. |
+
+## Extending it
+
+Keep custom server delivery separate from client rendering. This method sends an already computed amount and colour to one recipient; it bypasses the ordinary damage-event eligibility and recipient selection described above.
+
+```java
+void sendNumber(ServerPlayerEntity viewer, Entity target, float amount, int color) {
+    DamageNumberPacket.send(viewer, target, amount, color);
+}
+```
+
+For animation changes, edit `DamageNumberAnimation`; for cascade placement, edit `DamageNumberStackLayout`. Preserve immutable snapshots and keep ModernUI view changes on its UI thread. There is no registration-based style extension in this path.
+
+## Verifying
+
+Compare single hits and rapid bursts at capped and uncapped frame rates. The pop, rise and fade should retain their real-time duration. Rotate the camera, then move or remove the target: projection follows the camera while the stored world position remains fixed.
+
+Exercise screen opening, HUD/debug toggles, cinematic rendering and reconnects. A brief hide can reveal an unexpired hit again; reconnecting must not. Send more than 128 hits and move beyond 96 blocks to check the collection and projection limits. Test Latin, Chinese and mixed labels with `displayDamageName` enabled, then compare attacker-only delivery with `displayToNearbyPlayers` on a dedicated server.
+
+## Related
+
+See [entity FX](/en/dev/entity-fx/) for entity-bound lifecycle effects and [Particlize](/en/dev/particlize/) for mesh-based effects.

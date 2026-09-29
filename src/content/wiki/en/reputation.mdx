@@ -1,148 +1,77 @@
 ---
-title: "Reputation & factions"
-description: "How factions are assigned, how relations resolve, what counts as theft, and what being wanted actually costs."
+title: "Reputation and factions"
+description: "Standing, witnesses, protected containers, wanted factions and report bands."
 category: world
 order: 10
-updated: 2026-09-01
-tagline: "Standing is tracked per faction, and the factions disagree."
-tags: ['world', 'factions', 'npc']
+updated: 2026-09-18
 ---
 
-Reputation in KTM2 is not one number. Every faction stores its own, evaluates its own wanted state, and reacts on its own terms. Helping one side is frequently how you lose standing with another.
+Each faction records your standing separately, from −1000 to +1000, with an initial value of 0. A faction considers you wanted at −100 or below; changes are evaluated against that faction's own standing.
 
-## How an entity gets a faction
+## What changes your standing
 
-An entity's factions come from four sources, and **only** these four:
+| Event | Base change | Conditions |
+| --- | --- | --- |
+| Caught taking protected items | −10 to −20 | −(10 + 2 × max(0, witnesses − 1)), capped at −20; witnesses within 16 blocks. |
+| Hurting a faction member | −2 to −12 | −clamp(2 + floor(damage × 0.5), 2, 12); no witness required. Invalid/nonpositive damage gives no penalty. |
+| Witnessed faction-member kill | −45 to −70 | −clamp(40 + 5 × witnesses, 40, 70); witnesses within 32 blocks. |
+| Kill a monster a protector is targeting | +5 | A living protector is in the 32-block search box and targets that monster. |
+| Rescue villagers by killing a monster | +10 | The monster targets a villager, or a villager in the 24-block search box is panicking with a matching threat memory. |
+| Both defence conditions | +15 | The rewards add once per kill, not once per protected entity. |
 
-<Steps>
+Theft has a cooldown of 100 ticks (5 seconds) per player, container position and dimension. Injury has a cooldown of 200 ticks (10 seconds) per player, victim and dimension. Creative and spectator players are excluded from these theft and combat incidents; quest rewards have their own entry point.
 
-1. Data-driven **entity faction rules**, described in the datapack reference below.
+### Witnesses and affected factions
 
-2. The factions KTM2's own NPCs ship with.
+At most 6 witnesses count. They must be alive, awake and free of Blindness, Darkness and Charm. Theft witnesses must share a protected faction and see the player with an unobstructed eye-to-eye ray. Kill witnesses must share a victim faction, see the killer and have an unobstructed ray to the victim.
 
-3. Factions a mod assigns to a creature directly.
+Theft affects the container's protected factions plus the witnesses' affiliations. Killing a faction member affects only factions shared by the victim and witnesses. Injury affects the victim's affiliations directly. Defence rewards go to the affiliations of the protectors and rescued villagers.
 
-4. The **structure-origin** faction recorded on a creature.
+Combat penalties for `isekaiexpansion:side/monster` and `isekaiexpansion:side/undead` apply while that side's standing is positive. At 0 they apply only if civilisation is not hostile to that side; below 0 they are filtered out. This exception applies to injury and witnessed-kill penalties, not every reputation change.
 
-</Steps>
+## Protected containers
 
-<Callout type="note" title="Standing in a village does not make you a villager">
-Reputation deliberately does not add a location faction just because something is standing inside a structure. A skeleton wandering into a village does not become village-affiliated, so killing it does not anger the village.
-</Callout>
+Taking items through a container screen can trigger theft; merely opening it does not. A player-placed inventory block is exempt for every player, regardless of who placed it. Generated containers can retain faction ownership from loot filling. An unmarked container falls back to local city and village factions.
 
-A structure-origin faction belongs only to creatures **generated as part of the structure itself**. Later natural spawns, spawner mobs, patrols, spawn eggs, commands, and anything that merely walks in do not inherit it.
+For a double inventory, the side holding the removed slot supplies the position and ownership. A player chest placed in a village does not become village property during loot filling. Without an eligible witness, taking protected items does not incur this theft penalty.
 
-## Faction relations
+## Factions and relations
 
-Relations are declared in datapacks as `friendly`, `neutral` or `hostile` — aliases `ally`, `enemy` and `war` are accepted.
+Entity affiliations combine explicit assignments, NPC configuration and matching data rules. A rule can also include saved structure-origin factions. Walking into a settlement does not itself add its faction to an entity.
 
-Resolution order:
+Relations resolve from persistent runtime overrides, then data-pack rules, then shared-faction friendly or otherwise neutral. Higher rule priority wins; equal-priority conflicts resolve hostile before friendly before neutral. These relations are separate from your numeric standing.
 
-<Steps>
+For targeting only, a hostile or monster-category entity without an explicit provider, NPC configuration or matching faction rule receives `isekaiexpansion:side/monster`. Ordinary players have no automatic faction targeting veto. The fallback does not make every monster kill a reputation incident.
 
-1. **Runtime relations set by story events.** They persist in the world save and sit deliberately above datapack defaults, so a story beat can start or end a war.
+## Wanted factions and Fate Balance
 
-2. **Datapack relation rules**, highest `priority` first.
+The [Fate Balance](/en/wiki/fate-balance/) countenance choices modify a change only if the affected faction already considers you wanted.
 
-3. **Fallback** — same faction is friendly, anything else is neutral.
+| Choice | Positive change | Negative change |
+| --- | --- | --- |
+| `kind_countenance` — Kind Countenance | ×1.25 | ×0.80 |
+| `fierce_countenance` — Grim Visage | ×0.80 | ×1.25 |
 
-</Steps>
+Results round to the nearest integer using the runtime's rounding rule, keeping a nonzero result at least +1 or −1. Each faction is adjusted separately before the final standing clamps to its bounds. A change that first crosses −100 is not retroactively modified.
 
-When equal-priority rules conflict: **hostile beats friendly, and friendly beats neutral.**
+Village-related changes also feed minor positive or negative vanilla gossip. This bridge processes at most 12 villagers, prioritises direct participants, then searches a 48-block box, with gossip magnitude capped at 25. It does not replace the faction ledger.
 
-### Targeting fallbacks
+## Reading the report
 
-Targeting uses the same explicit factions plus one small implicit rule:
+The report includes the default factions and your recorded dynamic affiliations. Settlement names are deterministic from their faction IDs, but are not unique identifiers. Their description gives a bearing relative to your position when the report is requested; other dimensions are labelled separately.
 
-- KTM2's own NPCs default to `isekaiexpansion:side/civilization`.
-- A mob with **no explicit faction rule** that is vanilla-hostile or in the monster spawn group counts as `isekaiexpansion:side/monster` — **for targeting only**.
+| Standing label | Range |
+| --- | --- |
+| Revered | 750–1000 |
+| Honored | 400–749 |
+| Friendly | 100–399 |
+| Neutral | −99–99 |
+| Wary | −399–−100 |
+| Hostile | −749–−400 |
+| Hated | −1000–−750 |
 
-If a mob does have an explicit rule, that rule controls relation behaviour and the generic monster fallback is not added on top.
+These are display bands; the wanted threshold remains −100. Names and descriptions are composed by the server and sent with the current values.
 
-## Theft and protected containers
+## Where the data lives
 
-Whether opening a chest is theft is decided by the container itself, not by where it is standing:
-
-<Steps>
-
-1. **A container a player placed** is personal storage, and faction theft reputation ignores it entirely.
-
-2. Any other container is judged by the owning faction recorded on it.
-
-3. With neither of those, a legacy location fallback still protects unmarked containers inside supported faction structures.
-
-</Steps>
-
-Loot filling never writes faction ownership onto a player-placed container. A chest you put down inside a village does not become village property.
-
-## Being wanted
-
-A faction considers you **wanted at −100 or lower**. Wanted state is evaluated independently per faction, **before** a reputation change is applied.
-
-The [Fate Balance](/en/wiki/fate-balance/) countenance pair only changes deltas for factions that are already wanted:
-
-| Fate | Positive reputation | Negative reputation | Factions above −100 |
-| --- | --- | --- | --- |
-| `kind_countenance` | ×1.25 | ×0.80 | unchanged |
-| `fierce_countenance` | ×0.80 | ×1.25 | unchanged |
-
-<Callout type="tip" title="A kind face is a recovery tool">
-Because the multipliers only apply below −100, `kind_countenance` does nothing while you are in good standing. It is insurance against a bad night, not a permanent charisma bonus.
-</Callout>
-
-When one event touches factions in different wanted states, each faction settles against its own wanted state. Countenance modifiers never leak onto factions that had no reason to distrust you.
-
-## Defender credit
-
-An entity rule can carry the `protector` role. A protector counts as a defender for its own factions while it is fighting a hostile target — so **killing something a guard is already fighting credits defender reputation to that guard's factions**. Helping the watch is recognised as helping the watch.
-
-## Datapack reference
-
-### Entity faction rules
-
-These live in `data/<namespace>/reputation/entity_factions/*.json`, one file per entity group and one rule per file. An entity matching several files receives factions and roles from all of them.
-
-| Key | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `entity_types` | string[] | yes | Entity type ids or tags. Tags start with `#`. |
-| `factions` | string[] | no | Static faction ids added to every match. Use stable namespaced ids. |
-| `dynamic_factions` | string[] | no | Factions generated from entity state. Supported: `minecraft:villager_profession`. |
-| `roles` | string[] | no | Behaviour roles, not faction ids. Supported: `protector`. |
-| `include_structure_origin_factions` | boolean | no | Allows structure-origin factions, still only for creatures generated with the structure. Default `false`. |
-
-```json
-{
-  "entity_types": ["minecraft:villager", "#example:guards"],
-  "factions": ["minecraft:village", "example:merchant_guild"],
-  "dynamic_factions": ["minecraft:villager_profession"],
-  "roles": ["protector"],
-  "include_structure_origin_factions": true
-}
-```
-
-`minecraft:villager_profession` emits one faction per villager profession, for example `minecraft:villager_profession/minecraft:librarian`. Values without a namespace normalise to `minecraft`.
-
-### Relation rules
-
-These live in `data/<namespace>/reputation/faction_relations/*.json`.
-
-| Key | Type | Required | Meaning |
-| --- | --- | --- | --- |
-| `source_factions` | string[] | yes | Acting side. |
-| `target_factions` | string[] | yes | Target side. |
-| `relation` | string | yes | `friendly`, `neutral` or `hostile`. |
-| `bidirectional` | boolean | no | Default `true`. |
-| `priority` | integer | no | Higher wins when a broad side rule and a narrow faction rule both match. Default `0`. |
-
-```json
-{
-  "source_factions": ["isekaiexpansion:side/human"],
-  "target_factions": ["isekaiexpansion:side/demon"],
-  "relation": "hostile",
-  "priority": 10
-}
-```
-
-### Id normalisation
-
-Faction ids are normalised as they are read: trimmed, lower-cased, backslashes and `|` become `/`, spaces become `_`, and a blank id becomes `unknown`. Write them cleanly anyway — normalisation is a safety net, not a style guide.
+Entity membership and faction relations live under `data/<namespace>/reputation/`. [Reputation data](/en/wiki/reputation-data/) gives the complete authoring tables; [Reputation runtime](/en/dev/reputation-runtime/) covers persistence, hooks and report composition.

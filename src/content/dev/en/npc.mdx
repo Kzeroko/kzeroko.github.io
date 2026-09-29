@@ -1,0 +1,161 @@
+---
+title: "NPC foundations"
+description: "Entity roles, portable state, inventory layout and the lifecycle shared by citizens and named companions."
+category: systems
+order: 60
+updated: 2026-09-27
+---
+
+NPC behaviour is built on `entity.BaseNpcEntity`, with role-specific subclasses and managers under `internal.ai`. These are project implementation and extension types, not a public NPC facade. Use the dedicated public facades for city and revival integration.
+
+## What it does
+
+| Layer | Added responsibilities | Default dialogue event |
+| --- | --- | --- |
+| `BaseNpcEntity` | Persistent humanoid body, inventory, interactions, navigation, follower ownership and shared brain. Combat/item-use/emote capabilities are disabled by default. | Base event hook. |
+| `SimpleNpcEntity` | Threat sensing, civilian flee task and body emotes. | NO_TRADE |
+| `CombatNpcEntity` | Combat/support sensors, action controller, automatic item-use capability and player hostility memory. Its core tasks replace the civilian flee addition. | INTERACT |
+| `UniqueNpcEntity` | Unique type identity, fixed gender, emotion, scheduled rest and POI use while wandering. | TRADE when trusted, otherwise INTERACT |
+| `CitizenNpcEntity` | Simple NPC with social CitizenIdentity and generated shared humanoid appearance. | Inherited NO_TRADE |
+| `AdventurerNpcEntity` | Bondable combat NPC with a generated humanoid profile and an initial iron sword. | Inherited INTERACT |
+
+The constructors disable loot pickup, mark NPCs persistent and install custom navigation/movement. NPCs reject immediate distance despawning and peaceful-difficulty removal. A subclass enabling a capability still needs its content: enabling item use does not make every quick-use item automatically usable, and enabling emotes does not populate an animation catalogue.
+
+## Runtime model
+
+### Brain and tick ownership
+
+The base brain owns CORE, IDLE and REST task lists. Core tasks include water survival, doors, looking, waking, follower commands, dialogue, staying and following; idle tasks choose local wandering/look/wait work. The base rest list is empty. Simple roles add civilian fleeing; combat roles add ranged escape. Unique roles add POI activity and sleep/home-return work, with IDLE at 0, REST at 16000 and IDLE again at 23000 daytime ticks.
+
+Server `mobTick` reconciles invalid follower ownership, updates dodge/idle state, emotes and role state, then item use. Unless a goal effect suspends brain control, it ticks the brain and follower commands. POI cooldowns still tick; suspended combat is interrupted. Riding compatibility runs only outside that suspension. Therefore brain suspension is not a blanket pause of every NPC manager.
+
+`NpcConfig` is a Java record/builder, not JSON. Role flags, movement, combat range, cooldown, personality and faction settings are chosen by the concrete entity. `normalMeleeAttacks` requires combat capability as well as its config flag. Evelina explicitly disables it and enables ranged/dodge behaviour; do not treat that character as the default melee example.
+
+The base attribute builder always includes attack damage (3) and attack speed (4.0), even when a subtype starts from the minimal builder. The default builder also sets maximum health to 30; adventurer registration uses this complete default. Civilian and unique builders may override damage and health. `NpcCombatAttributes` restores the weapon-compatible attack-speed base on server spawn initialisation and NBT load; equipment, outfit and effect modifiers remain active. A queued melee hit revalidates the attacking NPC, target life/removal state and world before applying damage on the server.
+
+### Inventory and customisation
+
+| Storage | Physical slots | Customisation handler slots | Contract |
+| --- | --- | --- | --- |
+| Backpack | 0–17, 18 slots | 0–17 | General storage. |
+| Quick use | 18–20, 3 slots | 21–23 | General storage, scanned for automatic use. |
+| Special | 21, 1 slot | 20 | Only NpcSpecializedItem, or empty. |
+| Main hand / offhand | Vanilla equipment, outside NpcInventory | 18 / 19 | Changes through customisation require marriage or allegiance ownership. |
+| Player inventory | Player-owned | 24–50 | Main inventory. |
+| Player hotbar | Player-owned | 51–59 | Hotbar. |
+
+`NpcInventory` has 22 physical slots. `addStack` copies its input, merges/fills backpack first, quick-use next, then special for specialised items, returning the remainder. `canInsert` only means some room exists, not that the whole stack fits.
+
+Customisation shift-click uses a different order: specialised slot first, then backpack, then quick-use; it returns after the first destination range accepts anything. Hands are never automatic shift-click destinations. The client receives a locked-slot mask; server clicks/quick-moves reject locked indices, and equipment extraction also checks the live marriage or allegiance-ownership policy. Reopen the screen after changing access policy because its mask is an opening snapshot.
+
+NPC inventory/equipment access requires a live, present NPC in the same world within 8 blocks. Customisation resolves the entity in the player's current server world and checks the same distance. Closing its handler releases the player's dialogue ownership when it still points at that NPC.
+
+Automatic item use waits for the weapon hit boundary and no active authored action. It scans quick-use slots only, in slot order, and requires a registered category plus `shouldNpcAutoUseItem`. The base hook returns false. It temporarily moves one item into the main hand, stops navigation, tracks category/use state, finishes the item and restores the previous hand. Sleep pauses an active use. The configured cooldown is clamped to 0–200 ticks (0–10 seconds). Category registration is cached per manager, so it is not a per-tick extension hook.
+
+`NpcCustomizeScreen` opens through `NpcCustomizeScreenHandler`, registered as `isekaiexpansion:npc_customize`. The Inventory destination has Backpack and Equipment subtabs. Only the selected NPC grid is shown above one player inventory. Equipment labels identify both hands, the specialised slot and quick-use slots. Switching tabs preserves the carried stack and the current appearance selection.
+
+Opening data carries the current rendered profile and each outfit entry’s fully resolved `HumanoidProfile`, encoded with the shared compact codec. The server composes each entry from the original character and that outfit’s overlay. The client never needs the server-only preset catalogue to preview a selection. The retired menu ID, classes and appearance-less entry format have no compatibility reader.
+
+The preview restores copied entity state and then applies the synchronised presentation to an isolated client entity. It never writes to the world NPC. This preserves generated citizen/adventurer identity and authored unique profiles, and prevents a cleared outfit layer from leaking into another choice. The shared follower preview uses the same snapshot path. Hand equipment follows the menu’s synchronised slots; changes are copied only when the stacks differ. Applying an outfit rechecks the live handler access policy on the server.
+
+### Shared entity NBT
+
+These are common custom fields, in addition to vanilla entity/equipment state. Combat, unique emotion, generated citizen identity and humanoid part internals belong to their owning systems.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `NpcIdentityId` | `UUID` | fresh token | Ordinary NPC identity, independent of display name and live entity UUID. Missing or malformed values allocate a new token. Unique NPCs do not save this field. |
+| `NpcBehavior` | `compound` | absent → WANDER | Behaviour state; old independent mode/owner fields are not read. |
+| `NpcBehavior.Mode` | `int` | DefaultMode | Ordinal: STAY=0, FOLLOW=1, WANDER=2, WANDER_BY_RADIUS=3. Invalid ordinal uses default. |
+| `NpcBehavior.DefaultMode` | `int` | WANDER | Durable non-follower mode; FOLLOW is sanitised to WANDER. |
+| `NpcBehavior.FollowReturnMode` | `int` | DefaultMode | Non-follower mode captured before following; invalid uses default. |
+| `NpcBehavior.FollowOwner` | `UUID` | `absent` | Saved only for FOLLOW with owner and positive session. |
+| `NpcBehavior.FollowSession` | `long` | `absent` | Must match the owner's live server session; owner alone is insufficient. |
+| `NpcOutfit` | `string` | preset default | Resolved outfit ID; applied after restoring the base character. |
+| `HumanoidProfile` | `compound` | generated/preset | Saved and restored only for non-authored NPC presets; authored profiles come from data. |
+| `StayAnchor` | `compound` | absent | Optional dimension and block position for staying or radius wandering. |
+| `HomeAnchor` | `compound` | absent | Optional home location, independent of stay anchor. |
+| `StayAnchor.Dim` | `string` | required | World ID; invalid identifier is not caught by this reader. |
+| `StayAnchor.X` | `int` | 0 | Block X coordinate. |
+| `StayAnchor.Y` | `int` | 0 | Block Y coordinate. |
+| `StayAnchor.Z` | `int` | 0 | Block Z coordinate. |
+| `HomeAnchor.Dim` | `string` | required | World ID, with the same parsing behaviour as StayAnchor. |
+| `HomeAnchor.X` | `int` | 0 | Block X coordinate. |
+| `HomeAnchor.Y` | `int` | 0 | Block Y coordinate. |
+| `HomeAnchor.Z` | `int` | 0 | Block Z coordinate. |
+| `NpcCityBinding` | `compound` | absent | Compact residence and optional duty-route reference; malformed binding becomes null. |
+| `NpcCityBinding.City` | `string` | required | City identifier. |
+| `NpcCityBinding.Residence` | `string` | required | Validated local residence ID. |
+| `NpcCityBinding.Route` | `string` | absent | Optional validated local route ID. |
+| `NpcInventory` | `list<compound>` | empty | Sparse list of nonempty Minecraft ItemStack compounds. |
+| `NpcInventory[].Slot` | `int` | list index | Numeric physical slot index; invalid destinations are repacked. |
+| `NpcFlying` | `boolean` | false | Saved flight flag; setters and travel logic still constrain runtime state. |
+| `NpcHovering` | `boolean` | false | Saved hover flag. |
+| `NpcSwimActive` | `boolean` | false | Active swimming flag; presentation hysteresis counters are transient. |
+| `NpcFollowProtectionMode` | `int` | ASSIST | Ordinal ASSIST=0, DEFEND=1, PASSIVE=2; numeric saved values clamp to range. |
+| `NpcRelationships` | `compound` | absent | Relationship compound: `Spouse` saves the marriage; `Owner` and `Bond` save allegiance. Unique marriage state is authoritative. |
+| `NpcRelationships.Spouse.Uuid` | `UUID` | required | Missing UUID makes the binding null. |
+| `NpcRelationships.Spouse.Name` | `string` | empty | Saved display name. |
+| `NpcPoiCooldowns` | `compound` | empty | POI ID → remaining positive ticks; unknown IDs, invalid IDs and nonpositive values are ignored. |
+
+Inventory loading clears current storage, restores each nonempty stack at its explicit numeric Slot (or list index when absent), and tries `addStack` when that destination is invalid. A repeated valid slot overwrites the earlier entry. Repacking ignores the returned remainder, so overflowing legacy data can lose items; it is not a lossless migration guarantee. New writes include Slot for every nonempty stack, preserving quick-use positions in sparse lists.
+
+The shared humanoid profile is tracked for clients, with a revision increment when the tracker changes. Citizens no longer use a separate appearance-key-only tracker. Authored NPCs resolve their character from the current preset; generated characters persist their base profile. The equipped outfit overlays that base without replacing it.
+
+### Follower sessions and death
+
+Use `beginFollowing(ServerPlayerEntity)`, `releaseFollowerOwnership()` or `stopFollowingAndSetMode(...)`. A FOLLOW ordinal alone is not ownership. Admission requires a live scoreboard session and space in the owner's squad, capped at 4; failure rolls back mode, owner, session and return behaviour.
+
+The scoreboard component persists `SessionEpoch` and `Players` (player UUID string → ordered UUID-int-array list). Active session mappings, movement headings and cohesion state are transient. Join allocates a new epoch and clears old squad membership; disconnect invalidates the session and releases loaded followers across worlds. A later-loaded NPC also reconciles its stored owner/session and releases an expired assignment. Packets send the recipient's whole ordered list, including unloaded members.
+
+Contract capture and release preserve a stored follower contract rather than inventing an owner. Release by the saved owner refreshes to that owner's current session; release by another player requires the original saved session still be live. Capacity is checked again for the newly spawned entity.
+
+Death records a grave before vanilla death processing. When accepted, the grave retains custom inventory and suppresses its ordinary drop, avoiding duplicate inventory on revival. Default non-grave deaths drop custom inventory only; equipment drops are disabled unless a subclass changes `dropInventoryOnly`. Follower membership is cleared immediately after death processing. Revival clears transient combat/follow state and restores non-follower behaviour before follow admission can occur again.
+
+## Contracts
+
+- **Server authority:** mutate behaviour, inventory, relationships, spawning and AI on the server thread. Tracked state presents the result to clients; it is not permission to run server mutations from rendering code.
+- **Identity:** ordinary NPC identity uses type plus a persistent `NpcIdentityId` token, cached on first access and invalidated when NBT is restored. Shared names, translations and renaming cannot merge favour or graves. Unique NPCs use type identity. Revival preserves the token while replacing the live entity UUID. Copying an entire entity snapshot also copies its identity; independent characters require a fresh token. Old name-derived keys are not migrated.
+- **Relationships:** Friendly/Trust/favour queries delegate to IsekaiCore using that identity. Their numeric level thresholds are dependency-owned. Marriage is a separate stored binding; the customisation policy checks `isMarriedTo` or allegiance ownership, not a guessed level threshold.
+- **Mode changes:** STAY and WANDER_BY_RADIUS capture a current stay anchor. Leaving FOLLOW clears its assignment; default and return modes sanitise FOLLOW/null to WANDER.
+- **World scope:** a city binding contains IDs, not city routes/menus copied onto the entity. Home and stay anchors contain dimensions. Resolve world-owned city data where the NPC is operating.
+- **Restoration:** profile precedes outfit, then behaviour, anchors, inventory/role state and transient managers are restored. Server load rebuilds the brain and reconciles follower ownership.
+- **Item insertion:** retain or handle the returned remainder from `addStack`. Do not treat `canInsert` as a full-capacity transaction check.
+
+## Extending it
+
+Choose the narrowest entity role, then override its hooks. Do not copy UniqueNpcEntity's emotion and rest work into mass-spawned citizens. Register the concrete type and its attribute container through the normal entity bootstrap.
+
+`util.npc.NpcSpawningUtil` is an internal project helper despite its public methods. Given an already registered NPC type:
+
+```java
+static <T extends BaseNpcEntity> Optional<T> spawnResident(
+        ServerWorld world, EntityType<T> type, BlockPos position) {
+    return NpcSpawningUtil.builder(world, type, position)
+            .defaultMode(BaseNpcEntity.NpcMode.WANDER_BY_RADIUS)
+            .initialMode(BaseNpcEntity.NpcMode.WANDER_BY_RADIUS)
+            .findHomeBedNear(position, 16)
+            .spawn();
+}
+```
+
+The builder positions at a block's bottom centre, defaults to STRUCTURE spawn reason and searches for a home bed within 16 blocks. Bed selection requires an unoccupied head within the spherical distance and optional predicate; it does not reserve a bed or prove a route. Negative search radii clamp to 0. Manual home skips search; `withoutHome` disables assignment. Both mode setters reject FOLLOW.
+
+Order is create → position → initialise → configure callbacks → home → city/modes → world insertion → afterSpawn callbacks. Multiple callbacks compose in registration order. A null entity or failed insertion returns Optional.empty; failed insertion discards the created entity and skips afterSpawn. Callback exceptions propagate. Use `afterSpawn` for work requiring a successfully inserted entity.
+
+## Verifying
+
+- Spawn simple, combat, unique and citizen roles. Confirm civilian flee versus combat behaviour, unique rest scheduling, and that missing content does not accidentally activate item use or emotes.
+- Save sparse quick-use inventory, all 22 physical slots and both hands. Test legacy missing Slot, out-of-range slots, duplicate slots and overflow in a disposable save.
+- Open customisation on a dedicated server for a citizen, adventurer and unique NPC. Compare the world appearance, switch outfits repeatedly and return to the default. Check both inventory tabs, one player inventory, hand preview updates and cursor continuity. Open as spouse, allegiance owner and other player; test click, number-key swap and shift-click, then close/remove the NPC or leave range. Verify handler indices differ from physical quick-use/special indices.
+- Start FOLLOW, fill the 4-member squad, unload/reload a follower, disconnect/rejoin and release a stored contract as owner/other player. Check return mode and that stale sessions never silently become new ownership.
+- Die with inventory while a grave can be recorded, then test a duplicate stable identity. Verify inventory is not both dropped and restored; examine the revival system's result before claiming recovery.
+- Reload an authored preset and a generated citizen. Confirm authored changes take effect, generated identity survives, and outfits remain overlays. Test malformed anchors separately from tolerant city-binding reads.
+
+## Related
+
+[NPC dialogue](/en/dev/npc-dialogue/) covers conversation admission and gifts. [Dialogue objects and UI](/en/dev/dialogue-ui/) explains blocking interactions and presentation; [Dialogue tools](/en/dev/dialogue-tools/) covers authoring workflows.
+
+[NPC revival](/en/dev/npc-revival-api/) covers graves and restoration. [Reputation runtime](/en/dev/reputation-runtime/) explains faction context; [Emoji playback](/en/dev/emoji-api/) covers the separate sticker channel.
+
+[NPC locomotion](/en/dev/npc-locomotion/) documents speed, flight and swimming. [NPC followers](/en/dev/npc-followers/) covers sessions, formation, commands and traversal; [City API](/en/dev/city-api/) manages persistent city references.

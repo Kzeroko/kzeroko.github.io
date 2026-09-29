@@ -9,7 +9,7 @@ import Pager from '../components/docs/Pager.astro';
 import TableOfContents from '../components/docs/TableOfContents.astro';
 import Icon from '../components/base/Icon.astro';
 import { formatDate, useTranslations } from '../i18n';
-import type { WikiGroup } from '../lib/content';
+import type { DocsGroup, DocsSection } from '../lib/content';
 
 /**
  * Three-column reference layout: section nav, article, page outline.
@@ -21,7 +21,9 @@ import type { WikiGroup } from '../lib/content';
 interface Props extends BaseLayoutProps {
   heading: string;
   lead?: string;
-  groups: WikiGroup[];
+  /** Which documentation section this page belongs to: `wiki` or `dev`. */
+  section: DocsSection;
+  groups: DocsGroup[];
   headings: MarkdownHeading[];
   crumbs: { label: string; href?: string }[];
   updated?: Date;
@@ -34,6 +36,7 @@ interface Props extends BaseLayoutProps {
 const {
   heading,
   lead,
+  section,
   groups,
   headings,
   crumbs,
@@ -52,7 +55,7 @@ const pathname = Astro.url.pathname;
 <BaseLayout {...base} mainClass="docs">
   <div class="docs__grid shell shell--wide">
     <aside class="docs__nav scroll-thin">
-      <DocsSidebar lang={base.lang} groups={groups} current={pathname} />
+      <DocsSidebar lang={base.lang} section={section} groups={groups} current={pathname} />
     </aside>
 
     <article class="docs__main">

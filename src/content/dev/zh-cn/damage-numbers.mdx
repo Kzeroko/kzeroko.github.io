@@ -1,0 +1,69 @@
+---
+title: "伤害数字"
+description: "伤害数字的数据包发送、命中位置记录与 ModernUI 浮层。"
+category: client
+order: 40
+updated: 2026-09-18
+---
+
+伤害数字由ModernUI浮层绘制，最多保留128次命中。服务端发送当次命中的世界坐标，客户端负责投影，并按单调时钟推进动画。这里介绍的是内部渲染入口，不是公共门面。
+
+## 它做什么
+
+`CommonEventFactory.OnApplyDamageEnd.sendDamageNumPacket`只有在`displayDamage`开启、目标不属于`DAMAGE_NUMBER_BLACKLIST`、攻击者是服务端玩家且检查时目标仍存活的情况下才发送数字。攻击者会收到数据包；开启`displayToNearbyPlayers`后，还会发送给攻击者包围盒向外扩展16格内的其他玩家。
+
+`DamageNumberPacket`使用`isekaiexpansion:damage_number`。线上字段依次为VarInt类型的目标实体ID、double类型的世界X/Y/Z、float类型的伤害量和int类型的颜色。实体ID只用于连续命中分组，渲染不会查询该实体来更新数字位置。
+
+## 运行时模型
+
+`DamageNumberAnchor.current`在发送时读取`EntityVisualBounds`。位置取高度×0.82，再加高度×0.12的间距；间距限制在0.06–0.18格。目标随后移动或消失，都不会改变已记录的位置。
+
+| 限制 | 数值 | 作用 |
+| --- | --- | --- |
+| 活跃命中 | 128 | 达到容量后插入会移除最早的命中。 |
+| 投影距离 | 96格 | 更远的命中仍然计时，但不进入可见快照。 |
+| 标称刻 | 50毫秒 | 年龄使用`System.nanoTime()`计算，不依赖世界刻。 |
+| 连击间隔 | 6刻（0.30秒） | 近期同组命中继续使用确定性的阶梯排布。 |
+| 已整形标签 | 256 | 按访问顺序缓存，淘汰最久未用的标签。 |
+| 闪光渐变 | 192 | 淘汰时释放着色器；强度分为16档。 |
+
+`DamageNumberManager`在Minecraft客户端线程维护命中和投影。`DamageNumberPresentation`复制条目列表。`DamageNumberModernOverlay`原子替换待发送快照，只排入一次UI投递；投递期间若出现新快照，会再次排入投递。
+
+`DamageNumberOverlayView`在UI线程推进快照年龄，只要还有未结束的条目就请求下一帧。同一标签在缓存驻留期间只做一次文字整形。内置字体`/assets/isekaiexpansion/uifonts/Cuprum-BoldItalic.ttf`排在ModernUI所选回退字体之前；字体缺失或读取失败时使用所选字体，并记录警告。浮层移除时释放闪光渐变。
+
+## 调用约定
+
+`show`会把非客户端线程的调用转交到客户端线程。世界不存在、分组ID为负、显示关闭、坐标或伤害量不是有限数时，调用被忽略。有限的负伤害量可以进入显示。数值使用`#.##`格式和根区域设置的小数符号。
+
+普通浮层会在打开界面、隐藏HUD或显示调试信息时隐藏数字；过场渲染也会隐藏。隐藏只发布空快照，不删除命中，实际经过的时间仍然计入寿命。加入服务器或断开连接会清空命中和序号。发布时若世界或玩家不存在，或显示已关闭，也会清空。
+
+下列选项属于`IsekaiConfig`。使用方读取当前配置对象，不通过数据包重载更新。发送端读取服务端实例，渲染端读取客户端实例。
+
+| 选项 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `displayDamage` | `boolean` | `true` | 分别控制服务端发送和客户端插入、发布。 |
+| `displayDamageName` | `boolean` | `false` | 在客户端加上伤害类型译名；发布时读取当前值。 |
+| `displayToNearbyPlayers` | `boolean` | `false` | 在服务端增加附近接收者，不改变投影距离。 |
+| `displayLength` | `integer` | `25` | 新收到命中的寿命：25刻（1.25秒）。界面范围为20–40刻（1–2秒）；插入时只限制至少1刻（0.05秒），此处没有运行时上限。已有命中保留创建时的寿命。 |
+
+## 扩展方式
+
+自定义服务端发送逻辑与客户端渲染应分开处理。下面的方法把已算好的数值和颜色发送给一个接收者，会绕过上文普通伤害事件的资格检查和接收者选择。
+
+```java
+void sendNumber(ServerPlayerEntity viewer, Entity target, float amount, int color) {
+    DamageNumberPacket.send(viewer, target, amount, color);
+}
+```
+
+修改动画时查看`DamageNumberAnimation`，修改连击排布时查看`DamageNumberStackLayout`。保持快照不可变，并在ModernUI的UI线程修改视图。这条路径没有通过注册扩展样式的接口。
+
+## 验证
+
+在限帧和不限帧时分别测试单次命中与快速连击，弹出、上升和淡出的实际时长应一致。旋转镜头，再移动或移除目标：投影随镜头变化，记录的世界位置保持不变。
+
+检查打开界面、HUD与调试信息切换、过场渲染和重新连接。短暂隐藏后，尚未过期的命中可以再次显示；重新连接后不应残留。连续发送超过128次命中，再移动到96格外，确认集合容量和投影距离限制。开启`displayDamageName`测试拉丁文字、中文和混合标签，再在独立服务端对比仅攻击者接收与开启`displayToNearbyPlayers`的结果。
+
+## 相关页面
+
+实体生命周期特效见[实体特效](/zh-cn/dev/entity-fx/)，网格特效见[Particlize](/zh-cn/dev/particlize/)。

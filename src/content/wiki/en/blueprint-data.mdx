@@ -1,0 +1,134 @@
+---
+title: "Blueprint and knowledge data"
+description: "Evidence sources, discovery requirements, display metadata and mandatory blacksmith terms."
+category: data
+order: 70
+updated: 2026-09-19
+---
+
+A knowledge file defines consumable evidence; a blueprint combines knowledge requirements with a forgery recipe and commission terms. Research belongs to each blueprint item, so pack changes are applied to its saved progress when it is normalised.
+
+## Where the files live
+
+| Path | One file defines |
+| --- | --- |
+| `data/<namespace>/knowledge/<path>.json` | Knowledge domain with ID `<namespace>:<path>`. |
+| `data/<namespace>/blueprints/<path>.json` | Blueprint with ID `<namespace>:<path>`. |
+
+Higher-priority packs replace the same resource path. No field merge occurs. Different blueprints may share a discovery ingredient or recipe: discovery takes the first matching blueprint in identifier order, and recipe lookup keeps the first ID in that same order. Namespace matters; subdirectories remain part of the ID.
+
+## Minimal example
+
+A minimal knowledge definition at `data/example/knowledge/metal.json`:
+
+```json
+{
+  "sources": [
+    {
+      "ingredient": {
+        "item": "minecraft:iron_ingot"
+      },
+      "insight": 4
+    }
+  ]
+}
+```
+
+This minimal form loads but needs translation entries for its generated title and description. The next file is a trimmed version of the bundled diamond-sword blueprint; save it at `data/isekaiexpansion/blueprints/diamond_sword.json` to override that blueprint. Its knowledge IDs already exist in bundled data.
+
+```json
+{
+  "recipe": "isekaiexpansion:ise_forgery/minecraft_diamond_sword",
+  "discovery": {
+    "item": "minecraft:diamond_sword"
+  },
+  "requirements": [
+    {
+      "knowledge": "isekaiexpansion:metallurgy",
+      "amount": 24
+    },
+    {
+      "knowledge": "isekaiexpansion:weaponcraft",
+      "amount": 12
+    }
+  ],
+  "blacksmith": {
+    "work_days": 3,
+    "daily_work_hours": 4,
+    "cost": 24000
+  }
+}
+```
+
+## Fields
+
+### Knowledge definition
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `name_key` | `string` | `knowledge.<namespace>.<path>.name` | Display translation key; path slashes become dots. |
+| `description_key` | `string` | `knowledge.<namespace>.<path>.description` | Description translation key. |
+| `discipline` | `string` | `general` | UI discipline label; no closed enum. Network limit 64 characters. |
+| `color` | `number` | `0xFF69C8E8` | Also accepts a hex string, optionally starting #. Numbers and strings of at most 6 hex digits force opaque alpha; longer strings preserve parsed ARGB. |
+| `sources` | `array<object>` | required | Nonempty evidence sources in priority order. |
+| `sources[].ingredient` | `ingredient` | required | Minecraft ingredient; examples use an item object. |
+| `sources[].ingredient.item` | `item id` | required for item form | Exact evidence item, as in the bundled sources. |
+| `sources[].ingredient.tag` | `tag id` | `absent` | Alternative tag form; omit the leading # inside this ingredient object. |
+| `sources[].consume` | `integer` | `1` | Positive count required in a single main-inventory stack; consumed per transcription outside creative mode. |
+| `sources[].insight` | `integer` | required | Positive insight per transcription, clamped to remaining progress after consumption. |
+
+### Blueprint definition
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `recipe` | `identifier` | required | Recipe ID, syntax-checked only during loading. Anvil and commissions later require an available forgery recipe. |
+| `discovery` | `ingredient` | required | Reference item predicate for the opposite hand. |
+| `discovery.item` | `item id` | required for item form | Exact reference item. |
+| `discovery.tag` | `tag id` | `absent` | Alternative reference tag without leading #. |
+| `discovery_consume` | `integer` | `1` | Positive count required in that hand; creative mode still needs it but does not consume it. |
+| `requirements` | `array<object>` | required | Knowledge requirements. Empty is accepted and becomes revealed on server normalisation. Keep knowledge IDs unique. |
+| `requirements[].knowledge` | `identifier` | required | Must exist in the successfully loaded knowledge catalogue. |
+| `requirements[].amount` | `integer` | required | Positive required insight. |
+| `blacksmith` | `object` | required | Commission terms; required even if no commission is used. |
+| `blacksmith.work_days` | `integer` | required | Exact integer 2–30; minimum complete daily work quotas. |
+| `blacksmith.daily_work_hours` | `integer` | required | Exact integer 2–6; each game work hour is 1000 ticks (50 seconds). |
+| `blacksmith.cost` | `integer` | required | Positive signed 64-bit integer, in copper units. No fallback price. |
+| `type` | `enum(EMPTY, UNKNOWN, WEAPON, ARMOR, TRINKET)` | `unknown` | Case-insensitive display type; whitespace is not trimmed. Does not choose the recipe implementation. |
+| `complexity` | `integer` | `1` | Display complexity, 1–5; does not calculate commission time. |
+| `decor` | `integer` | `0` | Display decoration index, 0–7. |
+| `creative_visible` | `boolean` | `true` | Include a bound unidentified variant in the creative catalogue. |
+| `required_mods` | `array<string>` | `[]` | Blueprint only: every mod must be loaded; otherwise skip this file before parsing its other fields. |
+| `name_key` | `string` | `blueprint.<namespace>.<path>.name` | Revealed title; path slashes become dots. |
+| `description_key` | `string` | `blueprint.<namespace>.<path>.description` | Revealed description. |
+| `unidentified_name_key` | `string` | `item.isekaiexpansion.blueprint_unknown` | Title before revelation. |
+| `unidentified_description_key` | `string` | `item.isekaiexpansion.blueprint_unknown.description` | Description before revelation. |
+
+### Ingredients and display strings
+
+Ingredient objects belong to Minecraft 1.20.1. Use an `item` object for a specific item or a `tag` object for an item tag, following [Fabric's 1.20 ingredient examples](https://wiki.fabricmc.net/tutorial:recipes#through_1206). These fields are passed to Minecraft's ingredient parser; this loader does not add NBT predicates or custom count fields inside them.
+
+All title/description translation keys are sent with a 256-character network limit. Display complexity and decoration do not replace explicit commission terms. Total required work is `work_days × daily_work_hours × 1000` ticks; its daily cap is `daily_work_hours × 1000`.
+
+Sources are considered in file order, then main-inventory slot order. One source must match one stack with enough items; stacks are not combined. The first match wins even if another source gives more insight. Evidence in the offhand is not searched. Overfilling a requirement still consumes the full declared source count.
+
+## Validation
+
+Malformed or empty files, missing required keys, bad identifiers, invalid type names and out-of-range model values log a per-file error and skip that definition. Successful files replace the catalogues; **a bad definition does not preserve its previous version**. Knowledge loads first, so a skipped knowledge file also makes blueprints referencing it fail.
+
+Unknown keys are ignored. Blueprint `required_mods` is a bespoke gate; the loader does not evaluate `fabric:load_conditions`. A knowledge file has no required-mod gate. A missing recipe is not a load-time error, but prevents commission quotes and usable forging.
+
+The blacksmith fields use exact integer parsing: strings, fractions, overflow and nonpositive cost are rejected. Other integer fields use the normal JSON integer reader; author them as integers. A missing/empty requirements array differs: missing fails, empty reveals on normalisation. Repeated knowledge IDs are not rejected, but differing required amounts can make completion unreachable because progress shares one key; use each ID once.
+
+Hex colour parsing strips an optional leading `#`. Invalid hexadecimal text fails the knowledge file. Numeric colours force opaque alpha; use an 8-digit ARGB string when transparency matters.
+
+Keep the catalogue at most 2048 blueprints, each screen at most 32 requirements and 32 recipe steps, and each step at most 64 ingredients. These are client packet decode limits, not loader checks; oversized definitions can load and then fail to open.
+
+## Reloading
+
+The server loads both catalogues on resource reload, then replaces knowledge and blueprints in sequence. Data-pack content sync and successful reload send the display catalogue to players. Server stop clears server catalogues. An open research screen is a snapshot; reopen it after changing data.
+
+Normalising an item refreshes display/recipe metadata, caps progress to current requirement amounts and recomputes revelation. It can revoke revelation if new requirements are unmet. Unused old knowledge keys remain saved. Accepted blacksmith orders separately snapshot terms and output and are unaffected by later definition edits.
+
+## Related
+
+[Blueprint research](/en/wiki/blueprints/), [Blacksmith commissions](/en/wiki/blacksmith-commissions/) and [Research runtime](/en/dev/blueprint-research/).

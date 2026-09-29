@@ -1,39 +1,90 @@
 ---
 title: "Equipment skills"
-description: "Active, passive and linked skill slots, the five common slot layouts, and how to read a weapon's identity from them."
+description: "Read item-specific skill layouts, unlock their slots and activate socketed equipment skills."
 category: combat
 order: 30
-updated: 2026-09-01
-tagline: "Two or four fixed slots per item, and no way to add more."
-tags: ['combat', 'equipment', 'builds']
+updated: 2026-09-26
 ---
 
-A piece of equipment — usually a weapon; armour is in development — carries **two or four fixed skill slots**. The count is part of the item and cannot be expanded, so a weapon's slot layout is more or less its identity.
+Some equipment carries a fixed layout of 2 or 4 item-specific skills. Skill gems add a separate source of abilities through compatible sockets, with their own activation order, energy costs and cooldowns.
 
-<SkillSlots />
+## Reading the layout
 
-## How to read a layout
+`A` means active, `P` passive and `L` linked. These labels describe each item's authored skill lines; a layout does not supply generic damage or a universal linked-skill effect.
 
-The letters tell you how the item wants to be played before you read a single number:
+| Layout | Active | Passive | Linked |
+| --- | --- | --- | --- |
+| `APPP` | 1 | 3 | 0 |
+| `APPL` | 1 | 2 | 1 |
+| `APLL` | 1 | 1 | 2 |
+| `ALLL` | 1 | 0 | 3 |
+| `PPPP` | 0 | 4 | 0 |
+| `AP` | 1 | 1 | 0 |
+| `AL` | 1 | 0 | 1 |
+| `PP` | 0 | 2 | 0 |
+| `LL` | 0 | 0 | 2 |
 
-- **More A** — nothing. There is never more than one Active.
-- **More P** — the item works on its own. Good for a first weapon or a backup.
-- **More L** — the item needs the rest of your kit. High ceiling, low floor.
+All 9 layouts above are defined. Their slot counts are fixed by the item, and none contains more than 1 active slot. They do not imply that every weapon or piece of armour supports this system.
 
-An `ALLL` weapon in an unbuilt loadout is worse than a plain `APPP` one; the same weapon in a finished build can be the best thing you own.
+For the item-template tooltip, hold <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd> or <kbd>D</kbd> to inspect skill 1, 2, 3 or 4 respectively. These are tooltip selectors, not universal skill activation keys.
 
-<Callout type="tip" title="Read the slots before the stats">
-Two weapons with identical damage and opposite layouts belong in completely different builds. The stat line tells you how hard it hits; the slot line tells you whether it fits.
-</Callout>
+## Unlocking an item's skills
 
-## Interaction with sockets
+Hold the required upgrade material on your inventory cursor and left-click a compatible item. The first matching locked skill unlocks and consumes 1 material. Unlocks belong to that item stack; experience levels and gem sockets do not unlock these lines.
 
-Skill slots and [gem sockets](/en/wiki/gems-and-sockets/) are separate systems on the same item:
+Raven (`isekaiexpansion:raven`) uses `APPP`:
 
-| | Skill slots | Gem sockets |
+| Skill | Type | Upgrade material |
 | --- | --- | --- |
-| Count | Fixed by the item | Set by its socket profile |
-| Changeable | No | Yes — insert, extract, reroll, reshape |
-| Unlocked by | — | Equipment level, seals |
+| 1 | Active | `minecraft:diamond` |
+| 2 | Passive | `minecraft:netherite_ingot` |
+| 3 | Passive | `minecraft:cobblestone` |
+| 4 | Passive | `minecraft:stone` |
 
-A `SKILL`-kind gem socket can host a passive proc or a manually activated equipment skill of its own. It does not consume one of the item's A/P/L slots — it is an additional line, gated by the socket rules instead.
+Lord Crystal (`isekaiexpansion:lord_crystal`) unlocks every remaining skill on a compatible item in one click. The current click action consumes 1 crystal even if all skills are already unlocked, including creative mode. Ordinary matching materials are consumed only when a locked matching skill is found.
+
+The template names a skill's category; the item defines its controls and prerequisites. Raven's unlocked active uses ordinary item use from the main hand and requires full health, Into the Groove and no item cooldown. A gem-skill key does not replace those item controls.
+
+## Awakening
+
+A separate registered inventory action uses a diamond block on compatible upgradeable equipment. Raven has awakening modifiers; its bonuses apply while held in the main hand.
+
+| Awakening level | Attack damage bonus | Melee critical-chance attribute bonus |
+| --- | --- | --- |
+| 1–2 | +2 | +0.1 |
+| 3–4 | +4 | +0.2 |
+| 5 | +8 | +0.4 |
+
+These are raw attribute additions; the damage pipeline interprets critical chance. Awakening does not unlock skill slots. The current action consumes 1 diamond block before checking whether awakening can advance, so it also consumes at the level 5 cap. Avoid clicking capped items expecting the material to be preserved.
+
+## Activating a skill gem
+
+Assign **Trigger Equipment Skill** in the controls menu; it is unbound by default. This action searches compatible `TRIGGERABLE` skill gems in this order:
+
+1. Main hand.
+2. Offhand.
+3. Head.
+4. Chest.
+5. Legs.
+6. Feet.
+
+Within an item it takes the first eligible socket. Locked, cracked, empty or incompatible sockets are skipped; trinkets are not scanned by this manual action.
+
+Once a gem is selected, the action checks that socket's cooldown and the player's astral energy. If the first selected gem is cooling down or unaffordable, the action stops instead of trying another gem. Creative players skip the energy cost, but still obey cooldowns.
+
+Manual activation does not roll a proc chance. Skill-level scaling can reduce the configured cooldown to 0. Energy is paid before the skill is invoked; a skill that declines its own action does not automatically refund it. The socket stores its cooldown, so extracting the gem does not reset that timer.
+
+The key is processed while no screen is open, no NPC command widget is active and no player actions are disabled. These input conditions are separate from the selected gem's own requirements.
+
+## How the systems fit together
+
+| System | Owns |
+| --- | --- |
+| Item skill layout | Fixed active/passive/linked lines and their unlock flags. |
+| Gem sockets | Inserted gems, compatibility, seals, cracks and per-socket cooldown. |
+| Equipment level | Experience progression and socket level requirements. |
+| Awakening | Separate stored level and registered weapon modifiers. |
+
+## Data and related pages
+
+[Gem data](/en/wiki/gem-data/) defines skill gems and socket profiles; [gems and sockets](/en/wiki/gems-and-sockets/) covers insertion and combat procs. Item skill layouts and upgrade materials are fixed by the item implementation. Developers can read [equipment skill runtime](/en/dev/equipment-skills/); equipment experience is covered in [levels and experience](/en/wiki/leveling/).

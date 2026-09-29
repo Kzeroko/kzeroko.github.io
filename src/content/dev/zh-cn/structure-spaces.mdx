@@ -1,0 +1,220 @@
+---
+title: "结构空间运行时"
+description: "房产标识、取得流程、访问检查、家具评估、持久化与客户端快照。"
+category: systems
+order: 82
+updated: 2026-09-27
+---
+
+`net.kzeroko.isekaiexpansion.api.structurespace.StructureSpaceAPI` 是服务器家园系统的公开入口，委托给 `internal.structurespace.StructureSpaceService`。存储实现保持包级可见；`SpaceShape`、`SpaceEntry` 和 `HomePermission` 则是当前公开签名中暴露的内部类型。
+
+## 它做什么
+
+该系统负责房产几何、住户契约、共享权限、休息奖励，以及派生的家具评估。[我的家园](/zh-cn/wiki/my-home/)面向玩家说明规则，[结构空间数据](/zh-cn/wiki/structure-space-data/)列出全部制作字段。
+
+房产登记处界面已经存在，但本仓库通过需要权限等级 2 的 `/ise dev structurespace` 打开，尚未连接房产登记员 NPC。`/ise home` 是玩家命令，状态界面也可打开个人家园列表。集成代码可调用内部的 `OpenSpacesScreenPacket.send(player, group)` 打开目录；公开入口尚未提供打开目录的方法。
+
+## 运行时模型
+
+### 标识与几何
+
+每个 `ServerWorld` 缓存一份 `StructureSpaceStorage`。`SpaceKey` 包含结构 ID、分组 ID、不可变锚点位置与房间 ID；维度由世界或快照单独提供。房间 ID 须符合 `[a-z0-9_./-]{1,64}`。`SpaceShape` 防御性复制方框，以含端点的区域并集表示房产，限制为 16 个区域、各轴外包跨度 128 格、区域体积之和 262144 格。相等性比较有序坐标，因此仅调整区域顺序也会改变相等性。
+
+区块索引覆盖实际声明的区域。位置查询还会确认区域包含关系，外包范围内的空隙不属于房产。注册会拒绝与其他房产实际区域相交的几何。按所在结构查询房产时，则使用相同结构 ID 与结构外包范围相交作为筛选，这是目录查询，不是位置权限检查。没有结构时，该查询退回到包含指定位置的独立家园。
+
+`bind` 偏移相对几何、清理到期租客，并保持已有锚点的房间与分组标识。结构 ID 来自所在结构，或使用 `isekaiexpansion:authored_home`。更新已有标识会保留住户与授权，替换定义并重建索引。`register` 接受绝对几何；完全相同的键已存在时立即返回，以保留生成后进行的运行时编辑。
+
+### 契约与访问
+
+租期使用 `world.getTime()`，不是昼夜时刻或现实时间。保存的到期值严格大于当前值时，租约才有效。周期性清理每 200 ticks（10 秒）执行一次；两次清理之间的权限与成员检查仍使用当前时间。
+
+| 数量 | 约定 |
+| --- | --- |
+| 住户名额 | 1–64，统计永久住户与有效租客。 |
+| 游戏日 | 24000 ticks。 |
+| 每次租赁调用的最长时长 | 2880000 ticks，即 120 天；多次续租可将总到期时间延至更远。 |
+| 正价格报价 | 价格 × 向上取整（截断后的时长 / 24000）。 |
+| 报价时长截断 | 1 至 2880000 ticks，非正输入也被截断；实际取得流程则拒绝非正或超长时长。 |
+| 访客规则 | 最多 128 条。 |
+| 权限位 | USE=1、BUILD=2、BREAK=4、ENTITIES=8、SLEEP=16；ALL=31。 |
+
+业主通过全部权限检查。有效租客的 USE 与 SLEEP 在访客覆盖规则之前直接放行。其他权限在没有永久住户时一律拒绝；否则显式访客掩码优先于队伍掩码，包括零掩码。队伍检查对任一业主调用 IsekaiCore 的 `TeamLogic.server().areOnSameSide(..., false)`。负访客掩码表示移除覆盖，公开入口只接受 −1 至 31。访客为 null 时编辑队伍掩码，−1 按零处理。
+
+编辑权限要求调用者 UUID 是目标世界中该房产的业主。新增访客必须在线或存在于服务器档案缓存中；已有访客离线后仍可编辑。业主不能作为访客目标。通过 `removeMember` 移除最后一位业主时，访问表被清空。
+
+### 家具与休息
+
+`HomeFurnitureRegistry` 保存不可变的有序规则列表，以及按方块状态对象身份索引的匹配缓存。每个方块归首先匹配的规则所有，即使该规则已达到计分数量上限。数据重载替换成功加载的规则；标签失效会清除匹配并递增版本。
+
+`HomeFurnitureTracker` 按世界保存，不持久化。没有业主的家园请求会返回已完成且分数为零。有业主时，几何引用变化、规则版本变化，或结果达到 1200 ticks（60 秒）都会标记为脏。脏快照可携带旧数值，但 `ready=false` 禁止据此授予奖励。
+
+| 评估调度 | 行为 |
+| --- | --- |
+| 全世界共享预算 | 每 tick 访问 2048 个位置。 |
+| 单任务时间片 | 每轮最多 256 个位置。 |
+| 轮数 | 最多 max(8, 初始队列长度)，同时受共享预算限制。 |
+| 区块缺失 | 重置游标并移出队列，须由后续请求重新入队；不加载区块。 |
+| 区域重叠 | 重复位置消耗扫描预算，但不重复计分。 |
+| 类别、家园、等级上限 | 每类 20 点，总计 100，等级=min(5, 分数/20)。 |
+| 周期性请求 | 每 100 ticks（5 秒）为身处自家区域的业主请求；家园快照也请求业主评估。 |
+| 缓存清理 | 每 1200 ticks 删除未排队且完成时间早于 2400 ticks 前的任务。 |
+
+方块变更钩子在服务器线程的 `WorldChunk.setBlockState` 返回后执行，仅当前后状态匹配的首条规则不同时，使对应永久家园评估失效。扫描过程中几何或规则版本变化会重启游标。
+
+在 `ServerWorld.wakeSleepingPlayers` 执行前，系统根据实际睡眠床铺检查符合条件的住户。租客获得 12000 ticks 安歇，业主获得 24000 ticks。只有评估完成且等级为正，业主才额外获得 24000 ticks 炉边眷顾。未授予新效果时，不会主动移除原有炉边眷顾。
+
+`isekaiexpansion:home_rested` 添加 0.05 的 MULTIPLY_TOTAL 最大生命值修正。`isekaiexpansion:hearthbound` 每个效果等级对应 0.02 最大生命值与 0.01 移动速度修正。家园战斗经验上限倍率为 `1 + 0.1 × restedPresent + 0.02 × min(5, hearthLevel)`；命运天平单独追踪战利品上限，家园战斗倍率独立计算。授予效果不直接治疗，移除效果会压低超过新上限的当前生命值。
+
+## 约定
+
+### 公开入口参考
+
+带世界或玩家参数的方法操作实时服务器状态。`rentCost` 是客户端也会使用的纯算术辅助方法。
+
+| 方法 | 返回值与边界 |
+| --- | --- |
+| `getSpaceAt(world, pos)`、`getCurrentSpace(player)` | 可为 null 的不可变定义视图。 |
+| `getSpacesForPlayer(world, uuid)` | 该世界内当前持有的房产，并清理到期租约。 |
+| `getSpacesForStructureAt(world, pos)` | 结构目录，或包含当前位置的独立家园。 |
+| `getSpacesForEntityStructure(entity)` | 同类查询；实体位于客户端世界时返回空列表。 |
+| `getSpacesForPlayerStructure(player)` | 在玩家当前位置进行同类查询。 |
+| `allows(world, player, pos, permission)` | 检查指定权限，家园外返回 true。 |
+| `canPlayerUseInSpace(world, player, pos)` | USE，家园外返回 true。 |
+| `canPlayerModifyInSpace(world, player, pos)` | 受保护结构的 BREAK 例外检查，家园外返回 false。 |
+| `canPlayerBedSetSpawn(player, bedPos)` | SLEEP 例外检查，家园外返回 false。 |
+| `hasSpaceAccess(world, player, pos)` | 仅住户资格，访客不算；家园外返回 false。 |
+| `tryRent(world, key, uuid, durationTicks)`、`tryBuy(world, key, uuid)` | 受信任的免费取得操作，仍检查允许标志与名额，并触发取得事件。 |
+| `tryRentPaid(world, key, player, durationTicks)`、`tryBuyPaid(world, key, player)` | 返回付费取得结果，本身不要求目录报价或距离条件。 |
+| `rentCost(pricePerDay, durationTicks)` | 进位并饱和处理的报价；非正价格返回零。 |
+| `addMember(world, key, uuid)` | 无需付款或允许购买标志即可添加永久住户；仍受名额限制，并转换现有租约，不触发购买事件。 |
+| `removeMember(world, key, uuid)` | 移除所有权与租约，无退款或取得事件。 |
+| `getMembers(world, key)` | 复制的业主集合与有效租客映射，不存在时为空。 |
+| `getRentEndTick(world, key, uuid)` | 绝对世界年龄到期值，或 −1。 |
+| `getRentRemainingTicks(world, key, uuid)` | 剩余 ticks，或 0。 |
+| `bind(world, anchor, room, group, relativeShape, capacity, rent, buy, rentPrice, buyPrice)` | 创建或更新制作绑定；标识、重叠或契约验证失败可抛出异常。 |
+| `register(world, structure, group, anchor, shape, capacity, rent, buy, rentPrice, buyPrice, room)` | 仅创建缺失的绝对坐标定义。 |
+| `unbindEmpty(world, anchor)` | 锚点存在有效住户则拒绝，原本不存在绑定也返回 true。 |
+| `snapshot(world, player, key)` | 可为 null 的 `SpaceEntry`，仅业主得到访客、队伍设置与评估。 |
+| `updatePermissions(world, owner, key, guest, mask)` | 业主授权的修改；目标、掩码或数量无效时返回 false。 |
+| `onBlockChanged(world, pos, previous, current)` | 使相关评估失效。 |
+| `validateRespawn(player)` | 原版选择重生位置前，清除失去权限的非强制家园床铺。 |
+
+`SpaceInfo` 包含键、几何、名额、允许标志与价格；`MemberInfo` 复制其集合。`SpaceEntry` 还包含维度、有效入住数、查看者所有权、租约及剩余时间、业主专属授权、分数、等级、就绪标志与分类总分，映射也被复制。`AccessMode` 声明 RENT、BUY 和 RENT_OR_BUY，但不能取代独立的租赁与购买布尔值。
+
+### 付款与事件
+
+付费取得先检查是否存在、允许标志与非业主身份，再检查租赁时长和付款能力。成员状态先改变，随后才调用 IsekaiCore 付款集成。付款返回失败时，恢复原有效租约或移除新增成员，并标记存储为脏。这是成员状态回滚，不是货币退款事务；若依赖在部分扣款后失败，公开入口无法撤销已经扣除的货币。
+
+本地 IsekaiCore 源码中的 `NumismaticCompat` 合计背包与钱包资金，先扣背包再扣钱包，并对报价溢出做饱和处理。集成缺失或失败时，正金额付款失败；零金额无需付款即可成功。此外部约定按本地依赖源码及当前消费的 `0.4.0-build60` 坐标检查，未验证源码与二进制完全一致。
+
+| AcquireResult | 含义 |
+| --- | --- |
+| SUCCESS | 成员已提交且付款成功。 |
+| NOT_FOUND | 键不存在。 |
+| NOT_ALLOWED | 允许标志关闭，或租期无效。 |
+| ALREADY_OWNER | 申请者已经是永久住户。 |
+| NO_CAPACITY | 新住户没有名额；有效续租或转换不另占名额。 |
+| INSUFFICIENT_FUNDS | 付款能力预检查失败。 |
+| PAYMENT_FAILED | 改变成员状态后付款返回 false，成员状态已恢复。 |
+| FAILED | 其他取得失败。 |
+
+内部 `StructureSpaceEvents.ON_SPACE_BOUGHT` 携带世界、SpaceInfo 与玩家 UUID；`ON_SPACE_RENTED` 另携带最终到期值。事件在取得后触发，付费调用仅在付款成功后触发。监听器按注册顺序运行，不可取消，也不隔离异常。监听器抛出的异常可能在状态提交后向外传播，不能据此认定购买尚未提交。
+
+### 持久化
+
+存储使用 `IsekaiPersistData.key("structure", "spaces", 2)`，对应维度持久化目录中的 `data/isekaiexpansion/structure/spaces_v2.dat`，不导入 v1。持久化负载内的字段如下：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Spaces` | `list<compound>` | 空 | 房产条目，不进行逐条异常恢复。 |
+| `Spaces[].StructureId`、`Spaces[].GroupId` | `string` | 缺失则无效 | 解析为标识符。 |
+| `Spaces[].AnchorPos` | `long` | 0 | 打包的绝对方块位置。 |
+| `Spaces[].RoomId` | `string` | 缺失则无效 | 经验证的房间 ID。 |
+| `Spaces[].Regions` | `list<compound>` | 缺失或空则无效 | 绝对区域，几何限制与制作格式相同。 |
+| `Spaces[].Regions[].Box` | `int[6]` | 无效 | 含端点的最小 XYZ、最大 XYZ。 |
+| `Spaces[].Capacity` | `int` | 1 | 非正值按 1 读取，大于 64 则拒绝。 |
+| `Spaces[].AllowRent`、`Spaces[].AllowBuy` | `boolean` | false | 运行时保存默认值与锚点的允许租赁默认值不同。 |
+| `Spaces[].RentPrice`、`Spaces[].BuyPrice` | `long` | 0 | 非负铜币价格，负值拒绝。 |
+| `Spaces[].Owners` | `list<compound>` | 空 | 永久住户 UUID，重复 UUID 合并。 |
+| `Spaces[].Owners[].Most`、`Spaces[].Owners[].Least` | `long` | 0 | UUID 的两个半部。 |
+| `Spaces[].Renters` | `list<compound>` | 空 | UUID 到到期值的映射，重复 UUID 后者覆盖。 |
+| `Spaces[].Renters[].Most`、`Spaces[].Renters[].Least` | `long` | 0 | UUID 的两个半部。 |
+| `Spaces[].Renters[].Until` | `long` | 0 | 绝对世界年龄到期值。 |
+| `Spaces[].Access` | `compound` | 空 | 共享权限。 |
+| `Spaces[].Access.Team` | `int` | 0 | 限制在 31 内的掩码。 |
+| `Spaces[].Access.Guests` | `list<compound>` | 空 | 最多读取 128 条。 |
+| `Spaces[].Access.Guests[].Player` | `UUID int[4]` | 缺失则无效 | 访客 UUID。 |
+| `Spaces[].Access.Guests[].Permissions` | `int` | 0 | 受限掩码，负值删除条目。 |
+
+读取不会重新检查跨家园重叠，也不协调业主与租客重复身份，或成员数与名额不符的情况。重复房产键覆盖映射中的旧值，但每条加载的定义都会被加入索引。格式错误可能导致加载失败，并非跳过条目。应将它视为运行时保存格式，而非宽松的另一种制作格式。温馨度、队列状态、报价与预览订阅均不持久化。
+
+### 网络与客户端生命周期
+
+目录通过 `SpaceOffers` 保存键集合、维度、可选分组及当前时间+1200 ticks 的到期值。接受申请只检查这些标识、维度与包含端点的有效期，不检查商人距离、当前结构、几何或界面显示价格。付费入口随后检查当前定义。成功或过期后的刷新保留原分组筛选。
+
+取得申请、家园请求与权限编辑共用 5 个服务器 tick 的限流，预览开关不参与。客户端权限修改可指向另一个服务器维度，但仍须通过业主授权。界面等待计时器仅用于抑制重复点击：权限修改为 1500 ms，取得申请为 2000 ms。
+
+| 数据包 ID 后缀，命名空间为 `isekaiexpansion` | 负载与检查 |
+| --- | --- |
+| `request_rent_space` | SpaceKey 与 VarLong 时长；要求有效报价并执行付费租赁。 |
+| `request_buy_space` | SpaceKey；要求有效报价并执行付费购买。 |
+| `home_action` | 无符号操作字节：0 家园列表、1 队伍掩码、2 访客掩码、3 预览布尔值。权限操作携带维度、键、可选访客 UUID 与 VarInt 掩码；其他操作拒绝。 |
+| `open_spaces_screen` | 家园标志、打开界面标志、余额、条目与玩家名称；最多 256 条房产与 512 个名称，名称最多 64 字符。 |
+| `apply_space_editor` | 锚点、房间与分组字符串（64 字符）、名额、租买标志、定长 long 价格、ShowBox、Regions NBT 与绑定标志。要求创造模式权限等级 2，距离平方不超过 4096，并验证坐标与契约。绑定先于制作字段写入。 |
+| `unbind_space` | 锚点位置，执行同样的管理员与距离检查，另要求已加载区块与锚点方块实体。 |
+| `open_space_editor` | 锚点位置，仅客户端当前存在该锚点方块实体时打开编辑器。 |
+| `sync_client_space_editor` | 锚点位置、房间与分组、名额、契约标志、定长 long 价格和 ShowBox，更新客户端已加载锚点。 |
+| `sync_client_space_selection` | 锚点位置、Regions NBT 与 ShowBox，更新客户端已加载锚点的几何。 |
+
+每条快照序列化维度、键、绝对 Regions、名额与入住数、允许标志与价格、业主与租客标志、剩余时长、队伍掩码、访客、分数、等级、就绪状态和类别总分。读取上限为 128 位访客、256 个类别、类别名 64 字符；制作规则还有更严格的 16 类上限。SpaceKey 包含结构与分组 ID、锚点及最多 64 字符的房间字符串。
+
+家园快照遍历服务器世界，先取最多 256 处，再按维度和房间排序。预览更新仅包含当前维度，不含余额或名称，每 100 ticks 发送。渲染过滤到期租约、错误维度、不可见外包范围，以及超过 96 格的距离。断开连接清除网格、家园、启用状态和草稿。目录与家园界面不暂停游戏；界面实例间只记住选中的家园或报价键，数据仍是快照。
+
+### 线程与保护范围
+
+世界存在后，在服务器线程调用状态方法。映射与存储未同步，公开入口不检查或调度线程归属。不要直接从生成工作线程调用；处理器明确将注册提交至服务器。即使缺少世界、上下文或 NBT，它也会移除锚点，并且只在稍后的注册调用周围捕获错误。
+
+家园钩子覆盖服务器方块使用与破坏、放置、桶的放置与收集、点火、直接实体交互与攻击，以及睡眠。创造模式权限等级 2 的管理员可绕过这些家园检查。地下城限制、挖掘疲劳及不可破坏标签仍可能拒绝操作。它不是对投射物、自动化或环境变化的通用领地保护系统。集成代码应通过 `allows` 检查具体动作权限，不能用 `hasSpaceAccess` 替代。
+
+## 扩展方式
+
+服务器交互可向公开入口询问具体权限。下面方法假定世界与玩家有效，并在服务器线程执行：
+
+```java
+static boolean mayUseHomeBlock(ServerPlayerEntity player, BlockPos position) {
+    return StructureSpaceAPI.allows(
+            player.getServerWorld(), player, position, HomePermission.USE);
+}
+```
+
+创建新房产时，先构造相对几何，再绑定；注册验证仍会执行：
+
+```java
+static void bindRoom(ServerWorld world, BlockPos anchor) {
+    SpaceShape shape = new SpaceShape(List.of(new BlockBox(0, 0, 0, 5, 3, 5)));
+    StructureSpaceAPI.bind(world, anchor, "room_1",
+            new Identifier("isekaiexpansion", "guild_lodging"),
+            shape, 1, true, true, 100L, 10000L);
+}
+```
+
+家具应通过[数据格式](/zh-cn/wiki/structure-space-data/)扩展，不要修改匹配缓存。自定义购买界面须使用服务器持有的键与价格，并在调用付费取得前执行自身的准入检查；公开入口本身不承担这项策略。
+
+## 验证
+
+- 绑定 L 形并集，确认空隙不属于家园；拒绝与其他家园重叠，以及低于现有住户数的名额。
+- 在满员房产中续租有效租约、转换为永久住户，并制造付款失败以检查成员恢复。
+- 比较业主、租客、显式零掩码访客、继承队友和外人的权限；移除最后一位业主后检查授权清除。
+- 在周期清理之间使租约到期并尝试床铺重生，确认强制重生点不被修改。
+- 在重叠区域内布置家具，卸载所需区块，并在评估过程中重载规则。未完成或陈旧结果不得授予炉边眷顾。
+- 测试过期或错误维度报价、服务器价格变更、未知访客及超长数据包列表。跨维度权限编辑仍须仅限业主。
+- 保存并重载有效 v2 世界，再测试模板的全部旋转与镜像，以及重复生成不覆盖已绑定房产。
+
+以上是回归检查步骤，本文不表示已经在游戏中执行。
+
+## 相关页面
+
+- [我的家园](/zh-cn/wiki/my-home/)——玩家规则。
+- [结构空间数据](/zh-cn/wiki/structure-space-data/)——锚点与家具字段。
+- [持久化状态](/zh-cn/dev/persistent-state/)——存储辅助层。
+- [命运天平 API](/zh-cn/dev/fate-balance-api/)——经验上限组合。

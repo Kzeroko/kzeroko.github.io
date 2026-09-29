@@ -1,0 +1,144 @@
+---
+title: "Effekseer Particles"
+description: "Spawning AAAParticles Effekseer effects from IsekaiExpansion through the EffekFxBuilder bridge, with block-space sizing, dynamic inputs and tracked lifetimes."
+category: client
+order: 10
+updated: 2026-09-18
+tagline: "The bridge between our gameplay code and the Effekseer runtime."
+tags: ['fx', 'aaaparticles', 'effekseer', 'client']
+---
+
+Effekseer is a standalone particle authoring tool. [AAAParticles](https://modrinth.com/mod/aaa-particles) is a third-party mod that runs the Effekseer native runtime inside Minecraft — IsekaiExpansion does not implement any of it. What this mod adds is a bridge: one builder that turns a gameplay event into a spawned emitter, sizes it in blocks rather than Effekseer units, and keeps entity-bound effects alive for the right viewers.
+
+## Entry point
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .position(pos)
+    .scale(0.5F)
+    .spawn();
+```
+
+`FxSyncUtil.effek(World, Identifier)` returns a fresh `EffekFxBuilder`. Everything else is chained on that builder, and nothing happens until `spawn()` or `spawnTracked()` is called.
+
+| Piece | Where |
+| --- | --- |
+| Builder entry | `net.kzeroko.isekaiexpansion.util.network.FxSyncUtil` |
+| Builder | `net.kzeroko.isekaiexpansion.internal.effek.EffekFxBuilder` |
+| Unit maths | `net.kzeroko.isekaiexpansion.internal.effek.EffekSpace` |
+| Client-side tracked emitters | `net.kzeroko.isekaiexpansion.internal.effek.ClientTrackedFxRegistry` |
+| Effect assets | `assets/isekaiexpansion/effeks/*.efkefc` |
+
+`FxSyncUtil` also exposes `spawnStaticEffekFx`, `spawnEffekFx` and a tracked variant. They are thin wrappers over the same builder, kept for call sites that predate it. New code uses the builder.
+
+The dependency is declared in `build.gradle` as `cn.chloeprime:aaa_particles-fabric-${minecraft_version}:${aaa_particles_version}`, currently resolving to `2.2.3`. The version lives in `gradle.properties`.
+
+## Common tasks
+
+### Spawn at a fixed position
+
+`position(Vec3d)` sets an absolute world position and clears any entity binding set earlier on the same builder. `at(Vec3d)` is the same thing under a shorter name.
+
+### Follow an entity
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .bind(entity)
+    .head()
+    .offset(new Vec3d(0.0D, 0.5D, 0.0D))
+    .spawnTracked();
+```
+
+`bind(Entity)` attaches the emitter to an entity. `head()` anchors it to the head rather than the feet, `offset(Vec3d)` shifts it in entity space, and `rigidBind()` makes the whole effect follow the entity transform instead of only its origin. `bindIf` and `headIf` take a boolean so a call site does not have to branch.
+
+### Size it in blocks, not Effekseer units
+
+AAAParticles 2.2.3 applies no hidden unit conversion: one Effekseer world unit renders as one Minecraft block at raw scale `1.0`, and the emitter scale multiplies the authored dimensions directly.
+
+That makes raw scale a number nobody can read. Measure one span in the Effekseer editor instead, and let the builder do the division:
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .position(pos)
+    .scaleToBlockDiameter(3.0F, 100.0F)
+    .spawn();
+```
+
+"This effect's authored diameter is 100 Effekseer units; render it 3 blocks wide." The builder stores raw scale `0.03`.
+
+`scaleToBlockRadius` and `scaleToBlockSpan` are the same calculation under names that match how the effect was measured. Pick the one matching the span you actually measured — radius against radius, diameter against diameter — and record that measurement next to the asset, because nothing at runtime can recover it.
+
+Raw `scale(float)` is still there for hand-tuned values. Whatever route you take, the final scale is clamped to `0.0…100.0` when the emitter is built.
+
+### Drive it from gameplay values
+
+`parameter(int index, float value)` forwards one Effekseer dynamic input. AAAParticles stores it as an untyped `(index, float)` pair — the meaning lives entirely in the Effekseer asset, in expressions that read `@In0`…`@In3` and write `@O.x`…`@O.w`.
+
+Effekseer exposes four external inputs, so valid indexes are `0`, `1`, `2` and `3`.
+
+| Index | Effekseer | Convention in this mod |
+| --- | --- | --- |
+| `0` | `@In0` | Intensity. `0`–`1` is the normal band; above `1` reads as overcharged. |
+| `1` | `@In1` | Primary scale — usually a radius or length multiplier. |
+| `2` | `@In2` | Secondary variant — colour mix, turbulence, or subtype. |
+| `3` | `@In3` | Alpha or lifetime — opacity, fade strength, duration multiplier. |
+
+An asset may define its own meanings, but then the asset brief has to say so. Reusing one index for two meanings in the same asset is how an effect ends up looking correct in one code path and wrong in another. `DevLootBeamEffek` passes an item's tooltip colour through inputs `0`–`3`, which is the shape most colour-swapped effects should copy.
+
+### Switch state mid-effect
+
+`trigger(int index)` sends a discrete Effekseer trigger when the emitter is created. Triggers are events, not values: use them to start a child node, stop a charging loop, fire a beam, or begin a fade. Four indexes, `0`–`3`, same as inputs.
+
+A charge-then-release effect is one named, persistent emitter driving its glow from `@In0 = chargeProgress`, then a trigger to stop the charge node and start the release. Changing an input or sending a trigger *after* spawn needs a named emitter, because AAAParticles looks emitters up by emitter type, effect id and name — `named(Identifier)` sets that name. Spawning a second emitter with the same three replaces the first.
+
+## Reference
+
+Every method returns the builder. Defaults apply when the method is never called.
+
+| Method | Default | What it does |
+| --- | --- | --- |
+| `position(Vec3d)` / `at(Vec3d)` | none | Absolute world position. Clears any entity binding. |
+| `bind(Entity)` | unbound | Attaches the emitter to an entity. |
+| `bindIf(boolean, Entity)` | unbound | Binds only when the flag is true. |
+| `head()` / `headIf(boolean)` | feet | Anchors to the entity's head instead of its origin. |
+| `offset(Vec3d)` | none | Entity-space offset applied on top of the binding. |
+| `rotation(float, float, float)` / `rotation(Vec3d)` | none | Fixed emitter rotation. |
+| `rotateFromVelocity()` | off | Derives rotation from the bound entity's velocity. |
+| `rigidBind()` | off | The whole effect follows the entity transform. Forces the tracked path on the server. |
+| `scale(float)` | `1.0` | Raw Effekseer scale, clamped to `0.0…100.0` at build time. |
+| `scaleToBlockSpan(desired, authored)` | `1.0` | Raw scale computed from a measured span. |
+| `scaleToBlockRadius` / `scaleToBlockDiameter` | `1.0` | The same calculation, named for what you measured. |
+| `speed(float)` | `1.0` | Relative play speed. AAAParticles advances emitter progress on the Java side, so avoid it on long-running emitters unless the asset was authored for it. |
+| `parameter(int, float)` | none | One Effekseer dynamic input, index `0`–`3`. Repeatable. |
+| `trigger(int)` | none | One Effekseer trigger fired at spawn, index `0`–`3`. Repeatable. |
+| `named(Identifier)` | anonymous | Names the emitter so it can be updated or replaced later. |
+| `force()` / `forceIf(boolean)` | off | Sends the spawn packet with long-distance range. |
+| `backingStatusEffect(Identifier)` | none | The client registry stops the emitter when that status effect leaves the bound entity. |
+| `persistent(boolean)` | `false` | Replays the emitter to viewers who start tracking the entity later. |
+| `spawn()` | — | Spawns the emitter. Returns nothing. |
+| `spawnTracked()` | — | Starts a server-tracked emitter and returns its instance id. |
+
+## Threading and lifecycle
+
+**`spawn()` works on both sides.** On the logical server it sends the AAAParticles spawn packet; on the logical client it creates the emitter locally. The one exception is a rigid binding on a bound entity, which always takes the tracked path so its whole-effect transform mode survives the trip.
+
+**`spawnTracked()` is server-only in effect.** Called off the logical server, or without a bound entity, it falls back to plain `spawn()` behaviour and returns `null`. When it does run properly it returns a `UUID` to keep, so the effect can be stopped later.
+
+**A tracked emitter has three ways to end.** The server stops it by instance id; the client registry stops it when the backing status effect leaves the entity; or `stopAllForEntity` clears everything bound to an entity that is going away. An emitter with no backing status effect and no stored id runs until its asset finishes — fine for an impact, a leak for an aura.
+
+**`persistent(true)` costs a replay.** Late viewers receive the emitter when they start tracking the entity, which is what an aura wants and what a one-shot impact does not.
+
+<Callout type="caution" title="Named emitters replace each other">
+Emitter type, effect id and name together identify an emitter. Spawning a second one with the same three silently replaces the first. Per-entity effects need the entity in the name — `effek/example/release/<uuid>` — or two players using the same ability will fight over one emitter.
+</Callout>
+
+## Upgrading AAAParticles
+
+The block-space maths in `EffekSpace` assumes AAAParticles applies no unit conversion of its own. That was verified against 2.2.3, where `ParticleEmitterInfo.spawnInWorld` passes world coordinates and scale straight through to `ParticleEmitter`, and the renderer translates by the camera position without a conversion multiplier.
+
+When bumping the version, re-read `ParticleEmitterInfo.spawnInWorld`, `ParticleEmitter.setScale` and `EffekRenderer`. If a conversion factor appears, change `EffekSpace.MINECRAFT_BLOCKS_PER_EFFEKSEER_WORLD_UNIT` and this page in the same commit.
+
+## Related
+
+- [Effekseer dynamic parameter reference](https://effekseer.github.io/Help_Tool/en/ToolReference/dynamicParameter.html)
+- [Effekseer trigger tutorial](https://effekseer.github.io/Help_Tool/en/ToolTutorial/15.html)

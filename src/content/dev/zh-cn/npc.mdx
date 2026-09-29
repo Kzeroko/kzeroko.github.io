@@ -1,0 +1,163 @@
+---
+title: "NPC 基础"
+description: "市民与具名同伴共用的实体分层、可保存状态、物品栏与生命周期。"
+category: systems
+order: 60
+updated: 2026-09-27
+---
+
+NPC 行为以 `entity.BaseNpcEntity` 为基础，通过角色子类与 `internal.ai` 管理器组合。这些属于项目实现及扩展类型，并非公开 NPC 门面。城市与复活集成应使用各自的公开门面。
+
+## 它做什么
+
+| 层级 | 新增职责 | 默认对话事件 |
+| --- | --- | --- |
+| `BaseNpcEntity` | 持久人形外观、物品栏、交互、导航、跟随归属及共用脑。默认关闭战斗、用物品和表情能力。 | 基础事件钩子。 |
+| `SimpleNpcEntity` | 威胁感知、平民逃跑任务及肢体表情。 | NO_TRADE |
+| `CombatNpcEntity` | 战斗与支援感知、动作控制器、自动用物品能力及玩家敌意记忆。核心任务不再采用平民逃跑扩展。 | INTERACT |
+| `UniqueNpcEntity` | 按类型确定的唯一身份、固定性别、情绪、定时休息及游荡期间使用 POI。 | 信任时 TRADE，否则 INTERACT |
+| `CitizenNpcEntity` | 带 CitizenIdentity 社会身份、使用共用人形外观生成的 Simple NPC。 | 继承 NO_TRADE |
+| `AdventurerNpcEntity` | 可建立隶属的战斗 NPC，生成共用人形外观，初始配备铁剑。 | 继承 INTERACT |
+
+构造时关闭拾取战利品、标记为持久实体，并安装自定义导航与移动。NPC 不因距离立即消失，也不会因和平难度移除。子类启用能力后仍须提供内容：启用物品使用不代表所有快捷槽物品都会自动使用，启用表情也不会自动填充动画目录。
+
+## 运行时模型
+
+### 脑与刻更新归属
+
+基础脑包含 CORE、IDLE、REST 任务列表。核心任务处理水面生存、门、视线、醒来、随从指令、对话、停留与跟随；空闲任务选择附近游荡、看向目标或等待。基础休息列表为空。Simple 角色增加平民逃跑，Combat 角色增加远程避让。Unique 角色增加 POI 活动及睡眠、回家任务，日内第 0 刻为 IDLE，第 16000 刻转 REST，第 23000 刻回到 IDLE。
+
+服务端 `mobTick` 先协调无效跟随归属，更新闪避、空闲、表情及角色状态，再处理物品使用。目标效果未暂停脑控制时，继续更新脑与随从指令。POI 冷却仍然递减；被暂停的战斗会中断。骑乘兼容仅在未暂停时更新。因此，暂停脑并不等于暂停所有 NPC 管理器。
+
+`NpcConfig` 是 Java record/builder，不是 JSON。移动、战斗范围、冷却、性格与阵营设置由具体实体选择。`normalMeleeAttacks` 同时要求战斗能力与配置开关。Evelina 明确关闭该开关，并启用远程、闪避行为，不适合作为默认近战示例。 自动快捷物品使用会等待武器命中时点，并要求没有编写的动作正在执行。
+
+基础属性构造器始终包含攻击伤害（3）和攻击速度（4.0），子类即使从最小构造器开始也不会缺少近战必需属性。默认构造器还将最大生命值设为 30；冒险者注册使用这套完整默认值。平民和唯一角色可覆盖伤害和生命值。`NpcCombatAttributes`在服务端生成初始化与NBT加载时恢复适配武器的攻击速度基准，保留装备、服装和效果修饰符。排队的近战命中会在服务端重新检查攻击者、目标存活及移除状态和所在世界，再施加伤害。
+
+### 物品栏与自定义界面
+
+| 存储 | 物理槽位 | 自定义界面 handler 槽位 | 约定 |
+| --- | --- | --- | --- |
+| 背包 | 0–17，共 18 格 | 0–17 | 通用存储。 |
+| 快捷使用 | 18–20，共 3 格 | 21–23 | 通用存储，自动使用从此扫描。 |
+| 特殊 | 21，共 1 格 | 20 | 仅 NpcSpecializedItem 或空。 |
+| 主手／副手 | 原版装备，不属于 NpcInventory | 18 / 19 | 通过自定义界面修改时要求明确的配偶或隶属归属绑定。 |
+| 玩家背包 | 玩家持有 | 24–50 | 主物品栏。 |
+| 玩家快捷栏 | 玩家持有 | 51–59 | 快捷栏。 |
+
+`NpcInventory` 共 22 个物理槽位。`addStack` 复制输入，先在背包合并及填充，再尝试快捷使用槽，最后对专用物品尝试特殊槽，返回剩余物品。`canInsert` 只表示存在部分空间，不保证整栈都能放下。
+
+自定义界面快捷移动采用不同顺序：专用物品先尝试特殊槽，再背包、再快捷使用槽；首个范围接受了任意数量后就返回。双手从不作为自动快捷移动目标。客户端收到锁定槽位掩码，服务端点击和快捷移动会拒绝锁定索引，装备取出另行检查实时婚姻或隶属归属条件。权限变更后应重新打开界面，因为掩码是打开时的快照。
+
+访问 NPC 物品栏和装备要求实体存活、未移除、与玩家同世界且距离不超过 8 格。自定义界面在玩家当前服务端世界查找实体，并检查相同距离。关闭 handler 时，若玩家对话归属仍指向此 NPC，则释放该归属。
+
+自动用物品仅按顺序扫描快捷使用槽，并要求已注册类别及 `shouldNpcAutoUseItem` 通过。基础钩子返回 false。开始时将一件物品暂放主手，停止导航，同步类别与使用状态；完成后处理物品并恢复原主手。睡眠暂停正在进行的使用。冷却限制为 0–200 刻，即 0–10 秒。类别注册表在每个管理器内缓存，不是逐刻扩展钩子。
+
+`NpcCustomizeScreen`由`NpcCustomizeScreenHandler`打开，注册 ID 为`isekaiexpansion:npc_customize`。「物品管理」分为「背包」和「装备」两个子页，只显示当前 NPC 槽位，下方保留一份玩家物品栏。装备页标出主手、副手、专属物品和快捷使用槽。切换子页会保留光标拿取的物品与当前外观选择。
+
+打开数据包含当前显示的形象，以及每件服装已经合成好的`HumanoidProfile`，统一使用紧凑编码。服务端以角色原始形象叠加各件服装的外观，客户端预览不需要读取仅存于服务端的预设目录。旧菜单 ID、旧类名及缺少外观的条目格式均不保留兼容读取。
+
+预览先恢复实体状态副本，再将同步的显示形象赋给独立客户端实体，不会修改世界中的 NPC。生成的平民、冒险者与唯一角色均保留自己的形象；切换服装时，上一次清空的部件不会残留到下一次选择。随从预览也使用同一套快照流程。双手装备跟随菜单同步槽位，仅在物品栈变化时复制。提交服装仍由服务端重新检查 handler 的实时访问权限。
+
+### 共用实体 NBT
+
+以下为原版实体及装备状态之外的共用自定义字段。战斗、唯一角色情绪、生成市民身份及人形部件内部数据由各自系统负责。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `NpcIdentityId` | `UUID` | 新建标识 | 普通 NPC 的持久身份，与显示名称和实体 UUID 无关。缺失或格式错误时分配新标识。唯一 NPC 不保存此字段。 |
+| `NpcBehavior` | `compound` | 缺失则 WANDER | 行为状态；不读取旧的独立模式和持有人字段。 |
+| `NpcBehavior.Mode` | `int` | DefaultMode | 序号 STAY=0、FOLLOW=1、WANDER=2、WANDER_BY_RADIUS=3；无效值使用默认模式。 |
+| `NpcBehavior.DefaultMode` | `int` | WANDER | 持久非跟随模式；FOLLOW 转为 WANDER。 |
+| `NpcBehavior.FollowReturnMode` | `int` | DefaultMode | 开始跟随前保存的非跟随模式；无效值使用默认模式。 |
+| `NpcBehavior.FollowOwner` | `UUID` | `absent` | 仅 FOLLOW 且有持有人及正会话号时保存。 |
+| `NpcBehavior.FollowSession` | `long` | `absent` | 必须匹配持有人当前服务端会话；仅有持有人不够。 |
+| `NpcOutfit` | `string` | 预设默认 | 解析后的服装 ID，在基础角色恢复后应用。 |
+| `HumanoidProfile` | `compound` | 生成或预设 | 仅非手工角色预设保存及恢复此值；手工角色外观来自数据。 |
+| `StayAnchor` | `compound` | 缺失 | 停留或范围游荡的可选维度与方块位置。 |
+| `HomeAnchor` | `compound` | 缺失 | 可选住所位置，与停留锚点分别保存。 |
+| `StayAnchor.Dim` | `string` | 必需 | 世界 ID；此读取器不捕获无效 ID 异常。 |
+| `StayAnchor.X` | `int` | 0 | 方块 X 坐标。 |
+| `StayAnchor.Y` | `int` | 0 | 方块 Y 坐标。 |
+| `StayAnchor.Z` | `int` | 0 | 方块 Z 坐标。 |
+| `HomeAnchor.Dim` | `string` | 必需 | 世界 ID，解析行为与 StayAnchor 相同。 |
+| `HomeAnchor.X` | `int` | 0 | 方块 X 坐标。 |
+| `HomeAnchor.Y` | `int` | 0 | 方块 Y 坐标。 |
+| `HomeAnchor.Z` | `int` | 0 | 方块 Z 坐标。 |
+| `NpcCityBinding` | `compound` | 缺失 | 紧凑住所及可选职责路线引用；格式错误则为 null。 |
+| `NpcCityBinding.City` | `string` | 必需 | 城市 ID。 |
+| `NpcCityBinding.Residence` | `string` | 必需 | 经过校验的本地住所 ID。 |
+| `NpcCityBinding.Route` | `string` | 缺失 | 可选的本地路线 ID，需通过校验。 |
+| `NpcInventory` | `list<compound>` | 空 | 非空 Minecraft ItemStack compound 的稀疏列表。 |
+| `NpcInventory[].Slot` | `int` | 列表序号 | 物理槽位数字索引；目的槽位无效时尝试重新存放。 |
+| `NpcFlying` | `boolean` | false | 保存的飞行标志；运行时仍受 setter 与移动逻辑约束。 |
+| `NpcHovering` | `boolean` | false | 保存的悬停标志。 |
+| `NpcSwimActive` | `boolean` | false | 主动游泳标志；显示滞后计数器不持久化。 |
+| `NpcFollowProtectionMode` | `int` | ASSIST | 序号 ASSIST=0、DEFEND=1、PASSIVE=2；已存数字限制在范围内。 |
+| `NpcRelationships` | `compound` | 缺失 | 关系复合字段：`Spouse` 保存婚姻，`Owner` 与 `Bond` 保存隶属。唯一角色以世界婚姻记录为准。 |
+| `NpcRelationships.Spouse.Uuid` | `UUID` | 必需 | 缺少 UUID 则绑定为 null。 |
+| `NpcRelationships.Spouse.Name` | `string` | 空 | 保存的显示名。 |
+| `NpcPoiCooldowns` | `compound` | 空 | POI ID → 剩余正刻数；忽略未知 ID、无效 ID 和非正值。 |
+
+物品栏加载先清空现有存储，再按显式数字 Slot 恢复各非空物品；缺失时使用列表序号，目的槽位无效则尝试 `addStack`。重复的有效槽位会覆盖较早条目。重新存放时忽略返回的剩余物品，因此旧数据溢出可能丢失物品，不能保证无损迁移。新写入为每个非空栈记录 Slot，使稀疏列表中的快捷使用位置保持不变。
+
+共用人形 profile 会同步给客户端，tracker 变化时增加渲染修订号。市民已不再使用独立的、仅含外观键的 tracker。手工角色从当前预设解析外观，生成角色则持久化基础 profile。当前服装叠加在基础角色上，不替换基础角色。
+
+### 跟随会话与死亡
+
+使用 `beginFollowing(ServerPlayerEntity)`、`releaseFollowerOwnership()` 或 `stopFollowingAndSetMode(...)`。仅设置 FOLLOW 序号不构成归属。加入要求记分板中存在有效会话且队伍未满，上限为 4；失败时回滚模式、持有人、会话与返回行为。
+
+记分板组件保存 `SessionEpoch` 与 `Players`，后者以玩家 UUID 字符串映射到有序 UUID 整数数组列表。活动会话映射、移动方向与聚拢状态不持久化。加入服务器分配新 epoch 并清除旧队伍；断线使会话失效，并在所有世界释放已加载随从。之后加载的 NPC 同样核对持有人与会话，释放过期归属。同步包发送接收者的完整有序列表，包括未加载成员。
+
+契约捕获与释放保留已存跟随约定，不会凭空指定新持有人。由原持有人释放时更新为其当前会话；其他玩家释放则要求原会话仍有效。新实体加入时再次检查容量。
+
+死亡在原版死亡处理前记录墓地。记录成功后，墓地保留自定义物品栏并阻止普通掉落，避免复活时复制物品。未记录墓地的默认死亡仅掉落自定义物品栏；除非子类修改 `dropInventoryOnly`，否则不掉落装备。死亡处理后立即清除队伍成员。复活清除临时战斗与跟随状态，恢复非跟随行为，之后才能重新加入跟随。
+
+## 约定
+
+- **服务端权威：** 行为、物品栏、关系、生成与 AI 修改在服务端线程执行。同步状态供客户端显示，不允许从渲染代码发起服务端修改。
+- **身份：** 普通 NPC 身份由类型和持久化的 `NpcIdentityId` 标识组成，首次访问后缓存，恢复 NBT 时清除缓存。同名、切换语言或改名不会合并好感与墓地。唯一 NPC 使用类型身份。复活保留此标识，同时更换实体 UUID。完整复制实体快照也会复制身份；独立角色须使用新标识。不迁移旧的名称身份键。
+- **关系：** Friendly、Trust 与好感查询按身份委托给 IsekaiCore，数字等级门槛由依赖负责。婚姻是单独保存的绑定；自定义界面检查 `isMarriedTo` 或隶属归属，不猜测等级阈值。
+- **模式变化：** STAY 与 WANDER_BY_RADIUS 捕获当前位置为停留锚点。离开 FOLLOW 清除跟随归属；默认和返回模式将 FOLLOW/null 转为 WANDER。
+- **世界范围：** 城市绑定保存 ID，不把路线或菜单复制到实体。住所与停留锚点带维度，应在 NPC 所在环境解析世界级城市数据。
+- **恢复顺序：** 先基础 profile、后服装，再行为、锚点、物品栏／角色状态及临时管理器。服务端加载后重建脑并协调跟随归属。
+- **物品插入：** 保留或处理 `addStack` 返回的剩余物品，不把 `canInsert` 当作整栈容量事务检查。
+
+## 扩展方式
+
+选择满足需求的最窄实体层级，再覆盖钩子。不要将 UniqueNpcEntity 的情绪与休息工作复制到大规模生成的市民。通过常规实体初始化注册具体类型与属性容器。
+
+`util.npc.NpcSpawningUtil` 虽有 public 方法，仍是项目内部辅助工具。已有注册 NPC 类型时：
+
+```java
+static <T extends BaseNpcEntity> Optional<T> spawnResident(
+        ServerWorld world, EntityType<T> type, BlockPos position) {
+    return NpcSpawningUtil.builder(world, type, position)
+            .defaultMode(BaseNpcEntity.NpcMode.WANDER_BY_RADIUS)
+            .initialMode(BaseNpcEntity.NpcMode.WANDER_BY_RADIUS)
+            .findHomeBedNear(position, 16)
+            .spawn();
+}
+```
+
+builder 使用方块底面中心位置，默认生成原因为 STRUCTURE，默认在 16 格内找床。只选择球形距离内、未占用的床头，并应用可选谓词；不预订床，也不证明道路可达。负半径限制为 0。手动住所跳过搜索，`withoutHome` 关闭住所分配。两个模式 setter 都拒绝 FOLLOW。
+
+顺序为创建 → 定位 → 初始化 → configure 回调 → 住所 → 城市／模式 → 加入世界 → afterSpawn 回调。多个回调按注册顺序组合。创建结果为空或加入失败返回 Optional.empty；加入失败会丢弃创建的实体，并跳过 afterSpawn。回调异常向外传播。依赖实体已成功加入世界的工作放在 `afterSpawn`。
+
+## 验证
+
+在独立服务端分别检查平民、冒险者和唯一角色：对比世界形象，反复切换服装并恢复默认；检查两个物品子页、单份玩家物品栏、双手预览更新与光标物品连续性。
+
+- 生成 Simple、Combat、Unique 与 Citizen 角色，确认平民逃跑与战斗区别、唯一角色休息时段，以及缺少内容时不会意外自动用物品或播放表情。
+- 保存稀疏快捷使用物品栏、全部 22 个物理槽位及双手。在一次性存档中测试旧数据缺失 Slot、越界槽、重复槽与溢出。
+- 分别以配偶和非配偶打开自定义界面，测试点击、数字键交换、快捷移动，再关闭界面、移除 NPC 或离开范围。确认 handler 索引不同于物理快捷使用／特殊槽索引。
+- 开始 FOLLOW，填满 4 人队伍，卸载并重载随从、断线重连，再由原持有人或其他玩家释放契约。检查返回模式，确保过期会话不悄悄获得新归属。
+- 在可记录墓地时携物死亡，再测试重复稳定身份。确认物品不会同时掉落和恢复；判断恢复成功前先检查复活系统结果。
+- 重载手工角色预设及生成市民，确认手工修改生效、生成身份保留、服装仍为叠加层。将错误锚点与容错城市绑定读取分别测试。
+
+## 相关页面
+
+[NPC 对话](/zh-cn/dev/npc-dialogue/)介绍对话准入与赠礼。[对话对象与界面](/zh-cn/dev/dialogue-ui/)说明阻塞交互和展示；[对话工具](/zh-cn/dev/dialogue-tools/)介绍编写流程。
+
+[NPC 复活](/zh-cn/dev/npc-revival-api/)说明墓地与恢复。[声望运行时](/zh-cn/dev/reputation-runtime/)说明阵营上下文；[表情贴纸播放](/zh-cn/dev/emoji-api/)介绍独立的贴纸通道。
+
+[NPC 移动](/zh-cn/dev/npc-locomotion/)说明速度、飞行与游泳。[NPC 跟随者](/zh-cn/dev/npc-followers/)涵盖会话、队形、命令与越障；[城市 API](/zh-cn/dev/city-api/)管理持久化城市引用。

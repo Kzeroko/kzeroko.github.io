@@ -1,0 +1,138 @@
+---
+import './dialogue-studio.css';
+import { ICONS } from '../../scripts/dialogue-studio/icons.mjs';
+
+interface Props { lang?: string }
+const { lang = 'en' } = Astro.props;
+const t = (en: string, cn: string) => (lang === 'zh-cn' ? cn : en);
+const svg = (name: keyof typeof ICONS, size = 16) =>
+  `<svg class="ds-icon" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${ICONS[name]}</svg>`;
+
+const rail = [
+  ['files', 'files', t('Files', '文件')],
+  ['generate', 'sparkles', t('Generate', '批量生成')],
+  ['sessions', 'layers', t('Sessions', '工作区')],
+] as const;
+const tabs = [
+  ['inspect', 'edit', t('Inspect', '属性')],
+  ['play', 'play', t('Play', '试玩')],
+  ['issues', 'alert', t('Issues', '问题')],
+] as const;
+const welcome = [
+  ['new', null, 'plus', t('New dialogue', '新建对话'), t('Start from a template at a resource path.', '选一个模板，填好资源路径。')],
+  [null, 'generate', 'sparkles', t('Generate a set', '批量生成'), t('Every route, tier and phase for an NPC in one go.', '一次生成某个 NPC 的全部入口、关系阶段与交互阶段。')],
+  ['import-folder', null, 'folder', t('Open a folder', '打开文件夹'), t('Pick the mod\'s blabber_dialogues folder, or drop it here.', '选择模组的 blabber_dialogues 文件夹，或直接拖进来。')],
+  ['import-files', null, 'upload', t('Import files', '导入文件'), t('Dialogue JSON, language files, a bundle ZIP or a backup.', '对话 JSON、语言文件、资源包 ZIP 或工作区备份。')],
+] as const;
+---
+
+<dialogue-studio class="ds" data-lang={lang} data-view="graph" data-panel="" data-inspector="">
+  <header class="ds-top">
+    <div class="ds-top__brand">
+      <span class="ds-top__mark" set:html={svg('graph', 18)} />
+      <h1 class="ds-top__title">{t('Dialogue Studio', '对话工坊')}</h1>
+    </div>
+    <div class="ds-crumb" data-crumb aria-live="polite"></div>
+    <div class="ds-seg ds-top__views" role="radiogroup" aria-label={t('Main view', '主视图')}>
+      <button type="button" class="ds-seg__item" role="radio" aria-checked="true" data-set-view="graph"><Fragment set:html={svg('graph')} /><span>{t('Graph', '画布')}</span></button>
+      <button type="button" class="ds-seg__item" role="radio" aria-checked="false" data-set-view="text"><Fragment set:html={svg('languages')} /><span>{t('Text', '文本')}</span></button>
+    </div>
+    <div class="ds-top__actions">
+      <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost" data-action="undo" aria-label={t('Undo', '撤销')} title={t('Undo (Ctrl+Z)', '撤销（Ctrl+Z）')} disabled set:html={svg('undo')} />
+      <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost" data-action="redo" aria-label={t('Redo', '重做')} title={t('Redo (Ctrl+Shift+Z)', '重做（Ctrl+Shift+Z）')} disabled set:html={svg('redo')} />
+      <span class="ds-top__sep" aria-hidden="true"></span>
+      <button type="button" class="ds-btn ds-btn--ghost ds-top__labelled" data-action="import" aria-haspopup="menu"><Fragment set:html={svg('upload')} /><span>{t('Import', '导入')}</span></button>
+      <button type="button" class="ds-btn ds-btn--primary ds-top__labelled" data-action="export" aria-haspopup="menu"><Fragment set:html={svg('download')} /><span>{t('Export', '导出')}</span></button>
+      <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost" data-action="toggle-inspector" aria-pressed="false" aria-label={t('Show or hide the inspector', '显示或隐藏属性面板')} title={t('Inspector', '属性面板')} set:html={svg('panelRight')} />
+    </div>
+  </header>
+
+  <div class="ds-body">
+    <nav class="ds-rail" aria-label={t('Studio panels', '工坊面板')}>
+      {rail.map(([id, icon, label]) => (
+        <button type="button" class="ds-rail__btn" data-open-panel={id} aria-pressed="false"><Fragment set:html={svg(icon, 18)} /><span>{label}</span></button>
+      ))}
+      <span class="ds-rail__spacer"></span>
+      <button type="button" class="ds-rail__btn" data-open-panel="help" aria-pressed="false"><Fragment set:html={svg('keyboard', 18)} /><span>{t('Help', '帮助')}</span></button>
+    </nav>
+
+    <aside class="ds-side" aria-label={t('Panel', '面板')}>
+      <section class="ds-panel" data-panel-view="files" hidden></section>
+      <section class="ds-panel" data-panel-view="generate" hidden></section>
+      <section class="ds-panel" data-panel-view="sessions" hidden></section>
+      <section class="ds-panel" data-panel-view="help" hidden></section>
+      <div class="ds-resize ds-resize--side" data-resize="side" role="separator" aria-orientation="vertical" aria-label={t('Resize panel', '调整面板宽度')}></div>
+    </aside>
+
+    <div class="ds-main">
+      <div class="ds-graph" data-graph-view>
+        <div class="ds-canvas" data-canvas tabindex="0" role="application" aria-label={t('Dialogue graph. Double-click to add a node.', '对话画布。双击添加节点。')}>
+          <div class="ds-world" data-world>
+            <svg class="ds-wires" data-wires aria-hidden="true"></svg>
+            <div class="ds-nodes" data-nodes></div>
+          </div>
+          <div class="ds-marquee" data-marquee hidden></div>
+
+          <div class="ds-canvas-tools" data-canvas-ui data-canvas-tools hidden>
+            <button type="button" class="ds-btn ds-btn--float" data-canvas-action="add"><Fragment set:html={svg('plus')} /><span>{t('Add node', '添加节点')}</span></button>
+            <button type="button" class="ds-btn ds-btn--float" data-canvas-action="tidy" title="L"><Fragment set:html={svg('layout')} /><span>{t('Tidy', '整理')}</span></button>
+            <button type="button" class="ds-btn ds-btn--float" data-canvas-action="fit" title="F"><Fragment set:html={svg('fit')} /><span>{t('Fit', '适应')}</span></button>
+            <button type="button" class="ds-btn ds-btn--float" data-action="preview-lang" aria-label={t('Language shown on nodes', '节点显示的语言')}><Fragment set:html={svg('languages')} /><span data-preview-lang>{lang === 'zh-cn' ? '中文' : 'EN'}</span></button>
+          </div>
+
+          <div class="ds-zoom" data-canvas-ui>
+            <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost" data-canvas-action="zoom-out" aria-label={t('Zoom out', '缩小')} set:html={svg('zoomOut')} />
+            <button type="button" class="ds-zoom__value" data-canvas-action="zoom-reset" data-zoom aria-label={t('Reset zoom to 100%', '缩放重置为 100%')}>100%</button>
+            <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost" data-canvas-action="zoom-in" aria-label={t('Zoom in', '放大')} set:html={svg('zoomIn')} />
+          </div>
+          <canvas class="ds-minimap" data-minimap data-canvas-ui aria-hidden="true"></canvas>
+
+          <div class="ds-welcome" data-welcome data-canvas-ui>
+            <div class="ds-welcome__card">
+              <span class="ds-welcome__mark" set:html={svg('graph', 28)} />
+              <h2>{t('Build NPC conversations as a graph', '用节点图搭 NPC 对话')}</h2>
+              <p>{t('Nodes are what the NPC says, wires are what the player answers. Text can stay empty until you are ready to write it.', '节点是 NPC 说的话，连线是玩家的回答。文本可以先空着，想写的时候再补。')}</p>
+              <div class="ds-welcome__grid">
+                {welcome.map(([action, panel, icon, title, body]) => (
+                  <button type="button" class="ds-welcome__action" data-action={action ?? undefined} data-open-panel={panel ?? undefined}>
+                    <Fragment set:html={svg(icon, 18)} />
+                    <strong>{title}</strong>
+                    <small>{body}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <section class="ds-texts" data-texts hidden aria-label={t('All text', '全部文本')}></section>
+      <div class="ds-drop" aria-hidden="true"><div><Fragment set:html={svg('upload', 28)} /><p>{t('Drop JSON, ZIP files or folders to import', '松开即可导入 JSON、ZIP 或文件夹')}</p></div></div>
+    </div>
+
+    <aside class="ds-insp" aria-label={t('Inspector', '属性面板')}>
+      <div class="ds-resize ds-resize--insp" data-resize="insp" role="separator" aria-orientation="vertical" aria-label={t('Resize inspector', '调整属性面板宽度')}></div>
+      <div class="ds-tabs" role="tablist" data-tabs aria-label={t('Inspector views', '属性面板视图')}>
+        {tabs.map(([id, icon, label]) => (
+          <button type="button" class="ds-tab" role="tab" id={`ds-tab-${id}`} aria-controls={`ds-tabview-${id}`} aria-selected="false" tabindex="-1" data-tab={id}>
+            <Fragment set:html={svg(icon, 14)} /><span>{label}</span>{id === 'issues' && <span class="ds-count is-error" data-issue-count></span>}
+          </button>
+        ))}
+        <button type="button" class="ds-btn ds-btn--icon ds-btn--ghost ds-tabs__close" data-action="toggle-inspector" aria-label={t('Close inspector', '关闭属性面板')} set:html={svg('close', 14)} />
+      </div>
+      {tabs.map(([id]) => <div class="ds-tabview" role="tabpanel" id={`ds-tabview-${id}`} aria-labelledby={`ds-tab-${id}`} data-tab-view={id} hidden></div>)}
+    </aside>
+  </div>
+
+  <footer class="ds-status">
+    <span class="ds-save" data-save data-state="saving"><i aria-hidden="true"></i><span>{t('Loading…', '加载中…')}</span></span>
+    <span class="ds-status__stat" data-stat-docs></span>
+    <span class="ds-status__stat ds-status__wide" data-stat-text></span>
+    <button type="button" class="ds-status__btn" data-action="issues"><Fragment set:html={svg('alert', 13)} /><span data-stat-errors></span></button>
+    <span class="ds-status__hint" data-hint aria-live="polite"></span>
+  </footer>
+  <noscript><p class="ds-noscript">{t('Dialogue Studio needs JavaScript.', '对话工坊需要启用 JavaScript。')}</p></noscript>
+</dialogue-studio>
+
+<script>
+  import '../../scripts/dialogue-studio/index.mjs';
+</script>

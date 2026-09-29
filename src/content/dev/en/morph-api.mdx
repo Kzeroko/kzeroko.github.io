@@ -1,0 +1,176 @@
+---
+title: "Morph services and extension interfaces"
+description: "Starting forms and registering abilities, form skills, tickers, travel, passenger handlers and variants."
+category: api
+order: 115
+updated: 2026-09-19
+---
+
+The morph package exposes server services and registration interfaces under `net.kzeroko.isekaiexpansion.api.morph`. The existing entry point is named `MorphService`, not a repository-standard `MorphAPI` facade, and several public contexts expose internal types. Treat those couplings as current implementation contracts, not a promise that every internal helper is stable.
+
+## Entry point
+
+Use `MorphFormRequest` for a reusable grant and `MorphService` for direct server operations. Abilities, form skills, ticking, travel, mounts and variants have separate registries. Registration does not grant a player a power, install client artwork or implement a native renderer.
+
+Read [lifecycle and authority](/en/dev/morphing/) before integrating, and [morph data](/en/wiki/morph-data/) for power metadata and attribute profiles.
+
+## Common tasks
+
+### Grant a timed form
+
+```java
+boolean grantFox(ServerPlayerEntity player) {
+    return MorphFormRequest.timed(
+            EntityType.getId(EntityType.FOX), 18, 20 * 60)
+            .start(player, new Identifier("example", "fox_grant"));
+}
+```
+
+This illustrative grant lasts 60 active seconds and rejects an existing morph. Its default mouse abilities are `none`; configured entity overrides still apply. A positive duration counts after entry completes, and blocked expiry waits for clearance.
+
+### Register an ability
+
+```java
+void registerRecovery() {
+    MorphAbilityRegistry.register(new Identifier("example", "recover"), context -> {
+        if (context.player().getHealth() >= context.player().getMaxHealth()) {
+            return MorphAbilityResult.reject();
+        }
+        context.player().heal(1.0F);
+        return MorphAbilityResult.accept(40);
+    });
+}
+```
+
+The example has a 40-tick accepted cooldown. Reference its ID from an appropriate modular form's ability slot. Implement `repeat`, `stop` and cooldown re-press policy explicitly when a held ability differs from repeated activation. Offensive abilities must independently validate targets.
+
+### Register travel
+
+```java
+void registerTravel(EntityType<? extends LivingEntity> formType) {
+    MorphTravelRegistry.register(formType, MorphTravelHandlers.flight(0.04F));
+}
+```
+
+Register once for a type without another handler. The helper owns movement, fall-distance reset, limb updates and travel statistics. It uses jump minus descend for vertical input, sprint acceleration ×1.3 and velocity damping ×0.91. The argument must be finite and positive. Built-in default flight covers allay, bat, bee, blaze, ghast, parrot, phantom and vex at 0.04; defaults preserve an earlier registration.
+
+### Add a form-specific power action
+
+```java
+void registerFormSkill(EntityType<? extends LivingEntity> formType) {
+    MorphFormSkillRegistry.register(
+            formType, new Identifier("example", "recover"), context -> {
+                if (context.player().getHealth() >= context.player().getMaxHealth()) return false;
+                context.player().heal(1.0F);
+                return true;
+            });
+}
+```
+
+This creates a form/action handler, not a power execution registration. The mod's triggerable registry must bridge an execution ID with `MorphFormTriggerableSkill(actionId)`; that implementation type lives under `origins.skill.handles.origin`. Author the owned regular power's `morph_able` policy for the intended form. The power-bar action is independent of the primary/secondary mouse slots.
+
+## Reference
+
+### Services and request values
+
+| Method / value | Side | Contract |
+| --- | --- | --- |
+| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | server | Enter the owned power's form or return from a matching source; boolean reports acceptance. |
+| `morph(ServerPlayerEntity, Identifier, NbtCompound, Identifier, Identifier, Identifier, Identifier, int, int)` | server | Form type, visual NBT, source ID, primary ID, secondary ID, optional skin, transition and duration after the player. Checks entity/space/riding; permits replacing existing state. |
+| `morphFromEntity(ServerPlayerEntity, LivingEntity, Identifier, Identifier, Identifier, Identifier, int, int)` | server | Captures/sanitises the source entity NBT and delegates to `morph`. |
+| `unmorph(ServerPlayerEntity)` | server | Starts normal exit; false when absent, already exiting or blocked by standing clearance. |
+| `canReturn(ServerPlayerEntity)` | server query | Checks standing-player space at the current position, independently of active phase. |
+| `expire(ServerPlayerEntity)` | server | Starts exit only from `ACTIVE` with clearance. It does not itself check duration or deadline; the component owns that decision. |
+| `UNLIMITED_DURATION` | constant | 0. |
+| `MorphFormRequest(...)` | value construction | Requires form/primary/secondary IDs, copies nullable NBT to an empty compound, clamps transition to at least 4 and duration to at least 0. Skin may be null. |
+| `timed(Identifier, int, int)` | value construction | Uses no NBT, both abilities `none`, no skin. Passing 0 duration still makes an unlimited request despite the method name. |
+| `withEntityNbt(NbtCompound)` / `entityNbt()` | value operation | Return a new request / defensive NBT copy. |
+| `start(ServerPlayerEntity, Identifier)` | server | Requires source ID and rejects an existing morph before delegating. |
+| `isTimed()` / `durationSeconds()` | query | Positive duration / rounded ticks divided by 20. |
+
+The service has no general null-tolerant wrapper. Only the nullable parameters described above are intended to be absent. Use the typed server-player call from a live server context rather than assuming a wrong-side call becomes a no-op.
+
+### Ability registry and callback
+
+| Method | Side / timing | Contract |
+| --- | --- | --- |
+| `MorphAbilityRegistry.register(Identifier, MorphAbility)` | common initialisation | Registers a gameplay ability; returns it. |
+| `find(Identifier)` | query | Optional registered ability. |
+| `registerOverride(EntityType, MorphAbilitySlot, Identifier)` | common initialisation | Exact entity/slot binding; referenced ability must already exist. Duplicate binding throws. |
+| `registerDisplayResolver(EntityType, MorphAbilityDisplayResolver)` | common initialisation | One per entity type; duplicate throws. Receives form, slot and resolved authored/override ID. |
+| `resolve(LivingEntity, MorphAbilitySlot, Identifier)` | server query | Optional resolved ID/ability, with entity override precedence. |
+| `resolveDisplayId(LivingEntity, MorphAbilitySlot, Identifier)` | both-side query | Display resolver may choose a state-dependent ID; null resolves to `none`. Also determines packet cooldown identity. |
+| `cooldownId(Identifier)` | query | Prefixes ability path with `morph_ability/`, retaining namespace. |
+
+`MorphAbilityContext` provides server player, component, unspawned form, slot, nullable target and nullable source power. `metaInt` and `metaDouble` read that power at effective skill level or use the supplied fallback.
+
+| Callback / result | Default | Contract |
+| --- | --- | --- |
+| `use(context)` | required | Server activation. |
+| `repeat(context)` | calls `use` | Held activation; does not imply a single continuous cast. |
+| `stop(context)` | rejected | Release callback. |
+| `acceptsPressDuringCooldown(context)` | false | Allows a fresh press through the cooldown gate, not a repeat. |
+| `MorphAbilityResult.reject()` | rejected, 0 | No preview or cooldown update. |
+| `MorphAbilityResult.accept(int)` | accepted | Clamps cooldown nonnegative. A positive accepted release can also set cooldown. |
+
+The packet layer does not catch arbitrary ability callback exceptions. Keep callbacks bounded and return a rejection for expected gameplay failure.
+
+### Form skills and tickers
+
+`MorphFormSkillRegistry.register(formType, actionId, handler)` rejects duplicate pairs. Resolution requires an active form of that exact entity type. `canTrigger`, `canTriggerOnCooldown` and `trigger` catch handler runtime exceptions, log and return false without unregistering. `trigger` checks `canTrigger` before executing.
+
+`MorphFormSkillHandler` requires `trigger`; eligibility defaults true and cooldown bypass defaults false. Its context exposes action ID, skill context, component, form, server player and `metaInt`. The bridge keeps remaining cooldown when an accepted cooldown bypass is supported, rather than restarting the configured duration.
+
+`MorphFormTickRegistry.register(formType, handler)` accepts one handler per exact type. `tick` runs for active forms on both logical sides; `MorphFormTickContext.isClient()` distinguishes them. The handler defaults `preservesNativeRotation()` to false and `detach` to no action. A tick exception removes that type's handler from the registry on the failing side. A detach exception is logged without removal. Do not rely on detach being called through a handler already removed by a tick failure.
+
+### Travel contract
+
+The context contains player, form, movement vector, jumping, descending and special-travel-active state, plus `isClient()`. Server and owning client may drive; observers do not. Register one exact-type handler with `MorphTravelRegistry.register`; duplicates throw. `find` can return an inactive-only handler, whereas `supports` requires `supportsActivation`.
+
+| Hook | Default | Meaning |
+| --- | --- | --- |
+| `travel(context)` | required | Apply movement or return a pass result. |
+| `handlesInactiveTravel(context)` | false | Allows travel when activation is off. |
+| `supportsActivation(form)` | true | Whether activation/input UI treats the form as special-travel capable. |
+| `supportsClientPrediction(form)` | false | Enables local activation preview. |
+| `activation(form)` | `DOUBLE_TAP` | Other option is `PRESS`. |
+| `isEngaged(context)` | activation flag | Determines the state toggled by a request. |
+| `canActivate(context)` | true | Entry eligibility. |
+| `remainsActive(context)` | calls `canActivate` | Ongoing eligibility. |
+| `onActivated` / `onDeactivated` | no action | Authoritative activation lifecycle. |
+| `onClientActivationPredicted` / `onClientDeactivationPredicted` | no action | Owner-client preview lifecycle. |
+
+`MorphTravelResult.pass()` keeps vanilla travel. `pass(speed)` keeps it with a finite, nonnegative movement-speed override. `handled()` suppresses vanilla travel. Suppression and a speed override cannot coexist; invalid construction throws. A handler that returns handled must actually perform the required movement and bookkeeping.
+
+Travel failures clear/deactivate state and return pass; the handler remains registered. Activation predicates queried outside those protected controller blocks are not universally exception-shielded.
+
+### Passenger and variant providers
+
+`MorphMountRegistry.register(formType, handler)` rejects duplicate types. A mount handler must implement `canBoard(host, form, passenger)` and `positionPassenger(host, form, passenger, updater)`. Its optional `passengerPitchDelta` defaults 0; `dismountLocation` defaults null for fallback. The registry does not catch provider exceptions. Keep seating checks deterministic and use the supplied updater for positioning.
+
+`MorphVariantRegistry.register(formType, provider)` also rejects duplicate types. A provider supplies `variants(formType)`, `defaultVariant(formType)` and `apply(form, variantId)`; `ownsFormTexture()` defaults true. Variant IDs must be nonnull and translation keys nonblank.
+
+Snapshot generation sorts form IDs, skips empty catalogues and keeps the first duplicate variant ID. A null default falls back to the first listed variant. A nonnull default is not checked for list membership, so the provider must supply a valid one. The direct `apply` path does not validate membership; player selection validation lives in the service.
+
+Catalogue/default/application exceptions log and yield empty/null/no application. `ownsFormTexture` is called without that exception guard. Providers should offer the same semantic variants on both sides; publish a server catalogue separately when it changes.
+
+## Events
+
+`internal.event.events.MorphEvents.ON_MORPH_PHASE_CHANGE` supplies player, component, previous and current phase to callbacks in registration order. It is noncancellable and does not isolate callback exceptions. It fires after state/sync work, including client NBT phase reception. The event and component types are internal coupling.
+
+## Threading and lifecycle
+
+Register gameplay definitions during common initialisation before players use forms. Client preview, camera and renderer hooks belong in client initialisation. Registries are process-wide; their concurrent maps do not make entity mutation safe from worker threads. There is no generic data-reload unregistration API.
+
+Use server services on the server thread with a live `ServerPlayerEntity`. Ability and form-skill handlers mutate server gameplay; tick handlers run on both sides and need explicit separation. Travel owner prediction must not apply server-only damage or rewards. Mount positioning and variant application can be used on both sides; keep world mutation confined to the appropriate game thread.
+
+The built-in service returns acceptance, not a future completion. Successful entry starts a transition; it does not mean the form is already `ACTIVE`. Resource availability and observer presentation are separate client concerns.
+
+## Related
+
+- [Client presentation](/en/dev/morph-client/)
+- [Saints Dragons bridge](/en/dev/morph-dragons/)
+
+- [Morph lifecycle](/en/dev/morphing/)
+- [Morph data](/en/wiki/morph-data/)
+- [Humanoid architecture](/en/dev/humanoid/)

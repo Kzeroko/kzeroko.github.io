@@ -1,0 +1,206 @@
+---
+title: "Humanoid part authoring"
+description: "Shared rig, models, catalogue fields, tint masks, secondary animation and resource validation."
+category: assets
+order: 100
+updated: 2026-09-27
+---
+
+Humanoid parts combine a server catalogue entry with client geometry and textures. This guide covers the shared skeleton and the resources needed to make a part selectable and renderable.
+
+## What you are making
+
+A reusable body, face, hair, trait, clothing or accessory part for players and humanoid NPCs. The server catalogue controls identity, selection and compatibility; client resources supply geometry and artwork. These are internal humanoid-system contracts, not a public facade.
+
+## Requirements
+
+Use the shared rig at `src/main/resources/assets/isekaiexpansion/geo/entity/humanoid/humanoid.geo.json`. Keep the slot names listed in [preset data](/en/wiki/humanoid-presets/) and supply both a model/texture and a matching catalogue definition. A discovered texture alone does not make a part selectable or renderable.
+
+The standard paths for a part are:
+
+```text
+assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default.png
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default_mask.png
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default_glowmask.png
+assets/<namespace>/animations/entity/humanoid/<slot>/<part>.animation.json
+data/<namespace>/humanoid_parts/<slot>/<part>.json
+```
+
+The part ID is `<namespace>:<slot>/<part>`. Model and base texture are required; masks and secondary animation are optional. The catalogue file must sit below a recognised slot directory with a nonempty remaining path. A part name may not contain `.`, which is reserved for gendered-mesh qualifiers; the catalogue rejects such a file. A name ending in `_male` or `_female`, such as `underwear_top/default_male`, is an ordinary part.
+
+## Steps
+
+### Preserve the shared skeleton
+
+Copy the rig's names, hierarchy and pivots. Animated anchors are `body`, `head`, `torso`, `right_arm`, `left_arm`, `right_leg` and `left_leg`; author their rotations at zero. Put new geometry under uniquely named content bones attached to the appropriate anchor.
+
+| Bone | Parent | Pivot |
+| --- | --- | --- |
+| `body` | — | `[0, 0, 0]` |
+| `head` | `body` | `[0, 24, 0]` |
+| `left_eye` | `head` | `[2, 27, -3.025]` |
+| `l_eye` | `left_eye` | `[2, 25, -4.025]` |
+| `l_eyebrow` | `left_eye` | `[2, 27.5, -4.025]` |
+| `right_eye` | `head` | `[-2, 27, -3.025]` |
+| `r_eye` | `right_eye` | `[-2, 25, -4.025]` |
+| `r_eyebrow` | `right_eye` | `[-2, 27.5, -4.025]` |
+| `hat` | `head` | `[0, 34, 0]` |
+| `torso` | `body` | `[0, 24, 0]` |
+| `oppai` | `torso` | `[1.64361, 20.03975, -1.72542]` |
+| `left_oppai` | `oppai` | `[1.94875, 20.09361, -1.85919]` |
+| `right_oppai` | `oppai` | `[-1.94875, 20.09361, -1.85919]` |
+| `cape` | `torso` | `[0, 24, 0]` |
+| `right_arm` | `body` | `[-5, 22, 0]` |
+| `main_item` | `right_arm` | `[-5.625, 14.2, -0.3]` |
+| `left_arm` | `body` | `[5, 22, 0]` |
+| `off_item` | `left_arm` | `[5.625, 14.2, -0.3]` |
+| `right_leg` | `body` | `[-1.9, 12, 0]` |
+| `right_shoe` | `right_leg` | `[-1.9, 12, 0]` |
+| `left_leg` | `body` | `[1.9, 12, 0]` |
+| `left_shoe` | `left_leg` | `[1.9, 12, 0]` |
+
+The template's `main_item` and `off_item` have authored rotation `[90, 0, 0]`. Player held-item attachment reads their pivot offsets, not those rotations. Keep item proxies out of exported geometry. The eye/eyebrow and `left_oppai`/`right_oppai` bones receive face/chest shaping; chest armour hides the chest feature bones.
+
+The Blockbench validator checks names, a single root, required anchors and anchor rotation. It **does not compare every pivot or parent against this table**. A successful validation therefore does not establish geometric alignment.
+
+### Declare and export geometry
+
+Use a declaring bone named after its slot, such as `hair`, to derive the part ID from the document name; or name it `hair_long_wavy` to declare `hair/long_wavy`. Rig bones do not declare parts, so a body declaration uses `body_<part>`. Several roots named `outfit_top_robe__torso` and `outfit_top_robe__sleeve` merge into the same part.
+
+A declaring bone owns its entire subtree. A nested slot-like name does not start another part. Mark reference geometry with the plugin's template property; it remains visible in the editor and is excluded from part geometry and texture footprints. See [NPC assets](/en/dev/npc-assets/) for the shared body/preset arrangement.
+
+### Supply styles, masks and glow
+
+Immediate PNG children of the texture directory become discovered styles, except names ending in `_mask` or `_glowmask`. Subdirectories are ignored. Ship `default.png` as the renderer fallback. The catalogue's `styles` list is separate from discovery: a file on disk does not automatically add a gallery choice.
+
+Optional `<part>.male.geo.json` and `<part>.female.geo.json` are gendered meshes of the same part: they share its part ID and textures, and the renderer picks one by the wearer's gender. If the base model is absent, discovery promotes the male model first, otherwise the female model. A missing requested gender variant uses that base, which may be the other gender's promoted mesh.
+
+**Current namespace limitation:** the client asset registry indexes the lowercase relative part path without its namespace, and texture discovery also searches that folder across namespaces. Two packs with the same `<slot>/<part>` can collide. Keep those paths distinct across installed packs; catalogue identifiers themselves still retain namespaces.
+
+A tint mask's RGB channels are weights, and alpha is coverage. `HumanoidTextureComposer` samples the mask to the artwork dimensions, zeros weights whose palette channels are unbound, normalises a weight sum above 1, blends uncovered weight with white, applies mask alpha, then multiplies the artwork RGB. Artwork alpha is retained. Black or transparent mask pixels preserve authored colour; a white mask blends all bound channels, rather than selecting just the red binding.
+
+Paint overlays blend after tinting and cannot make a fully transparent artwork pixel visible. No readable mask means no tint. The glowmask is a separate emissive texture rendered directly on non-body part geometry at full light; it is not a scalar brightness mask and is not passed through the palette compositor. Glow is omitted when that render pass disallows it or uses partial opacity.
+
+### Animate secondary bones
+
+Place clips in the animation path above. Discovery recognises `idle` and `run`, preferring the exact key, then a case-insensitive name equal to or ending in `.idle`, `_idle`, `.run` or `_run`. Unreadable files log a warning and produce no secondary animation.
+
+The part controller chooses `run` while the subject is sprinting and that clip exists; otherwise it uses `idle`, falling back to `run` if idle is absent. This is not a velocity-based gait test. Both loop with an entity-derived phase offset.
+
+Part animation runs before the body's pose is synchronised by bone name. Animate custom content bones: body-owned bones receive the main pose afterward. The exporter strips rig-bone channels from part clips and drops clips with no remaining channels.
+
+## Declaring it
+
+For `hair/long_wavy`, write the catalogue entry at `data/<namespace>/humanoid_parts/hair/long_wavy.json`:
+
+```json
+{
+  "gender": "female",
+  "styles": ["default"],
+  "channels": {
+    "r": "hair_base",
+    "g": "hair_tip"
+  },
+  "sort": 1000
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `slot` | `string` | `folder slot` | Optional assertion; must equal the first path segment. Unknown or mismatched slot rejects the file. |
+| `enabled` | `boolean` | `true` | False skips the entry after slot validation. |
+| `styles` | `array<string>` | `[default]` | Trimmed lowercase, deduplicated in order; empty restores `default`. First style is the catalogue fallback. |
+| `channels` | `object` | `by slot kind` | Explicit object replaces all default channel bindings; omitted members are unbound. |
+| `channels.r` | `palette channel` | `unbound` | Mask red weight; unknown channel is unbound. |
+| `channels.g` | `palette channel` | `unbound` | Mask green weight; unknown channel is unbound. |
+| `channels.b` | `palette channel` | `unbound` | Mask blue weight; unknown channel is unbound. |
+| `gender` | `enum(male, female)` | `unisex` | Gender the part is styled for. Generated NPCs roll only parts of their own gender or unisex parts, unless no body suits them; players may still choose it. Any other value rejects the file. |
+| `gender_locked` | `boolean` | `false` | `true` also restricts the part to `gender`: characters of the other gender can neither select nor keep it. Rejects the file when `gender` is absent. |
+| `chain` | `string` | `none` | Chain ID shared by parts worn as one garment across slots; a value without a namespace takes the part's namespace. An unparsable ID rejects the file. Chain rules are below. |
+| `origins` | `array<identifier>` | `[]` | Allowed origins; empty allows all. Invalid IDs are discarded, so an all-invalid list becomes unrestricted. |
+| `suppressed_by` | `array<string>` | `slot defaults` | Equipment slots; recognised names include `head`, `chest`, `legs`, `feet`, `mainhand`, `offhand`. Rendering checks armour only. Empty or all-invalid restores slot defaults. |
+| `unlock` | `object` | `always` | Shared unlock rule; all fields are defined in the preset reference. |
+| `sort` | `integer` | `1000` | Ascending order, then full part ID. |
+| `tags` | `array<string>` | `[]` | Trimmed lowercase deduplicated tags. Citizen generation prefers parts sharing a tag with the citizen's identity; gender is `gender`, not a tag. Network limit 48 characters each. |
+| `hides_slots` | `array<string>` | `[]` | Slots to hide while this part is referenced. Unknown slots ignored; hide calculation precedes this part's own visibility/resource checks. |
+| `default_for` | `string` | `none` | `any` (aliases `both`, `true`), `male`, `female`; unknown is `none`. Default seeding also requires `always` unlock, a matching origin and, for a `gender_locked` part, the locked gender. |
+| `requires` | `object` | `{}` | All named slot conditions must pass; unmet dependencies are removed repeatedly until stable. |
+| `requires.<slot>` | `identifier / array<identifier> / null` | `absent` | String or list permits those part IDs in that slot. Empty list/null/invalid-only IDs require any nonempty reference. Unknown slot rejects the file. |
+
+Unlock fields and all palette channel IDs are defined in [preset data](/en/wiki/humanoid-presets/). They are shared with this catalogue. Player selection evaluates unlocks; NPC authored profiles can still use locked parts.
+
+Display names use `humanoid_part.<namespace>.<path-with-dots>`; style names append `.style.<style>`. Add both locales in `language_assemble/categories/humanoid/`, then run `./gradlew.bat assembleLanguageFiles`. Keep authored translations in the assembly inputs. The [Blockbench plugin](/en/dev/blockbench-plugin/) produces starter catalogue entries, not display translations.
+
+### Default tint bindings
+
+| Slot kind | Red | Green | Blue |
+| --- | --- | --- | --- |
+| `body` | `skin` | `blush` | `lip` |
+| `hair` | `hair_base` | `hair_tip` | — |
+| `trait` | `trait_primary` | `trait_secondary` | — |
+| `outfit` | `outfit_primary` | `outfit_secondary` | `outfit_accent` |
+| `underwear` | `underwear_primary` | `underwear_secondary` | — |
+| `accessory` | `accessory_primary` | `accessory_secondary` | `accessory_accent` |
+| `face (face, eyes, eyebrows, facial_hair)` | — | — | — |
+
+All face-kind slots default to no binding, including eyes, eyebrows and facial hair. The plugin explicitly writes useful channels for those specific slots; handwritten files must do the same. For example, eyes normally bind red to `eye_left`, green to `eye_right` and blue to `eye_sclera`.
+
+### Visibility and compatibility
+
+Default armour suppression hides `outfit_top` and `gloves` for chest equipment, `outfit_bottom` for leg equipment, `socks` and `shoes` for foot equipment, and `head_accessory` for head equipment. Other slots have no default suppression. An explicit empty list cannot disable these defaults.
+
+`hides_slots` is collected from all referenced catalogue entries before rendering eligibility is checked. A part with a missing model, unavailable style or armour suppression can still hide other slots. Avoid assuming hidden parts cannot themselves hide something.
+
+`requires` is an AND across slots and an OR among the allowed IDs for each slot. It checks references, not actual visibility. Empty/null ID sets mean any occupied reference; malformed IDs can silently broaden a clause to that condition. Unsatisfied requirements are removed repeatedly, so removing a foundation part can remove several dependent layers.
+
+A catalogue style absent from a saved reference is replaced during sanitisation by the first declared style. Separately, the renderer falls back from an unavailable texture style to `default`, and skips that part if neither exists. These are different fallback stages.
+
+`gender` without `gender_locked` only describes the part. The character screen lists every part the character may wear, those styled for the character's gender or unisex first, then the rest, keeping catalogue order within each group.
+
+### Chains
+
+Parts sharing a `chain` ID are one garment spread across slots. Each member keeps its own slot for rendering, armour suppression and `hides_slots`, so hiding one slot hides only that member. The bundled male briefs are two chained parts:
+
+```json
+{
+  "gender": "male",
+  "gender_locked": true,
+  "chain": "default_male_underwear",
+  "default_for": "male",
+  "sort": 0,
+  "tags": ["base"]
+}
+```
+
+The same file sits at `humanoid_parts/underwear_top/default_male.json` and `humanoid_parts/underwear_bottom/default_male.json`, forming chain `isekaiexpansion:default_male_underwear`.
+
+- **Equipping** any member in the character screen, a generated NPC or an NPC outfit wears every member. A member already worn keeps its style and paint; anything displaced from a member's slot takes its own chain with it.
+- **Removing or replacing** any member removes the others. In an NPC outfit, `none` on one member clears the whole chain.
+- **Sanitisation** completes a partly worn chain when every missing member's slot is empty and the character may wear that member. Otherwise it removes the members that are worn. A member dropped for an unmet `requires` takes the chain with it, and completion never happens after that.
+
+When the catalogue loads, a chain must have at least two members, no two in the same slot and the same gender lock, `origins` and `unlock` on every member. A chain that breaks any rule is dissolved with a logged warning, and its parts load as unchained parts.
+
+### Failure and reload behaviour
+
+Unknown root keys are ignored. A bad slot path, a part name containing `.`, a conflicting `slot`, an unknown `gender`, `gender_locked` without `gender`, an unparsable `chain`, a wrong JSON shape or an unknown required slot rejects the whole definition and logs a per-file error. The successful definitions replace the catalogue; invalid ones do not retain their previous versions.
+
+Styles are lowercased and trimmed by the catalogue but do not receive the stricter part-reference character validation there. Author styles using `a-z`, `0-9`, `_` and `-`, at most 64 characters; tags must fit 48 characters. These are network bounds, not catalogue-parser length checks.
+
+A client resource reload rebuilds discovered assets and invalidates render policy. Successful server data-pack reload resends the catalogue and revalidates saved player profiles. Reload both when changing both declarations and artwork.
+
+## Checklist
+
+- Compare rig pivots and parents with the template, then run the plugin contract check.
+- Inspect the exported model for reference cubes, held-item proxies and duplicated base geometry.
+- Confirm catalogue ID, slot path, model path and texture folder agree.
+- Test every advertised style, both gendered meshes and the `default` texture fallback.
+- Equip, replace and remove each member of a chain, then switch gender and check generated NPCs of both genders.
+- Change each bound colour separately; test black mask areas, mixed RGB weights and transparent artwork.
+- Test armour suppression, `hides_slots`, dependent parts, origin filtering and unlock failure.
+- Check idle, sprinting, first-person arms and an NPC using the same part.
+- Reload server data and client resources; inspect the logs and existing saved characters.
+
+## Related
+
+[Preset data](/en/wiki/humanoid-presets/) and [NPC assets](/en/dev/npc-assets/).

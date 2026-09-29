@@ -1,0 +1,108 @@
+---
+title: "Humanoid architecture and extension points"
+description: "Profile ownership, authoritative mutation, shared presentation and safe extension of the humanoid system."
+category: systems
+order: 100
+updated: 2026-09-26
+---
+
+Players and NPCs share the humanoid appearance model and rendering pipeline. This reference identifies the internal owners of that state and the entry points for changing it.
+
+## What it does
+
+The humanoid system gives players and NPCs the same appearance model: identity, body build, face shape, palette, selected parts and an optional origin ID. `HumanoidProfile` is a versioned value object; the current version is 1. JSON authoring belongs in [preset data](/en/wiki/humanoid-presets/) and [part authoring](/en/dev/humanoid-parts/).
+
+The Java types described here live in `internal.humanoid` or client implementation packages. They are internal integration points, not a `HumanoidAPI` facade.
+
+## Runtime model
+
+| Owner / stage | Responsibility |
+| --- | --- |
+| `HumanoidAppearanceComponent` | Player profile, creation stage, saved profiles and revision; component ID `isekaiexpansion:humanoid_appearance`. Registered with `ALWAYS_COPY` for respawn. |
+| `HumanoidSubject` | Nonplayer contract: get/set profile and expose a revision. |
+| `BaseNpcEntity` | Base character is stored separately from its outfit-composed presentation. |
+| `HumanoidAppearanceAccess` | Uniform player/subject reads and internal direct assignment. |
+| `HumanoidAppearanceService` | Server player sanitisation, origin resolution, unlock/paint validation and creation-stage commits. |
+| `HumanoidPartCatalogRegistry` | Server-authored part definitions, compatibility sanitisation and catalogue revision. |
+| `HumanoidPartAssetRegistry` | Client resource discovery; distinct from server catalogue membership. |
+| `HumanoidRenderResolver` | Resolves body, visible layers, styles, tint/paint textures and armour/trait hiding into a snapshot. |
+| `HumanoidProfileCodec` / `HumanoidProfileTracker` | Shared compact wire format for component and tracked-entity presentation. |
+
+A player's live profile, revision and creation stage synchronise to recipients; personal saved slots are included only for the owner. Component setters skip equal replacements, recalculate dimensions when needed and bump revision on accepted changes. Revision is a cache invalidation counter, not an authorisation token.
+
+NPC presets resolve an authored or generated base profile; the selected outfit overlays it for display. Read `getBaseHumanoidProfile()` when editing/exporting the character and `getHumanoidProfile()` when rendering. Citizen generation and NPC preset hooks are covered in [NPC assets](/en/dev/npc-assets/).
+
+Client creation editing keeps a detached working profile and up to 48 undo entries. It does not edit the live player component directly. Submission crosses a server scope merge followed by sanitisation; screen visibility alone is not the authority boundary.
+
+## Contracts
+
+### Read through the common access point
+
+`HumanoidAppearanceAccess.profileOrNull(entity)` returns no profile for unsupported entities; `profileOf(entity)` returns `HumanoidProfile.DEFAULT` instead. `revisionOf` returns 0 for unsupported entities. Player lookup takes precedence over the nonplayer subject interface.
+
+`displayName` returns an enabled character name: translated text for a selected name preset or literal text for a typed nickname. Otherwise it returns the entity's own name. It does not rename the entity itself. `buildOf` reads the same profile path.
+
+`applyProfile` directly calls the player's component setter or the subject setter. It does **not** perform server player sanitisation. For untrusted player submissions, use the scoped packet/service path. Direct component setters are appropriate only when the caller deliberately owns validation.
+
+### Validate on the server
+
+`sanitizeForPlayer` resolves the actual Origins origin, sanitises catalogue compatibility, removes locked parts, removes unknown paint references, then fills declared starting parts while character creation is incomplete. An empty catalogue is treated as unavailable data and preserves existing parts.
+
+Catalogue sanitisation checks slot, gender and origin compatibility, repairs styles, fills mandatory body/origin traits, then removes unmet companion requirements until stable. These checks do not prove client models or textures exist. Unlock checks and resource resolution remain separate stages.
+
+Creation-stage changes normally advance monotonically; explicit reset is separate. `HumanoidCreationFlow.owedScope` decides the owed step, and `OpenHumanoidCreationPacket.send` grants a scoped session before asking the client to display it. The exact scope matrix and current request-handler limitations belong in the runtime reference.
+
+### Give body size one owner
+
+`HumanoidBodyScale.of(player)` uses `height / 1.8` only when a player component has a body reference and no active morph entity. Otherwise it returns 1. Player dimensions, eye height and the outer player render scale use that policy.
+
+The player feature marks `HumanoidRigRenderState.setBodyScaleApplied(true)`; the rig renderer then skips applying body scale again. Detached/NPC rendering has its own presentation context. Do not multiply both the outer player transform and the rig by the player's height ratio.
+
+Client body rendering additionally requires the shared rig resource and yields to an active morph presentation. Server size policy does not depend on client resource availability. A missing resource can therefore affect rendering without removing the server's body reference.
+
+## Extending it
+
+### Add a channel, slot or chapter
+
+| Change | Required audit |
+| --- | --- |
+| Colour channel | Add ID/default to `HumanoidColorChannel`, expose it in `CreationChapter`, add translations and review catalogue/plugin channel bindings. |
+| Part slot | Add ID, kind, render order and armour defaults to `HumanoidSlot`; expose its chapter, update `showsOnArm` and trait mapping where relevant, and update the plugin's explicit slot list. |
+| Screen chapter | Define slots, palette channels and camera focus in `CreationChapter`; include it in allowed scopes and add custom controls where the generic slot builder is insufficient. |
+| Nonplayer subject | Implement `HumanoidSubject`, own persistence/synchronisation, and bump the reported revision when presentation changes. |
+| NPC-specific generation | Override `resolveInitialHumanoidProfile`; use `getNpcPresetId` to share a preset across entity types. |
+
+Palette NBT stores an array by channel ordinal. The wire format uses ordinal bits for palette channels and ordinals for slots. Preserve existing enum order and audit compatibility when extending it; render ordering is the slot's explicit numeric order, not its ordinal. The palette wire encoding uses an integer mask, so adding channels also requires reviewing mask capacity.
+
+The Blockbench plugin contains explicit slot/channel tables; adding an enum constant is not sufficient to update the whole authoring pipeline. Keep the Java declarations, screen exposure, exporter, language entries and data definitions aligned.
+
+Add display strings through `language_assemble`. Chapter keys use `screen.isekaiexpansion.creation.chapter.<id>` and `.hint`; part/channel/slot keys follow the authoring reference and existing language category.
+
+### Integrate a screen into creation
+
+Use `ClientHumanoidScreenSequencer.hold(screen, gate)` for screens that must wait until `AFTER_CHARACTER_BASE` or `AFTER_CHARACTER_COMPLETE`. If it returns false, the gate is already open and the caller may show the screen. A new held screen replaces the previous held screen for the same gate.
+
+Server grants are queued, and the client releases held screens and grants when no screen is active. Keep new stage decisions in `HumanoidCreationFlow`; adding a UI chapter does not by itself grant mutation authority or change stage progression.
+
+### Preserve render ownership
+
+The body supplies shared bone poses; part-specific animation is evaluated before matching body poses overwrite shared names. Shape/face changes belong in `HumanoidBoneShaper`, texture composition in `HumanoidTextureComposer`, and asset discovery in its reload listener.
+
+The render snapshot cache includes profile/revision, catalogue and asset revisions, paint revision, armour/trait masks and composed-texture generation. A new visual input needs a corresponding invalidation input. Do not keep a parallel cache that survives catalogue or resource reload without versioning it.
+
+## Verifying
+
+- Compare the same profile on its player owner, another client, an NPC and a detached preview.
+- Submit fields outside each granted scope and compare the stored profile, not only the screen preview.
+- Confirm respawn retains profile/stage/saved slots and only the owner receives saved profiles.
+- Change height, body presence and morph state; check hitbox, eye height, held items and rendered scale.
+- Reload catalogue and client assets independently; check saved profiles and render-cache invalidation.
+- For a new slot/channel, round-trip NBT and network state, check enum compatibility, then export it through the plugin.
+- Test an interrupted first-join sequence and a held screen without replacing an active screen.
+
+Names and culture selection are documented in [Naming API](/en/dev/naming/).
+
+## Related
+
+- [Humanoid saves, editor and paint runtime](/en/dev/humanoid-runtime/)
+[Preset data](/en/wiki/humanoid-presets/), [Part authoring](/en/dev/humanoid-parts/), [Blockbench plugin](/en/dev/blockbench-plugin/) and [NPC foundations](/en/dev/npc/).

@@ -1,0 +1,206 @@
+---
+title: "人形部件制作"
+description: "共享骨架、模型、目录字段、染色遮罩、附加动画与资源验证。"
+category: assets
+order: 100
+updated: 2026-09-27
+---
+
+人形部件由服务端目录条目与客户端模型、纹理共同组成。本指南说明共享骨架约定，以及让部件可选、可渲染所需的资源。
+
+## 你要做的东西
+
+为玩家与人形 NPC 制作可复用的身体、面部、头发、种族特征、服装或饰品部件。服务端目录决定身份、选择条件与兼容关系，客户端资源提供几何体和纹理。本文描述人形系统的内部约定，不是公共门面接口。
+
+## 前置要求
+
+使用共享骨架 `src/main/resources/assets/isekaiexpansion/geo/entity/humanoid/humanoid.geo.json`。槽位名称须来自[预设数据](/zh-cn/wiki/humanoid-presets/)，并同时提供模型、纹理及匹配的目录定义。仅发现纹理不会让部件自动可选或可渲染。
+
+部件采用以下标准路径：
+
+```text
+assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default.png
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default_mask.png
+assets/<namespace>/textures/entity/humanoid/<slot>/<part>/default_glowmask.png
+assets/<namespace>/animations/entity/humanoid/<slot>/<part>.animation.json
+data/<namespace>/humanoid_parts/<slot>/<part>.json
+```
+
+部件 ID 为 `<namespace>:<slot>/<part>`。模型与基础纹理必需，遮罩和附加动画可选。目录文件须位于已识别的槽位目录下，剩余路径不得为空。部件名称不能包含 `.`，这个字符留给性别网格限定符使用，含有它的目录文件会被拒绝。以 `_male` 或 `_female` 结尾的名称（例如 `underwear_top/default_male`）只是普通部件。
+
+## 步骤
+
+### 保留共享骨架
+
+复制骨架名称、父子关系与枢轴。动画锚点为 `body`、`head`、`torso`、`right_arm`、`left_arm`、`right_leg` 和 `left_leg`，制作时旋转应为零。新几何体放在对应锚点下，并使用名称唯一的内容骨骼。
+
+| 骨骼 | 父级 | 枢轴 |
+| --- | --- | --- |
+| `body` | — | `[0, 0, 0]` |
+| `head` | `body` | `[0, 24, 0]` |
+| `left_eye` | `head` | `[2, 27, -3.025]` |
+| `l_eye` | `left_eye` | `[2, 25, -4.025]` |
+| `l_eyebrow` | `left_eye` | `[2, 27.5, -4.025]` |
+| `right_eye` | `head` | `[-2, 27, -3.025]` |
+| `r_eye` | `right_eye` | `[-2, 25, -4.025]` |
+| `r_eyebrow` | `right_eye` | `[-2, 27.5, -4.025]` |
+| `hat` | `head` | `[0, 34, 0]` |
+| `torso` | `body` | `[0, 24, 0]` |
+| `oppai` | `torso` | `[1.64361, 20.03975, -1.72542]` |
+| `left_oppai` | `oppai` | `[1.94875, 20.09361, -1.85919]` |
+| `right_oppai` | `oppai` | `[-1.94875, 20.09361, -1.85919]` |
+| `cape` | `torso` | `[0, 24, 0]` |
+| `right_arm` | `body` | `[-5, 22, 0]` |
+| `main_item` | `right_arm` | `[-5.625, 14.2, -0.3]` |
+| `left_arm` | `body` | `[5, 22, 0]` |
+| `off_item` | `left_arm` | `[5.625, 14.2, -0.3]` |
+| `right_leg` | `body` | `[-1.9, 12, 0]` |
+| `right_shoe` | `right_leg` | `[-1.9, 12, 0]` |
+| `left_leg` | `body` | `[1.9, 12, 0]` |
+| `left_shoe` | `left_leg` | `[1.9, 12, 0]` |
+
+模板中的 `main_item` 和 `off_item` 带有 `[90, 0, 0]` 旋转。玩家手持物品定位读取其枢轴偏移，不读取该旋转。导出几何体时应去掉物品代理。眼睛、眉毛及 `left_oppai`、`right_oppai` 骨骼接受面部和胸部调整；穿戴胸甲会隐藏胸部特征骨骼。
+
+Blockbench 验证器检查名称、唯一根骨骼、必需锚点及锚点旋转，**不会逐项比对本表中的枢轴和父级**。因此，验证通过并不代表几何对齐正确。
+
+### 声明并导出几何体
+
+将声明骨骼命名为槽位名，例如 `hair`，部件 ID 便取自文档名称；或命名为 `hair_long_wavy`，声明 `hair/long_wavy`。骨架自有骨骼不声明部件，因此身体声明使用 `body_<part>`。多个根如 `outfit_top_robe__torso` 和 `outfit_top_robe__sleeve` 会合并成同一部件。
+
+声明骨骼拥有整个子树，嵌套的类似槽位名称不会另起部件。通过插件的模板属性标记参考几何体；它在编辑器中保持可见，但不进入部件几何体和纹理覆盖范围。共享身体与预设的组织方式见 [NPC 资源](/zh-cn/dev/npc-assets/)。
+
+### 提供样式、遮罩与发光纹理
+
+纹理目录直属的 PNG 文件会被发现为样式，名称以 `_mask` 或 `_glowmask` 结尾的文件除外。子目录被忽略。提供 `default.png` 作为渲染回退。目录中的 `styles` 列表与资源发现分开处理：磁盘上出现文件不会自动增加图库选项。
+
+可选的 `<part>.male.geo.json` 与 `<part>.female.geo.json` 是同一部件的性别网格：两者共用部件 ID 和纹理，渲染器按穿戴者的性别选用其一。缺少基础模型时，先将男性模型作为基础，否则使用女性模型。请求的性别变体缺失时使用该基础模型，因此可能显示另一性别的模型。
+
+**当前命名空间限制**：客户端资源注册表按小写的相对部件路径索引，不包含命名空间；纹理发现也跨命名空间搜索同一目录。两个包使用相同 `<slot>/<part>` 时可能冲突。已安装包之间应保持该路径唯一；目录标识符本身仍保留命名空间。
+
+染色遮罩的 RGB 是权重，alpha 是覆盖强度。`HumanoidTextureComposer` 将遮罩采样到原图尺寸，将未绑定配色通道的权重置零，总权重大于 1 时归一化，以白色补足未覆盖权重，再应用遮罩 alpha 并乘到原图 RGB 上。原图 alpha 保持不变。黑色或透明遮罩保留原始颜色；白色遮罩混合所有已绑定通道，并非只选红色绑定。
+
+绘制覆盖在染色后混合，不能使完全透明的原图像素变为可见。没有可读遮罩就不染色。发光纹理是独立的自发光纹理，在非身体部件几何体上以全亮直接绘制；它不是单通道亮度遮罩，也不经过配色合成器。绘制通道禁止发光或采用部分透明度时，不执行该发光层。
+
+### 制作附加骨骼动画
+
+将动画片段放入上述动画路径。资源发现识别 `idle` 和 `run`，优先使用完全相同的键，然后匹配忽略大小写的同名键，或以 `.idle`、`_idle`、`.run`、`_run` 结尾的键。文件不可读时记录警告，不提供附加动画。
+
+实体正在疾跑且存在 `run` 时，部件控制器使用该片段；否则使用 `idle`，缺少 idle 时再回退到 `run`。该判断不依赖移动速度。片段循环播放，并使用由实体身份决定的相位偏移。
+
+部件动画先运行，随后按骨骼名称同步身体姿势。因此应动画化自定义内容骨骼：身体拥有的骨骼之后会收到主姿势。导出器从部件动画中去掉骨架自有骨骼通道，并丢弃没有剩余通道的片段。
+
+## 声明它
+
+对于 `hair/long_wavy`，在 `data/<namespace>/humanoid_parts/hair/long_wavy.json` 写入目录条目：
+
+```json
+{
+  "gender": "female",
+  "styles": ["default"],
+  "channels": {
+    "r": "hair_base",
+    "g": "hair_tip"
+  },
+  "sort": 1000
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `slot` | `string` | `folder slot` | 可选断言，必须与路径首段相同；未知或不匹配的槽位导致文件失败。 |
+| `enabled` | `boolean` | `true` | false 在验证槽位后跳过该条目。 |
+| `styles` | `array<string>` | `[default]` | 去除首尾空格并转为小写，按顺序去重；空列表恢复 `default`。首个样式作为目录回退值。 |
+| `channels` | `object` | `by slot kind` | 显式对象替换全部默认通道绑定；缺失的成员不绑定。 |
+| `channels.r` | `palette channel` | `unbound` | 遮罩红色权重；未知通道不绑定。 |
+| `channels.g` | `palette channel` | `unbound` | 遮罩绿色权重；未知通道不绑定。 |
+| `channels.b` | `palette channel` | `unbound` | 遮罩蓝色权重；未知通道不绑定。 |
+| `gender` | `enum(male, female)` | `unisex` | 部件面向的性别。生成的 NPC 只会抽到自己性别或通用的部件，除非没有适合的身体；玩家仍可自由选择。其他值会让文件失败。 |
+| `gender_locked` | `boolean` | `false` | 为 `true` 时，部件还被限制在 `gender` 所写的性别：另一性别的角色既不能选择，也不能保留它。缺少 `gender` 时文件失败。 |
+| `chain` | `string` | `none` | 部件链 ID，由跨槽位作为一件衣物穿戴的部件共用；不带命名空间时取部件自身的命名空间。无法解析的 ID 会让文件失败。部件链规则见下文。 |
+| `origins` | `array<identifier>` | `[]` | 允许的种族；空列表允许全部。无效 ID 被丢弃，因此全部无效的列表等同于不限制。 |
+| `suppressed_by` | `array<string>` | `slot defaults` | 装备槽位；识别 `head`、`chest`、`legs`、`feet`、`mainhand`、`offhand`，渲染只检查护甲。空列表或全部无效时恢复槽位默认值。 |
+| `unlock` | `object` | `always` | 共享解锁规则，完整字段见预设参考。 |
+| `sort` | `integer` | `1000` | 升序排列，再按完整部件 ID 排序。 |
+| `tags` | `array<string>` | `[]` | 去除首尾空格并转为小写、去重。市民生成时优先选用与市民身份共享标签的部件；性别由 `gender` 表示，不再写进标签。每项网络限制为 48 个字符。 |
+| `hides_slots` | `array<string>` | `[]` | 引用该部件时隐藏的槽位。忽略未知值；隐藏计算先于该部件自身的可见性和资源检查。 |
+| `default_for` | `string` | `none` | `any`（别名 `both`、`true`）、`male`、`female`；未知值为 `none`。自动补充还要求 `always` 解锁、匹配的种族，以及对 `gender_locked` 部件而言被锁定的性别。 |
+| `requires` | `object` | `{}` | 所有指定槽位条件须同时满足；反复移除不满足依赖的部件，直到稳定。 |
+| `requires.<slot>` | `identifier / array<identifier> / null` | `absent` | 字符串或列表限定该槽位允许的部件 ID。空列表、null 或全无效 ID 仅要求存在非空引用。未知槽位导致文件失败。 |
+
+解锁字段与全部配色通道 ID 见[预设数据](/zh-cn/wiki/humanoid-presets/)，本目录共用这些格式。玩家选择会检查解锁条件；NPC 手工指定的外观仍可引用锁定部件。
+
+显示名称使用 `humanoid_part.<namespace>.<path-with-dots>`，样式名称追加 `.style.<style>`。在 `language_assemble/categories/humanoid/` 添加两种语言，再运行 `./gradlew.bat assembleLanguageFiles`。翻译源应保留在语言组装输入中。[Blockbench 插件](/zh-cn/dev/blockbench-plugin/)只生成起始目录条目，不生成显示名称翻译。
+
+### 默认染色绑定
+
+| 槽位类别 | 红 | 绿 | 蓝 |
+| --- | --- | --- | --- |
+| `body` | `skin` | `blush` | `lip` |
+| `hair` | `hair_base` | `hair_tip` | — |
+| `trait` | `trait_primary` | `trait_secondary` | — |
+| `outfit` | `outfit_primary` | `outfit_secondary` | `outfit_accent` |
+| `underwear` | `underwear_primary` | `underwear_secondary` | — |
+| `accessory` | `accessory_primary` | `accessory_secondary` | `accessory_accent` |
+| `face (face, eyes, eyebrows, facial_hair)` | — | — | — |
+
+所有面部类别槽位默认都不绑定通道，包括眼睛、眉毛和胡须。插件会为这些具体槽位显式写入常用通道，手写文件也需自行声明。例如，眼睛通常将红绑定为 `eye_left`、绿绑定为 `eye_right`、蓝绑定为 `eye_sclera`。
+
+### 可见性与兼容关系
+
+默认护甲遮挡规则如下：胸部装备隐藏 `outfit_top` 与 `gloves`，腿部装备隐藏 `outfit_bottom`，脚部装备隐藏 `socks` 与 `shoes`，头部装备隐藏 `head_accessory`。其他槽位没有默认遮挡。显式空列表不能关闭这些默认规则。
+
+`hides_slots` 在检查渲染资格前，从全部已引用的目录条目中收集。即使部件缺少模型、样式不可用或被护甲遮挡，它仍可能隐藏其他槽位。不能假定被隐藏的部件就失去隐藏作用。
+
+`requires` 对各槽位取 AND，对同一槽位内允许的 ID 取 OR。它检查引用，不检查实际可见性。空或 null 的 ID 集合表示任意非空引用；无效 ID 可能悄悄将条件放宽到这一形式。不满足依赖的部件会被反复移除，因此去掉基础部件可能连带移除多个依赖层。
+
+已保存引用的样式不在目录中时，验证流程将其替换为首个声明样式。另外，渲染器找不到纹理样式时回退到 `default`，两者都没有则跳过该部件。这是不同阶段的回退。
+
+只写 `gender`、不写 `gender_locked` 时，它只是对部件的描述。角色界面列出角色能穿戴的全部部件：先列出面向该角色性别或通用的部件，再列出其余部件，各组内部保持目录顺序。
+
+### 部件链
+
+共用同一 `chain` ID 的部件是分布在多个槽位上的同一件衣物。每个成员在渲染、护甲遮挡和 `hides_slots` 上仍按自己的槽位处理，所以隐藏一个槽位只会隐藏对应的成员。自带的男性内裤就是两个链在一起的部件：
+
+```json
+{
+  "gender": "male",
+  "gender_locked": true,
+  "chain": "default_male_underwear",
+  "default_for": "male",
+  "sort": 0,
+  "tags": ["base"]
+}
+```
+
+同一份内容分别放在 `humanoid_parts/underwear_top/default_male.json` 和 `humanoid_parts/underwear_bottom/default_male.json`，组成部件链 `isekaiexpansion:default_male_underwear`。
+
+- **穿戴**：在角色界面、生成的 NPC 或 NPC 服装中穿上任意成员，都会穿上全部成员。已穿着的成员保留自己的样式和绘制；被挤出成员槽位的部件会连同它所在的部件链一起卸下。
+- **移除或替换**：移除或替换任意成员，其他成员随之卸下。NPC 服装里对一个成员写 `none` 会清空整条链。
+- **验证**：部件链只穿了一部分时，如果每个缺少成员的槽位都为空、角色也能穿戴该成员，验证流程会补齐整条链；否则卸下已穿的成员。成员因 `requires` 不满足而被移除时，整条链随之移除，此后不会再补齐。
+
+目录加载时，一条部件链至少要有两个成员，同一槽位不能有两个成员，所有成员的性别锁定、`origins` 与 `unlock` 必须相同。违反任一规则的部件链会被解散并记录警告，其部件按普通部件加载。
+
+### 失败与重载行为
+
+未知根字段被忽略。错误的槽位路径、含 `.` 的部件名称、冲突的 `slot`、未知的 `gender`、没有 `gender` 的 `gender_locked`、无法解析的 `chain`、错误 JSON 结构或未知的依赖槽位会导致整个定义失败，并记录逐文件错误。成功定义替换目录；无效定义不保留上一版本。
+
+目录会将样式转为小写并去除首尾空格，但不会在此执行部件引用所用的更严格字符验证。样式应只用 `a-z`、`0-9`、`_` 和 `-`，最多 64 个字符；标签须在 48 个字符以内。这些是网络限制，不是目录解析器的长度检查。
+
+客户端资源重载会重建已发现资源并使渲染策略失效。服务端数据包重载成功后重新发送目录，并验证玩家已保存的外观。同时修改声明与图像时，两侧都需要重载。
+
+## 检查清单
+
+- 对照模板检查骨架枢轴与父级，再执行插件约定检查。
+- 检查导出模型是否包含参考方块、手持物品代理或重复的基础几何体。
+- 确认目录 ID、槽位路径、模型路径与纹理目录一致。
+- 测试全部声明样式、两种性别网格及 `default` 纹理回退。
+- 穿戴、替换和移除部件链的每个成员，再切换性别，并检查两种性别的生成 NPC。
+- 分别调整各绑定颜色，测试黑色遮罩区域、混合 RGB 权重与透明原图。
+- 测试护甲遮挡、`hides_slots`、依赖部件、种族筛选和解锁失败。
+- 检查待机、疾跑、第一人称手臂及使用同一部件的 NPC。
+- 重载服务端数据与客户端资源，检查日志和已保存角色。
+
+## 相关页面
+
+[预设数据](/zh-cn/wiki/humanoid-presets/)与 [NPC 资源](/zh-cn/dev/npc-assets/)。

@@ -1,0 +1,159 @@
+---
+title: "Dialogue camera and terrain fading"
+description: "Session-owned shoulder framing, actor facing, movement claims and nearby-terrain shader coverage."
+category: client
+order: 75
+updated: 2026-09-19
+---
+
+Dialogue camera follows a player and speaker with a shoulder shot, searching up to 32 candidate positions when it reevaluates the view. Session and entity identity checks keep the camera tied to the current conversation, while a separate terrain shader patch fades geometry close to any scripted camera.
+
+## What it does
+
+The implementation lives under `client.camera.compat` and `client.camera.fade`; these are internal integration types, not public API facades. The Blabber bridge starts `isekaiexpansion:dialogue_humanoid` for ordinary and parent conversations and forwards close events with the current session ID. Parent starts also claim the dialogue entity. This checkout pins third-party Blabber to `0.5.1-build32`; the hooks described here are the mod's own bridge.
+
+The camera uses the loaded animation as an offset from a following dialogue anchor, with `YawAlign.NONE` and dialogue playback options. It holds the final animation pose, blends in over 5 ticks (0.25 seconds), keeps the HUD and dialogue input available, and restores the saved perspective when its owned camera stops. The bundled animation is a neutral pose; the rig supplies the shot composition and FOV.
+
+## Runtime model
+
+| Stage | Ownership and checks |
+| --- | --- |
+| Server start | Sends session UUID, animation ID, player entity ID/UUID and speaker entity ID/UUID; a null session ID sends nothing |
+| Client admission | Requires a world and local player, matching local player UUID and no active/pending full cinematic |
+| Tracking wait | Up to 40 end-tick attempts (2 seconds at 20 ticks/second); both entity IDs must resolve to the expected UUIDs |
+| Rig | Holds the original entity objects and client world, samples interpolated eyes/position and updates framing each tick |
+| Stop | Matching session UUID, or a null wildcard, arms a countdown of 2; an end tick that begins at zero clears the session |
+| Clear | Releases the dialogue movement claim and stops the camera only if its anchor still owns this exact rig |
+
+The tracking retry allowance is not a guaranteed wait duration. Before any Blabber dialogue handler is observed, more than 10 missing-screen ticks clear the request; after one was observed, more than 2 missing-screen ticks do so. These checks can end a request before its 40 tracking attempts are used.
+
+A new request with the same animation and actor UUIDs can reuse an already owned, valid rig; it updates the session token and cancels pending stop. This avoids restarting the shot when moving between conversation screens. Otherwise the old dialogue state is cleared before a new request is installed.
+
+The session clears on disconnect, world identity change, local-player death, full cinematic takeover, invalid actors or loss of camera ownership. Rig validity requires two distinct, alive, non-removed entities in the current client world, separated by at most 24 blocks. Cleanup checks the active anchor's rig identity, so it does not stop an unrelated replacement camera. Calls into the camera controller still share the lifecycle constraints described in [Camera Scene API](/en/dev/camera-api/).
+
+### Framing and search
+
+These values come from `DialogueCameraSettings.defaults()`, not user config:
+
+| Setting | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `distance` | `number` | `2.55` | Base shoulder distance in blocks, scaled by the larger actor eye height divided by 1.62. |
+| `minDistance` | `number` | `1.25` | Minimum candidate distance in blocks. |
+| `maxDistance` | `number` | `6` | Maximum ideal distance in blocks. |
+| `clearance` | `number` | `0.22` | Half-extent of the camera collision test box, in blocks. |
+| `followWeight` | `number` | `0.35` | Per-tick interpolation weight for position and speaker screen-X. |
+| `sideHysteresis` | `number` | `1.5` | Additional score cost when testing a different angle. |
+| `verticalFov` | `number` | `35` | Base vertical FOV in degrees, widened for narrow windows. |
+| `speakerScreenX` | `number` | `0.60` | Normalised speaker-eye X, mirrored to 0.40 on the opposite shoulder. |
+| `eyeScreenY` | `number` | `0.34` | Normalised eye Y measured from the top of the screen. |
+
+The pivot is at the player's eye X/Z and one quarter of the vertical difference towards the speaker's eyes. The horizontal player-to-speaker axis updates when squared horizontal separation exceeds 0.04; nearly coincident actors retain the prior axis, with player yaw used at initial construction when necessary.
+
+The search runs initially, every 4 update ticks (0.2 seconds) or immediately when the desired camera box is obstructed. It tests angles 135, −135, 120, −120, 150, −150, 165 and −165 degrees, with distance factors 1, 0.8, 0.6 and 0.4 of the ideal distance, each bounded by the minimum.
+
+Lower score wins. The current candidate is retained unless an alternative improves its score after the angle-change penalty:
+
+| Score term | Cost |
+| --- | --- |
+| Distance from ideal | Absolute distance difference ×2 |
+| Angle from the preferred shoulder | Absolute difference from 135 degrees in angle magnitude, divided by 20 |
+| Foreground player's eye position | Screen-X error ×12, targeting 0.24 or 0.76; screen-Y error ×8 |
+| Player eye behind camera | +40 |
+| Player head top above screen Y 0.04 | Excess ×30 |
+| Camera collision box obstructed | +100 |
+| Speaker eye ray obstructed | +25 |
+| Camera within squared distance 0.64 of either eye | +20 |
+| Player bounding box expanded by 0.1 intersects the speaker sightline | +35 |
+| Different candidate angle | +1.5 |
+
+Collision uses a box-space test; visibility uses visual block shapes with fluids ignored. Penalties are finite, so a fully blocked room can still produce a blocked winning shot. This is a bounded best-candidate search, not a visibility guarantee or a pathfinder.
+
+Position and screen-X approach their targets with weight 0.35. A position jump whose squared distance exceeds 36 snaps both interpolation endpoints. If the smoothed position is obstructed, the rig uses the desired position; it does not sweep the path between them. Focus uses interpolated speaker eyes, and composition keeps zero roll.
+
+Narrow-window FOV is computed from the half-angle tangent: multiply by `max(1, (16 / 9) / max(0.5, aspect))`, convert back to degrees and cap at 90. The window's framebuffer aspect drives this calculation without changing the user's gameplay FOV option.
+
+## Contracts
+
+### Facing and input
+
+The dialogue session takes a `PlayerLocomotionOverride.Source.DIALOGUE` claim at the start of each client tick while it owns a valid rig. Claim priority is `COMPULSION < DIALOGUE < CINEMATIC`. The winning hold clears forward/sideways input, jumping and sneaking. Horizontal drift is removed, but vertical velocity is retained, so starting a conversation does not suspend a falling player.
+
+Mouse look deltas become zero while the dialogue owns the player. Dialogue ownership alone does not activate the full cinematic mouse-button/scroll lock; the conversation screen can still receive input. Player facing is applied after the inherited client-player tick. Server mob facing runs at the tail of the mob tick, after checking the tracked dialogue player and active session target.
+
+| Facing rule | Value |
+| --- | --- |
+| Yaw approach | 0.4 of remaining wrapped error, capped at 18 degrees per call |
+| Body approach | Same approach rule, capped at 12 degrees |
+| Head offset | Clamped to the shared 75-degree body-relative bound |
+| Pitch | 0.4 of remaining error, step limited to ±12 degrees, final range −85–85 degrees |
+| Look control | Requests yaw/pitch limits of 18/12 degrees |
+
+Facing requires distinct, living, present actors in the same world; the actor must not be sleeping. Server mob facing yields to combat when there is a target, an attacking flag, an attack-target brain memory or a non-idle NPC combat phase. It also yields when the dialogue player's team/viewer lookup reports a server cinematic. This rotates entities through their existing pose fields, without installing a separate body animation.
+
+### Nearby terrain fading
+
+`CameraMixin` advances `CameraBlockFade` whenever the camera is updated, using whether the controller returned a scripted pose. This includes dialogue, camera-API and full cinematic poses, even when blend weight is still zero. A pending request with no pose does not itself enable fading.
+
+| Envelope value | Behaviour |
+| --- | --- |
+| Near distance | 0.35 blocks |
+| Far distance | 1.8 blocks |
+| Entry time constant | 0.14 seconds |
+| Exit time constant | 0.2 seconds |
+| Maximum frame elapsed | 0.1 seconds |
+| Snap tolerance | 0.001 from the target strength |
+
+The exponential envelope approaches strength 1 while a scripted pose exists and 0 otherwise. World changes reset it, and disconnect resets its stored world/time/strength. This changes rendering only; it does not edit blocks, collision or chunk meshes.
+
+The injected fragment function reconstructs view-space position from fragment coordinates, viewport and inverse projection. Coverage is `smoothstep(near, far, distance)`; opacity interpolates from 1 to coverage using the envelope strength. A stable screen-space noise threshold discards fragments according to opacity. At full strength, geometry inside the near distance disappears, geometry past the far distance remains and the intermediate band is dithered. This is not alpha blending.
+
+### Renderer routes and limits
+
+| Route | Patched surface |
+| --- | --- |
+| Vanilla | Fragment programs named `rendertype_solid`, `rendertype_cutout`, `rendertype_cutout_mipped`, `rendertype_translucent` and `rendertype_tripwire`, with an optional namespace prefix |
+| Sodium | Source `sodium:blocks/block_layer_opaque.fsh`; uniforms upload when its GL program binds |
+| Iris with Sodium terrain pipeline | Returned main-view solid, cutout and translucent fragment sources; shadow getters are not patched |
+
+Sodium and Iris mixins are gated on their respective mod IDs. These are the hooks implemented in this checkout, not a guarantee that every external renderer or shaderpack accepts the resulting program.
+
+The patch masks comments before finding the first `void main()` or `void main(void)`, inserts declarations before it and calls the discard function at the start. It leaves the source unchanged when the marker `iseCameraFadeStrength` already occurs anywhere, when no matching main exists or when uncommented source contains `early_fragment_tests`. The marker check includes comments; even a comment containing it prevents injection.
+
+Uniform locations belong to each linked program wrapper. Upload does nothing when the strength uniform is absent; at zero weight it uploads only strength. Active upload reads the current projection and GL viewport. Terrain routes do not cover arbitrary entity, block-entity, particle or custom shader programs, and the patch does not modify Iris shadow sources. Material hidden in the main view can therefore still cast a shadow.
+
+## Extending it
+
+Use the existing Blabber start/close hooks for ordinary dialogue. For an internal alternative animation, the server-side call requires an actual active dialogue session and its speaker:
+
+```java
+void sendDialogueShot(ServerPlayerEntity player, Entity speaker) {
+    var session = Blabber.getActiveDialogueSession(player).orElse(null);
+    if (session != null) {
+        DialogueCameraNetworking.sendStart(
+                player, session.sessionId(),
+                new Identifier("isekaiexpansion", "dialogue_humanoid"),
+                player, speaker
+        );
+    }
+}
+```
+
+Run that on the server thread and keep the client-only rig classes out of server initialisation. The receiving client resolves entities and animation later; sending has no playback acknowledgement. Use a matching session token to close a particular conversation; null is explicitly a wildcard.
+
+The rig constructs its own default settings, so changing framing currently means changing implementation defaults or adding an explicit settings path. A new framing rule should use the same composition/projection helpers for scoring and final output. A new renderer bridge must patch only the intended fragment route and upload uniforms for that linked program; do not reuse uniform locations across programs.
+
+## Verifying
+
+- Open ordinary and parent conversations, then move between them with the same actors. Check that the rig persists and a stale stop token cannot close the new session.
+- Delay speaker tracking, reuse an entity ID with a different UUID and close the screen before the retry budget expires. Confirm cleanup and the missing-screen thresholds.
+- Test a short and tall speaker, near-coincident actors, narrow and wide windows, walls, corners and a fully blocked room. Check both shoulder choices and the FOV cap.
+- Start while moving or falling, close the dialogue, enter combat and start a full cinematic. Confirm horizontal hold, vertical motion and rotation ownership.
+- Replace the dialogue camera with another camera, then deliver the old close event. Confirm only the dialogue movement claim is released.
+- Check fade entry/exit, dimension changes and resource reload on vanilla, Sodium and Iris separately. Include shadowed terrain and a shader containing `early_fragment_tests`; unchanged output is expected for the skipped patch.
+- These checks describe expected source behaviour. They do not certify visual output or compatibility with an untested shaderpack.
+
+## Related
+
+- [Camera Scene API](/en/dev/camera-api/) — playback options, anchors and controller lifecycle.
+- [Cinematic scene runtime](/en/dev/cinematic-scenes/) — full-scene takeover and actor control.
+- [Dialogue UI](/en/dev/dialogue-ui/) and [NPC dialogue](/en/dev/npc-dialogue/) — screen and server conversation ownership.

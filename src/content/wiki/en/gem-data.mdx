@@ -1,0 +1,296 @@
+---
+title: "Gem data"
+description: "Define gem rolls, sockets, difficulty scaling, curses and consumables with their validation and reload rules."
+category: data
+order: 60
+updated: 2026-09-18
+---
+
+Gem resources control which bonuses can be rolled and where they fit. The server loads all gem families as one snapshot: an invalid resource keeps the previous snapshot active.
+
+## Where the files live
+
+Except global settings, these paths are relative to `data/<namespace>/`; any namespace can contribute definitions. Global settings are read only from `data/isekaiexpansion/gem_system/settings.json`.
+
+```text
+gem_system/settings.json
+gem_attributes/random_roll/*.json
+gem_attributes/fixed_attributes/*.json
+gem_attributes/element_attributes/*.json
+gem_attributes/skill_attributes/*.json
+socket_profiles/*.json
+curses/*.json
+gem_consumables/*.json
+```
+
+Each file contains one object. A higher-priority pack replaces a resource with the same namespaced path; definitions at different paths are still checked for duplicate IDs, attributes and item ownership. Global settings use the highest resource, not a field-by-field merge. A socket profile's ID is its namespaced path below `socket_profiles/`, without `.json`.
+
+## Minimal example
+
+Save this as `data/example/socket_profiles/iron_sword.json`. It gives an iron sword an unlocked attribute socket and outranks the bundled melee profile. The explicit priority prevents the example being hidden by that existing profile; it is optional to the parser.
+
+```json
+{
+  "priority": 120,
+  "match": {
+    "items": [
+      "minecraft:iron_sword"
+    ]
+  },
+  "sockets": [
+    {
+      "kind": "ATTRIBUTE",
+      "min_item_level": 0
+    }
+  ]
+}
+```
+
+## Fields
+
+Use actual JSON numbers and booleans. Missing required fields or numeric conversion failures reject the reload. Unknown fields are ignored except the explicitly removed keys under Validation. The table calls out intentional fallbacks for wrong container types.
+
+### Global settings
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `random_roll_count` | `array<object>` | `[{count:1,weight:80},{count:2,weight:17},{count:3,weight:3}]` | Weighted line counts. Missing, non-array, empty or all-zero-weight lists use this fallback. |
+| `random_roll_count[].count` | `integer` | `1` | Positive line count; cannot exceed the number of distinct eligible attributes actually available. |
+| `random_roll_count[].weight` | `integer` | `0` | Non-negative; zero entries are removed. |
+| `random_requirement_roll` | `object` | `{}` | Controls whether a random gem receives an equipment restriction. |
+| `random_requirement_roll.base_chance` | `number` | `0.42` | Finite probability 0–1; used outside a difficulty context and for missing difficulty overrides. |
+| `random_requirement_roll.dungeon_difficulty_chances` | `object` | `{}` | Difficulty-to-probability map, finite 0–1. Keys: common, uncommon, rare, epic, legendary, unique. |
+| `random_requirement_pool` | `array<object>` | `[]` | Restriction candidates. Empty means no restriction can be rolled. |
+| `random_requirement_pool[].id` | `identifier` | required | Unique restriction ID; stored on the gem and used for its translation key. |
+| `random_requirement_pool[].weight` | `integer` | `1` | Non-negative default weight. At least this or a difficulty override must be positive. |
+| `random_requirement_pool[].dungeon_difficulty_weights` | `object` | `{}` | Same difficulty keys; exact non-negative integer weights override the default. |
+| `random_requirement_pool[].match` | `object` | required | At least one constraint is required; all populated groups must match. |
+| `random_requirement_pool[].match.items` | `array<item id>` | `[]` | Any listed item; IDs are syntax-checked, not required to exist in the item registry. |
+| `random_requirement_pool[].match.all_tags` | `array<tag id>` | `[]` | Every listed item tag must match; leading # is accepted but not required. |
+| `random_requirement_pool[].match.any_tags` | `array<tag id>` | `[]` | At least one listed tag must match. |
+| `random_requirement_pool[].match.weapon_types` | `array<string>` | `[]` | At least one resolved weapon type; see the complete list below. |
+| `random_requirement_pool[].match.nbt` | `array<object>` | `[]` | Every NBT predicate must match. |
+| `random_requirement_pool[].match.nbt[].path` | `string` | required | Nonblank dot-separated compound keys; empty segments and list indexing are unsupported. |
+| `random_requirement_pool[].match.nbt[].regex` | `string` | required | Valid nonblank regular expression, at most 512 characters. Matches the complete value string; input over 4096 characters never matches. |
+| `insert` | `object` | `{}` | Insertion settings; non-object uses defaults. |
+| `insert.base_success` | `number` | `0.85` | Finite 0–1, no greater than success_cap. |
+| `insert.success_cap` | `number` | `0.95` | Finite 0–1 maximum insertion probability. |
+| `insert.crack_chance_on_fail` | `number` | `0.2` | Finite 0–1 probability, rolled only after insertion fails. |
+| `insert.fatigue` | `object` | `{}` | Equipment-wide insertion strain; non-object uses defaults. |
+| `insert.fatigue.max` | `integer` | `10` | Non-negative stored strain cap. |
+| `insert.fatigue.on_fail_add` | `integer` | `1` | Non-negative strain added on a valid failed attempt. |
+| `insert.fatigue.on_success_change` | `integer` | `-2` | Non-positive strain change on success; resulting strain clamps to 0–max. |
+| `insert.fatigue.success_bonus_curve` | `object` | `{}` | Non-object uses defaults. |
+| `insert.fatigue.success_bonus_curve.type` | `enum(LINEAR)` | `LINEAR` | Trimmed and case-insensitive; other curves reject the reload. |
+| `insert.fatigue.success_bonus_curve.per_fatigue` | `number` | `0.06` | Finite non-negative probability added per strain point. |
+
+### Random and fixed attributes
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `attribute` | `identifier` | required | Random definition: registered attribute ID; unique across random definitions. |
+| `domain` | `enum(BASE, OFFENSE, DEFENSE, UTILITY, RESOURCE)` | required | Stat group for random and fixed definitions. |
+| `weight` | `number` | `1` | Random definition only: finite positive sampling weight. |
+| `damage_categories` | `array<enum(MELEE, RANGE, MAGIC)>` | `[]` | Random, fixed and element definitions: missing, null or empty allows all categories. |
+| `operations` | `array<object>` | required | Random definition: nonempty list; each operation name may occur only once. |
+| `operations[].name` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | required | Attribute operation; trimmed and case-insensitive. |
+| `operations[].min` | `number` | required | Finite minimum rolled value. |
+| `operations[].max` | `number` | required | Finite maximum, at least min. |
+| `operations[].format` | `object` | `{decimals:2}` | Rounding format below; an integer shorthand is also accepted. |
+| `operations[].difficulty_scaling` | `object` | `{}` | Optional multiplier formulas described below; a formula string is also accepted. |
+| `id` | `identifier` | required | Fixed, element, skill, curse and consumable definitions: unique within that definition family. |
+| `item` | `item id` | required | Fixed, element, skill and consumable definitions: registered item; unique within that family. A fixed/element/skill item cannot belong to another of those gem families. |
+| `modifiers` | `array<object>` | required | Fixed definition: nonempty modifier list. |
+| `modifiers[].attribute` | `identifier` | required | Registered attribute, unique within this fixed gem. |
+| `modifiers[].operations` | `array<object>` | required | Nonempty list; operation names cannot repeat for this attribute. |
+| `modifiers[].operations[].name` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | required | Same operation names as random rolls. |
+| `modifiers[].operations[].value` | `number` | required | Finite fixed value, rounded by format. |
+| `modifiers[].operations[].format` | `object` | `{decimals:2}` | Same rounding format. |
+| `modifiers[].operations[].difficulty_scaling` | `object` | `{}` | Same difficulty scaling format. |
+
+### Value formatting and difficulty scaling
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format.decimals` | `integer` | `2` | 0–6 decimal places; values are rounded, not merely displayed with fewer digits. |
+| `difficulty_scaling.formula` | `string` | `absent` | Fallback multiplier formula. |
+| `difficulty_scaling.default` | `string` | `absent` | Overrides formula as the fallback. |
+| `difficulty_scaling.formulas` | `object` | `{}` | Map of band names to formula strings; overrides earlier fallback keys. |
+| `difficulty_scaling.<band>` | `string` | `absent` | Top-level formula keys override formulas. Runtime bands: common, default, dangerous, mythic. |
+| `difficulty_scaling.min_multiplier` | `number` | `0` | Finite non-negative lower bound; min is an alias. |
+| `difficulty_scaling.min` | `number` | `0` | Used only when min_multiplier is absent. |
+| `difficulty_scaling.max_multiplier` | `number` | `1.7976931348623157E308` | Finite upper bound, at least the lower bound; max is an alias. |
+| `difficulty_scaling.max` | `number` | `1.7976931348623157E308` | Used only when max_multiplier is absent. |
+
+### Element and skill gems
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `school` | `identifier` | required | Element only: registered spell school. Full ID or case-insensitive school path resolves. |
+| `trigger` | `enum(MELEE_HIT, RANGED_HIT, MAGIC_HIT, ON_HURT, ON_KILL, TRIGGERABLE)` | required | Element and skill definitions. TRIGGERABLE is skill-only and requires proc.chance 1. |
+| `proc` | `object` | required | Trigger probability and per-socket cooldown. |
+| `proc.chance` | `number` | required | Finite 0–1 probability. |
+| `proc.cooldown_ticks` | `integer` | required | Non-negative ticks; 20 ticks = 1 second. |
+| `damage` | `object` | required | Element only: uniformly rolled damage range. |
+| `damage.min` | `number` | required | Finite non-negative minimum. |
+| `damage.max` | `number` | required | Finite maximum, at least damage.min. |
+| `damage.format` | `object` | `{decimals:2}` | Same rounding format. |
+| `skill` | `identifier` | required | Skill only: an already registered triggerable skill. |
+| `cost` | `object` | `{}` | Skill only; missing or non-object means no energy cost. |
+| `cost.energy` | `integer` | `0` | Non-negative astral energy cost. |
+| `scaling` | `object` | `absent` | Skill-level scaling; missing or non-object disables it. |
+| `scaling.chance_add` | `number` | `0` | Finite probability added per non-negative skill level, then clamped 0–1; ignored for manual activation. |
+| `scaling.cooldown_mult` | `number` | `0` | Finite non-negative reduction per skill level: round(base cooldown × max(0, 1 − value × level)). |
+
+### Socket profiles
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `priority` | `integer` | `0` | Higher first; ties use ascending namespaced profile ID. |
+| `match` | `object` | `{}` | All populated groups combine with AND. Missing or non-object matches everything. |
+| `match.items` | `array<item id>` | `[]` | Restrict to listed item IDs. |
+| `match.all_tags` | `array<tag id>` | `[]` | Require every tag. |
+| `match.any_tags` | `array<tag id>` | `[]` | Require at least one tag. |
+| `match.deny_items` | `array<item id>` | `[]` | Reject listed items before positive checks. |
+| `match.deny_tags` | `array<tag id>` | `[]` | Reject if any listed tag matches. |
+| `sockets` | `array<object>` | `[]` | Ordered socket slots. Missing or non-array produces no sockets. |
+| `sockets[].kind` | `enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)` | required | Accepted gem family; mutable item state can override the kind. |
+| `sockets[].domains` | `array<enum(BASE, OFFENSE, DEFENSE, UTILITY, RESOURCE)>` | `[]` | Random/fixed restrictions; missing, null or empty permits all. |
+| `sockets[].damage_categories` | `array<enum(MELEE, RANGE, MAGIC)>` | `[]` | Random/fixed/element definitions need at least one overlapping category. Empty permits all. |
+| `sockets[].schools` | `array<identifier>` | `[]` | Element restrictions; missing, null or empty permits all registered schools. |
+| `sockets[].allowed_skills` | `array<identifier>` | `[]` | Skill restrictions; empty allows all. Every supplied ID must name a registered triggerable skill. |
+| `sockets[].min_item_level` | `integer` | required | Non-negative equipment level required to unlock this slot. |
+
+### Curses
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `multiplier` | `object` | required | Strength range rolled when binding the curse. |
+| `multiplier.min` | `number` | required | Finite, strictly greater than 1. |
+| `multiplier.max` | `number` | required | Finite, at least multiplier.min. |
+| `downsides` | `array<object>` | required | Nonempty downside list. |
+| `downsides[].type` | `enum(attribute, status_effect, damage_taken_mult)` | required | Case-insensitive downside kind; write the canonical form without surrounding whitespace. |
+| `downsides[].data` | `object` | `{}` | Per-kind fields below. Missing or non-object becomes empty and fails if required fields are absent. |
+| `downsides[].data.attribute` | `identifier` | required for attribute | Registered attribute. |
+| `downsides[].data.operation` | `enum(ADDITION, MULTIPLY_BASE, MULTIPLY_TOTAL)` | required for attribute | Attribute operation. |
+| `downsides[].data.value` | `number` | required for attribute / damage_taken_mult | Finite negative attribute value, or finite positive incoming-damage bonus. Both multiply by the stored curse strength. |
+| `downsides[].data.name` | `string` | `ise_curse_downside` | Attribute modifier label. |
+| `downsides[].data.effect` | `identifier` | required for status_effect | Registered status effect. |
+| `downsides[].data.duration` | `integer` | `40` | Positive status duration in ticks: 40 ticks (2 seconds) before curse scaling. |
+| `downsides[].data.amplifier` | `integer` | `0` | Non-negative, zero-based effect amplifier; not multiplied by curse strength. |
+| `downsides[].data.ambient` | `boolean` | `false` | Ambient effect display. |
+| `downsides[].data.show_particles` | `boolean` | `true` | Show effect particles. |
+| `downsides[].data.show_icon` | `boolean` | `true` | Show effect icon. |
+
+### Consumables
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `target` | `enum(EQUIPMENT, GEM, ANY)` | required | EQUIPMENT requires a socket profile and a non-gem item; GEM requires a recognized gem; ANY accepts any nonempty stack. |
+| `success_chance` | `number` | `1` | Finite probability 0–1. |
+| `consume_rule` | `enum(ALWAYS, ON_SUCCESS, NEVER)` | `ON_SUCCESS` | Consumption after a valid attempt; creative players are exempt. |
+| `on_success` | `array<object>` | `[]` | Ordered actions for a successful roll. Missing or non-array means empty. |
+| `on_fail` | `array<object>` | `[]` | Ordered actions for a failed roll. At least one branch must contain an action. |
+| `on_success[].type / on_fail[].type` | `identifier` | required | Registered action ID from the table below. |
+| `on_success[].data / on_fail[].data` | `object` | `{}` | Action-specific data; missing or non-object becomes empty. |
+| `data.index` | `integer` | `action-dependent` | Zero-based socket index; the selection UI overrides it. Removal defaults to the last eligible filled socket; reroll defaults to eligible slots in order. State, kind and repair actions need an index. |
+| `data.count` | `integer` | `2147483647` | reroll_socketed_random_gems: positive limit. UI selection supplies 1 when omitted. |
+| `data.break_chance` | `number` | `0` | remove_socketed_gem: finite 0–1 shatter probability. extract_safe forces 0. |
+| `data.locked` | `boolean` | `unchanged` | set_socket_state: explicit seal state; requires this or toggle_locked. Overrides the toggle result when both exist. |
+| `data.toggle_locked` | `boolean` | `false` | set_socket_state: toggle the seal of an empty, level-unlocked socket. |
+| `data.cracked` | `boolean` | `unchanged` | set_socket_state: changes the crack flag alongside a required lock option; repair_crack removes it directly. |
+| `data.kind` | `enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)` | `absent` | reroll_socket_kind: explicit replacement kind, takes precedence over pool; cannot equal current kind. |
+| `data.pool` | `array<enum(ATTRIBUTE, FIXED, ELEMENT, SKILL)>` | `all kinds` | reroll_socket_kind: at least 2 distinct kinds if supplied; the current kind is removed before choosing. |
+| `data.id` | `identifier` | `random configured curse` | apply_curse: configured curse ID; target must be uncursed. |
+| `data.amount` | `integer` | `1` | reduce_insert_fatigue: positive reduction, floored at 0 remaining strain. |
+
+### Enumerations and formulas
+
+Weapon restrictions accept `none`, `sword`, `rapier`, `greatsword`, `glaive`, `dagger`, `lance`, `scythe`, `axe`, `halberd`, `spear`, `mace`, `hammer`, `wand`, `staff`, `katana`, `chakram`, `gauntlet`, `boomerang`, `bow`, `crossbow`, `gun`, `magigun`. Matching ignores case and surrounding whitespace. Unknown names reject the reload.
+
+Formulas produce a multiplier, then the operation's rounding format applies to `base × multiplier`. Variables `areaLv` and `level` both hold area level; `base` and `value` both hold the unscaled attribute value. Formula bands differ from the requirement-map keys:
+
+| Dungeon difficulty | Formula band |
+| --- | --- |
+| `common`, `uncommon` | `common` |
+| `rare`, `epic` | `default` |
+| `legendary` | `dangerous` |
+| `unique` | `mythic` |
+
+A missing band falls back to `default`. Missing formulas, non-finite results and evaluation errors use multiplier 1; evaluation errors log at use, not reload. The bundled exp4j dependency evaluates formulas. Formula keys and expressions cross the network with limits of 64 and 512 characters respectively; stay within those limits even though loading does not enforce them. Scaling applies to random and fixed attributes, not element or skill gems.
+
+### Consumable actions
+
+All IDs below use the `isekaiexpansion:` namespace. Action fields belong inside `data`.
+
+| Action | Effect |
+| --- | --- |
+| `isekaiexpansion:reroll_random_lines` | Replace random attributes, values and target requirement. |
+| `isekaiexpansion:reroll_random_values` | Keep attributes, operations and requirement; reroll values. |
+| `isekaiexpansion:reroll_socketed_random_gems` | Reroll socketed random gems; locked or cracked slots are excluded. |
+| `isekaiexpansion:remove_socketed_gem` | Remove with break_chance; a lock blocks removal, a crack does not. |
+| `isekaiexpansion:extract_safe` | Remove with zero shatter probability. |
+| `isekaiexpansion:set_socket_state` | Change an empty socket's seal after its level unlock. |
+| `isekaiexpansion:reroll_socket_kind` | Change an empty, unlocked, uncracked socket to another kind. |
+| `isekaiexpansion:apply_curse` | Bind a curse to an uncursed target. |
+| `isekaiexpansion:cleanse_curse` | Remove existing curse data. |
+| `isekaiexpansion:repair_crack` | Repair a cracked slot whose level requirement is met; a seal is allowed. |
+| `isekaiexpansion:reduce_insert_fatigue` | Reduce positive equipment strain. |
+
+Eligibility is checked before rolling and consuming, against both branches. The chosen branch runs in order; successful earlier mutations are not rolled back if a later action does nothing. A successful roll with no applied action does not consume. A failed roll can consume under `ALWAYS` even with an empty failure branch. An empty target is never eligible. Registration alone does not add an eligibility rule for a new code action.
+
+Curse attribute values and status durations scale by the stored multiplier. Incoming damage becomes `damage × (1 + sum(value × curse multiplier))`; status amplifiers do not scale. Multiple curses providing the same effect take the greatest duration and amplifier, combine ambient with OR, and particle/icon visibility with AND.
+
+## Full example
+
+Save this as `data/example/gem_attributes/random_roll/attack_damage.json` after replacing or removing any other active random definition for this attribute. It follows the bundled random files' structure; different filenames do not permit duplicate attribute IDs.
+
+```json
+{
+  "attribute": "minecraft:generic.attack_damage",
+  "domain": "OFFENSE",
+  "weight": 1,
+  "damage_categories": [
+    "MELEE"
+  ],
+  "operations": [
+    {
+      "name": "ADDITION",
+      "min": 1,
+      "max": 2,
+      "format": {
+        "decimals": 2
+      },
+      "difficulty_scaling": {
+        "formula": "1 + areaLv * 0.02",
+        "min_multiplier": 1,
+        "max_multiplier": 2
+      }
+    }
+  ]
+}
+```
+
+## Validation
+
+- **Malformed, empty or non-object file:** records a resource error and rejects the gem snapshot. Required arrays must be nonempty where specified.
+- **Unknown registry ID:** gem items, attributes, schools, effects and triggerable skills reject the reload. Profile and requirement item/tag filters validate syntax only; an absent optional-mod item remains a non-match.
+- **Duplicate definition:** random attribute IDs, same-family definition IDs, same-family item IDs and cross-family fixed/element/skill item reuse reject the reload. Equal-priority profiles are allowed and sort by ID.
+- **Invalid range:** finite, probability and positive checks reject rather than clamp. Some integer fields use numeric conversion; supply integers explicitly. Difficulty weight maps additionally reject fractional values and duplicate keys differing only in case.
+- **Removed fields:** `insert.cost_curve` rejects; use `insert.crack_chance_on_fail`. Element `extras` rejects; use typed element fields.
+- **Conditional compatibility:** Fabric's `fabric:load_conditions` is checked before gem fields. A failing condition excludes the file; failing settings conditions use defaults. Condition syntax belongs to Fabric. Passing conditions do not relax registry validation.
+
+Unknown action-data keys are normally ignored; `set_socket_state` copies unrecognized keys into saved state. Wrong optional action-data types can bypass readers and fall back rather than fail. JSON action data becomes NBT: booleans become bytes, integral in-range numbers become integers, other numbers become doubles, and null becomes an empty string. Use homogeneous arrays.
+
+A restriction translates as `gem_requirement.<namespace>.<path>`, with path slashes changed to dots. Removing its definition leaves existing gems with that ID unable to match equipment; it does not remove the restriction.
+
+## Reloading
+
+Resources load on the server resource reload. Joining sends the active snapshot; a successful data-pack reload broadcasts it to connected clients. Replacement clears the item-to-profile cache. A gem-local validation failure retains its previous snapshot; this is not a transaction across unrelated reload listeners.
+
+Existing item NBT remains separate. Reloading does not reroll stored random values. It can change compatibility, fixed-definition values and the profile selected for an item. Reducing a profile's socket count can discard excess saved slots when a mutating operation normalizes the item; inspect occupied equipment before making that change.
+
+## Related
+
+[Gems and sockets](/en/wiki/gems-and-sockets/) explains the player loop. [Gem runtime](/en/dev/gem-system/) covers item NBT, integration and verification.
+

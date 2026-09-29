@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import DialogueStudio from '../../../components/tools/DialogueStudio.astro';
+import { localeCodes, type LocaleCode } from '../../../i18n';
+export function getStaticPaths() { return localeCodes.map(lang => ({ params:{lang} })); }
+const lang = Astro.params.lang as LocaleCode;
+const zh = lang === 'zh-cn';
+const title = zh ? '对话工坊' : 'Dialogue Studio';
+const description = zh
+  ? '异界扩展的 NPC 对话节点编辑器：拖线连节点，双语文本就地填写，批量生成、导入导出资源包，工作区存在本机。'
+  : 'Node editor for Isekai Expansion NPC dialogue: wire nodes together, write both languages in place, generate in bulk, import and export resource bundles, with sessions kept in your browser.';
+---
+<BaseLayout lang={lang} title={title} description={description} chrome="app">
+  <DialogueStudio lang={lang}/>
+</BaseLayout>

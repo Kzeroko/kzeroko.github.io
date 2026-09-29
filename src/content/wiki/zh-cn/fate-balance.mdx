@@ -1,123 +1,120 @@
 ---
 title: "命运天平"
-description: "建角色时分配的祝福与负担预算，以及每一对内置选项到底改变了什么。"
+description: "选择影响饮食、休息、交往与日常见闻的恩赐和负契。"
 category: core
 order: 20
-updated: 2026-09-01
-tagline: "每一份优势，都有人替它付账。"
-tags: ['建角', '特质']
+updated: 2026-09-27
 ---
 
-命运天平是你在还没开始玩之前就要花掉的特质系统。它是一份**点数预算**：祝福花点数，负担返点数，不平衡的方案提交不了。
+命运天平用默认10点起始点数塑造日常生活。恩赐消耗点数，负契最多额外提供6点。饮食、睡眠、性格与交往特质共用这份预算。
 
-在厄达斯没有白拿的好处，要想的是你愿意付哪一种代价。
+## 点数预算
 
-## 编辑器怎么运作
-
-<Steps>
-
-1. 选项按**分类**分组，每个分类有自己的排序权重。
-2. 每个选项都有**极性**（祝福或负担）、**点数**，以及**严重度**（轻微、标准等）。
-3. 选项之间可以**互斥**、归入**排他组**，或设有**前置要求**。
-4. 调整过程中允许暂时冲突或超支，这是故意的。只有**合法**的方案才能提交。
-5. 提交时整份方案会重新算一遍，算不过就提交不了。
-
-</Steps>
-
-<Callout type="note" title="预设是起点，不是捷径">
-应用预设只是替换你手上的草稿，既不跳过确认，也不跳过校验。
-</Callout>
-
-## 内置选项对
-
-大多数选项挂的是普通的属性修正器。少数几项由对应的系统自己去读，因此不会出现在属性面板上，要等那个系统下一次结算才看得到效果。
-
-### 食量
-
-| 选项 | 最大饱食 | 效果 |
-| --- | --- | --- |
-| `hearty_appetite`（大胃） | 26 | 饿死之前多 30% 储备 |
-| `birdlike_appetite`（小鸟胃） | 14 | 更快吃饱，储备少 30% |
-
-Isekai Core 关掉了基于饱食度的自然回血，所以食量选项只改变储备，不影响恢复速度。
-
-### 性格
-
-由[舒适度](/zh-cn/wiki/comfort/)系统在计算获取、损失与衰减时读取。
-
-| 选项 | 舒适度获取 | 舒适度损失 | 自然衰减 |
-| --- | --- | --- | --- |
-| `optimistic_nature`（乐观） | ×1.20 | ×0.80 | ×0.80 |
-| `pessimistic_nature`（悲观） | ×0.80 | ×1.20 | ×1.25 |
-
-### 气场
-
-按阵营分别判定，**只在该阵营的声望已经低到通缉线时生效**。一张讨喜的脸帮不了本来就喜欢你的人。
-
-| 选项 | 效果 |
+| 规则 | 数值 |
 | --- | --- |
-| `kind_countenance`（和善） | 在声望低谷时缓和阵营反应 |
-| `fierce_countenance`（凶悍） | 让反应更严厉 |
+| 起始点数 | 默认`10`；服务端设置`fateBalanceMaxPoints`，范围`0–64` |
+| 负契贡献上限 | `6` |
+| 剩余点数 | 起始点数+负契贡献−恩赐消耗 |
+| 确认条件 | 剩余点数至少`0`，并满足可用性、前置、冲突与互斥组规则 |
+| 空命谱 | 允许，也可以保留未花费点数 |
 
-阵营声望如何计算见[声望](/zh-cn/wiki/reputation/)。
+每对对立命途不能并选。全部口味命途共用一个互斥组，因此口味恩赐与负契合计最多选一条。食物标签没有任何物品时，对应口味不可选。分类为通用、起居、心性、交往、饮食与特殊。
 
-### 社交
+## 编织命谱
 
-NPC 对话的门槛由两条互相独立的社交属性判定：
+先选择命途查看效果，再将其选入或释放。添加冲突命途前，先移除已有选择。撤销与重做修改草稿；重置恢复打开编辑器时的命谱。预设替换草稿，仍需确认。
 
-| 属性 | 衡量的东西 | 选项对 | 幅度 |
+定下命谱时，服务端会再次评估全部选择。超支或违反规则的草稿无法确认。已确认的命谱会存档，并在重生后保留。
+
+## 内置命途
+
+当前共有28条内置命途。下表短ID均使用前缀`isekaiexpansion:fate_balance/`。点数分别表示恩赐消耗或负契贡献，每张表按恩赐、对应负契的顺序排列。
+
+### 起居
+
+| 命途与ID | 类型 | 点数 | 效果 |
 | --- | --- | --- | --- |
-| `isekaiexpansion:eloquence`（口才） | 言语说服与辩论 | `silver_tongue` / `tongue_tied` | ±8 |
-| `isekaiexpansion:charm`（魅力） | 存在感、亲和力、第一印象 | `captivating_presence` / `unassuming_presence` | ±8 |
+| 安梦入怀 `restful_sleeper` | 恩赐 | 2 | 睡眠舒适度恢复×1.25 |
+| 辗转难眠 `fitful_sleeper` | 负契 | 2 | 睡眠舒适度恢复×0.75 |
 
-两者分开判定。把卫兵说动和让店主对你有好感是两种能力，一套配装完全可以只擅长其中一种。
+### 心性
 
-## 给附属模组作者
+| 命途与ID | 类型 | 点数 | 效果 |
+| --- | --- | --- | --- |
+| 学者灵光 `quick_study` | 恩赐 | 2 | 战利品与适用任务经验×1.15 |
+| 思绪游离 `wandering_mind` | 负契 | 2 | 战利品与适用任务经验×0.85 |
+| 长路远望 `long_horizon` | 恩赐 | 2 | 每日战利品经验上限×1.20 |
+| 囿于寸光 `short_horizon` | 负契 | 2 | 每日战利品经验上限×0.80 |
+| 乐观性格 `optimistic_nature` | 恩赐 | 2 | 舒适度收益×1.20、损失×0.80、衰减间隔×1.25 |
+| 消极性格 `pessimistic_nature` | 负契 | 2 | 舒适度收益×0.80、损失×1.20、衰减间隔×0.80 |
 
-命运天平的定义是**通用端内容**：同一份定义既要支撑客户端的草稿预览，也要支撑服务端的校验，所以可用性判定必须在两个逻辑端上都安全。
+### 交往
 
-在 `fabric.mod.json` 中声明专用入口点：
+| 命途与ID | 类型 | 点数 | 效果 |
+| --- | --- | --- | --- |
+| 辞锋如银 `silver_tongue` | 恩赐 | 2 | 口才+8 |
+| 拙于言辞 `tongue_tied` | 负契 | 2 | 口才−8 |
+| 魅力四射 `captivating_presence` | 恩赐 | 2 | 魅力+8 |
+| 寡淡无华 `unassuming_presence` | 负契 | 2 | 魅力−8 |
+| 面相和善 `kind_countenance` | 恩赐 | 2 | 受通缉阵营声望收益×1.25、损失×0.80 |
+| 面相狰狞 `fierce_countenance` | 负契 | 2 | 受通缉阵营声望收益×0.80、损失×1.25 |
 
-```json
-{
-  "entrypoints": {
-    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
-  }
-}
-```
+### 饮食
 
-```java
-public final class ExampleFateBalance implements FateBalanceEntrypoint {
-    private static final Identifier CATEGORY = new Identifier("example", "fate_balance/traveler");
-    private static final Identifier BLESSING = new Identifier("example", "sure_footed");
-    private static final Identifier BURDEN = new Identifier("example", "restless_sleep");
+| 命途与ID | 类型 | 点数 | 效果 |
+| --- | --- | --- | --- |
+| 大胃王 `hearty_appetite` | 恩赐 | 2 | 饥饿上限20 → 26 |
+| 小鸟胃 `birdlike_appetite` | 负契 | 2 | 饥饿上限20 → 14 |
+| 家常滋味 `contented_diner` | 恩赐 | 1 | 重复食物保留比例×1.25，最高1.00 |
+| 喜新厌旧 `fussy_diner` | 负契 | 1 | 重复食物保留比例×0.75 |
+| 田园知味 `garden_palate` | 恩赐 | 1 | 匹配新鲜蔬果：+4舒适度 |
+| 只恋田蔬 `garden_bound` | 负契 | 1 | 其他食物：−3舒适度 |
+| 炉火麦香 `hearth_palate` | 恩赐 | 1 | 匹配面包：+4舒适度 |
+| 唯爱麦香 `hearth_bound` | 负契 | 1 | 其他食物：−3舒适度 |
+| 海风晚餐 `coastal_palate` | 恩赐 | 1 | 匹配熟鱼：+4舒适度 |
+| 无鱼不欢 `coastal_bound` | 负契 | 1 | 其他食物：−3舒适度 |
+| 甘根余味 `root_palate` | 恩赐 | 1 | 匹配胡萝卜食物：+4舒适度 |
+| 独爱甘根 `root_bound` | 负契 | 1 | 其他食物：−3舒适度 |
+| 舌尖余烬 `spice_palate` | 恩赐 | 1 | 匹配辛辣食物：+4舒适度 |
+| 无辣不欢 `spice_bound` | 负契 | 1 | 其他食物：−3舒适度 |
 
-    @Override
-    public void register(FateBalanceRegistrar registrar) {
-        registrar.registerCategory(new FateBalanceCategory(
-                CATEGORY, "screen.example.fate_balance.category.traveler", 20));
+## 饮食与休息
 
-        registrar.registerChoice(FateBalanceChoice.builder(BLESSING, FateBalancePolarity.BLESSING, 2)
-                .category(CATEGORY)
-                .severity(FateBalanceSeverity.STANDARD)
-                .tags("travel", "movement")
-                .build());
+口味只作用于品质修正后基础舒适度为正的食物。口味恩赐为匹配食物增加+4；口味负契使分类外的食物减少3，结果可能变为负数。基础值为零或负数的食物保持原值。口味只调整舒适度，不触发食用动作或限时增益。
 
-        registrar.registerChoice(FateBalanceChoice.builder(BURDEN, FateBalancePolarity.BURDEN, 1)
-                .category(CATEGORY)
-                .severity(FateBalanceSeverity.MINOR)
-                .conflictsWith(BLESSING)
-                .build());
-    }
-}
-```
+食物分类使用`isekaiexpansion:fate_balance/meals/`下的物品标签：
 
-翻译键默认取 `fate_balance.<命名空间>.<路径>` 与 `….description`，可用 `nameKey`、`descriptionKey` 覆盖。自定义图标使用 16×16 的源材质。
+| 口味组合 | 标签后缀 | 食物 |
+| --- | --- | --- |
+| `garden_palate` / `garden_bound` | `fresh_produce` | 新鲜蔬果 |
+| `hearth_palate` / `hearth_bound` | `bread` | 面包 |
+| `coastal_palate` / `coastal_bound` | `cooked_fish` | 熟鱼 |
+| `root_palate` / `root_bound` | `carrots` | 胡萝卜食物 |
+| `spice_palate` / `spice_bound` | `spicy_foods` | 辛辣食物 |
 
-### 让选项产生效果
+口味调整后，正值食物按[舒适度](/zh-cn/wiki/comfort/)的6种近期食物记录计算重复进食。此前出现0、1、2及至少3次时，通常分别保留1.00、0.70、0.40和0.10。饮食特质只调整重复食物的保留比例，最高1.00。正结果向下取整，至少保留1；负结果不受重复进食削减。之后应用性格修正，食物提示使用同一套计算。
 
-定义本身**不带任何回调**。订阅 `FateBalanceEvents.PROFILE_CHANGED`，根据事件给出的「前一组」与「当前组」不可变标识符集合去对账。监听器在同步组件更新之后运行，必须保证幂等。
+完成睡眠后，基础恢复取30与缺失舒适度70%的较小值并向下取整，再乘睡眠特质倍率并四舍五入。最后应用性格修正，舒适度限制在0–100。世界唤醒睡眠玩家时，只有已经睡够重置时间所需时长的玩家能获得恢复。
 
-只读的玩法判定用 `FateBalanceApi.isSelected(player, choiceId)`。受信任的服务端系统可以调用 `FateBalanceApi.commit`，复用与选择界面完全相同的校验、持久化、同步与事件链路。
+## 其他联动
 
-跨选项规则通过 `registerRule` 注册；规则返回本地化的 `FateBalanceProblem`，**不得修改玩家状态**。
+战利品与适用的任务奖励须经过IsekaiCore经验事件，才会受到学习倍率影响。异界扩展直接发放的`isekaiexpansion:xp`任务奖励与等级药水绕过此事件。战斗经验保持原值。经验奖励会取整，小额奖励可能不变。
+
+命运天平只改变每日战利品经验上限；家园休息效果独立管理战斗经验上限。每个受影响的上限每秒按当前等级重算，最后一项修饰移除时单独恢复一次默认上限。两条路径都不会清除已经使用的经验额度。详见[等级成长](/zh-cn/wiki/leveling/)。
+
+性格影响非直接赋值的舒适度变化与衰减间隔。收益和损失取整，非零结果至少保留原方向的一点；直接赋值跳过倍率。面貌特质只作用于当前声望不高于−100的阵营。口才与魅力是不同的对话属性。食欲改变饥饿容量，不定义治疗倍率。
+
+## 内置预设
+
+| 预设 | 选择的短ID | 恩赐消耗 | 负契贡献 |
+| --- | --- | --- | --- |
+| 远行客 | `quick_study`, `long_horizon`, `hearty_appetite`, `restful_sleeper`, `contented_diner`, `root_palate` | 10 | 0 |
+| 守炉人 | `restful_sleeper`, `optimistic_nature`, `hearty_appetite`, `captivating_presence`, `contented_diner`, `hearth_palate` | 10 | 0 |
+| 说书人 | `silver_tongue`, `captivating_presence`, `kind_countenance`, `quick_study`, `optimistic_nature` | 10 | 0 |
+| 素日闲居 | `restful_sleeper`, `optimistic_nature`, `contented_diner`, `garden_bound` | 5 | 1 |
+
+全部预设均符合默认预算。服务器改变点数或增加规则后，预设也可能无法确认。
+
+## 定义位置
+
+命途与效果由模组注册。附属模组通过[命运天平API](/zh-cn/dev/fate-balance-api/)扩展；数据包可以修改饮食标签和[食物舒适度数值](/zh-cn/wiki/comfort-food/)。

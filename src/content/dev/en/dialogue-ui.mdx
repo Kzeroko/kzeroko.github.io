@@ -1,0 +1,219 @@
+---
+title: "Dialogue objects and UI"
+description: "Blabber blocking objects, one-use replies, persistent visuals and the ModernUI presentation bridge."
+category: client
+order: 135
+updated: 2026-09-19
+---
+
+Dialogue objects let a server interaction temporarily replace ordinary choices with a catalogue, prompt or subtitle-only waiting state. Persistent contributors add nonblocking visuals through a separate draw-list bridge, with game-state capture on the Minecraft client thread and rendering on ModernUI's UI thread.
+
+## Entry point
+
+The server API, including `DialoguePanel`, belongs to Blabber: `io.github.ladysnake.blabber.api.DialogueAPI`, `DialogueScreenObject` and `DialogueObjectResult`. Client contracts live under `io.github.ladysnake.blabber.api.client`: `DialogueClientAPI`, `DialoguePresentation`, `PersistDialogueScreenObject`, `DialogueScreenContext` and `DialogueDrawList`.
+
+This checkout consumes Blabber `0.5.1-build32` and Isekai Core `0.4.0-build61`. The dependency contracts below were checked against the local Blabber source checkout, not established by comparing a compiled jar. Keep the consumed build aligned on client and server; these packets include interaction revisions and object tokens.
+
+IsekaiExpansion installs `IsekaiDialoguePresentation` and registers `NpcFavorDialogueHud` as `isekaiexpansion:npc_status` during client setup. The dependency owns object state, selection and input; the host supplies catalogue surfaces, labels and tooltip controls.
+
+## Common tasks
+
+### Offer a server-owned choice
+
+Call this while the player has an active Blabber session and dialogue handler, on the server thread:
+
+```java
+static void offer(ServerPlayerEntity player) {
+    var entry = new DialogueScreenObject.Entry(
+            new Identifier("example", "accept"), Text.literal("Accept"));
+    var object = new DialogueScreenObject(new Identifier("example", "offer"),
+            Text.literal("Choose a response."), List.of(entry), true, DialoguePanel.conversation());
+    DialogueAPI.showObject(player, object, (speaker, result) -> {
+        if (result.cancelled()) return;
+        speaker.sendMessage(Text.literal(result.selection().orElseThrow().toString()), false);
+    });
+}
+```
+
+This uses the server API package above, `java.util.List` and Minecraft's `ServerPlayerEntity`, `Identifier` and `Text`. Use the entry constructor accepting `NbtCompound` and `Display` for server-owned payloads and client-visible metadata. The response retrieves that stored payload; the client does not supply replacement data.
+
+For asynchronous work, store the UUID returned by `showObject`, then recheck `isCurrentObject(player, token)` plus your own dimension/entity/session conditions before continuing. [Wayfinding API](/en/dev/wayfinding-api/) shows why a token alone is not a complete gameplay context check.
+
+### Register a nonblocking visual
+
+During client initialisation, before opening a dialogue:
+
+```java
+static void registerDialogueLabel() {
+    DialogueClientAPI.registerPersistent(new Identifier("example", "dialogue_label"),
+            (context, session, draw) -> {
+                if (session == null) return;
+                draw.text("Example", 12, 24, 100, 14, 9, 0xFFFFFFFF);
+            });
+}
+```
+
+Use `api.client.DialogueClientAPI` from Blabber and Minecraft's `Identifier`. Positions are Minecraft scaled GUI coordinates. The callback reads game state and fills the builder; it must not manipulate ModernUI views. Remove the contributor with `removePersistent` using the same ID.
+
+## Reference
+
+### Server objects
+
+| Entry point | Contract |
+| --- | --- |
+| `DialogueAPI.showObject(player, object, completion)` | Returns a random UUID token. Cancels/replaces an old object, requires an active session and dialogue handler, and synchronises the new object. |
+| `DialogueAPI.isHolding(player)` | Whether an object matches the player's current handler and dialogue session. |
+| `DialogueAPI.isCurrentObject(player, token)` | Same active-context check plus token equality. |
+| `DialogueAPI.clearObject(player)` | Removes the object and reports cancellation; no object is a no-op. |
+| `new DialogueScreenObject(type, title, entries, cancellable, panel)` | Type/title nonnull; copies title and the entry list; validates text, size and duplicate IDs. Empty entries keep the subtitle active and hide the panel. |
+| `new DialogueScreenObject.Entry(id, label, data, display)` | Nonnull ID, copied label and NBT. The 2-argument overload uses empty NBT; `data()` returns another copy. |
+| `new DialogueObjectResult(selection, data, reason)` | Optional selected ID and copied NBT; `data()` copies again, `cancelled()` means empty selection. |
+
+Titles/labels are copied at construction, but their record accessors return those stored `Text` objects. Treat them as immutable after construction. NBT accessors explicitly make defensive copies.
+
+| Bound | Value |
+| --- | --- |
+| Entry count | At most 4096, with unique entry IDs. |
+| Title length | At most 2048 Java string units from `getString()`. |
+| Entry label length | At most 512 Java string units each. |
+| Encoded-size estimate | At most 524288: UTF-8 serialised title/labels plus each ID string length, 16 overhead units and the encoded panel/display metadata. |
+| Object deadline | 300 real seconds (5 minutes), measured with `nanoTime`. |
+
+The encoded check is the constructor's estimate, not an exact count of every wire byte. Payload NBT is excluded because it remains on the server. Invalid construction throws `IllegalArgumentException`; it does not truncate a catalogue.
+
+### Service layouts and speech stages
+
+`DialoguePanel` requires a `layout`, heading, confirmation and cancellation `Text`, a `searchable` flag, filter descriptors and continuation lines. Layout is `CONVERSATION`, `CATALOGUE` or `TRADE`. `conversation()` creates compact replies without a header or generic footer; `catalogue(heading, confirm, cancel, searchable)` creates an explicit selection list. `then(Text...)` replaces the continuation list, allowing at most 32 additional speech stages. Filters allow at most 16 descriptors; each has a key, label and copied item icon. An empty key means all categories.
+
+The first subtitle comes from the object's title; subsequent lines come from `continuation`. Confirm first reveals the current line, then advances one stage. Replies appear only after the final line is revealed. The blacksmith quotes price, work time and terms in separate stages. Wayfinding enables search for destinations and uses distinct headings and confirmation labels for kinds and compasses.
+
+`DialogueScreenObject.Display` carries a copied item icon, detail text, category, copper price and enabled flag. Negative price omits the price constraint. Category `action` places the entry in a fixed service toolbar, outside catalogue filters. `TRADE` adds item category icons and inclusive minimum/maximum copper fields. Minecraft renders item models inside ModernUI surfaces; ModernUI owns layout, focus and input.
+
+`Display(icon, detail, category, price, enabled, exchange)` accepts a nullable `exchange`. Ordinary entries pass null. Structured exchange rows keep the name and stock in a header and render payment and result below it, without parsing translated prose.
+
+| Exchange field | Type | Required / range | Meaning |
+| --- | --- | --- | --- |
+| `items` | `List<ItemStack>` | Required, at most 2 | Non-currency input stacks; constructor and accessor copy them. |
+| `money` | `long` | Required, ≥0 | Exact payable copper total after adjustments and bargaining. |
+| `result` | `ItemStack` | Required | Copied output stack. |
+| `resultMoney` | `long` | Required, ≥0 | Currency payout; 0 uses the output item model. |
+| `originalMoney` | `long` | Required, ≥`money` | Pre-bargain adjusted copper price; higher values enable the crossed-out comparison. |
+| `discount` | `int` | Required, 0–100 | Display percentage; this host supplies 0–15 and uses 0 for barter. |
+
+`DialoguePresentation.createExchange(context, exchange)` creates the structured content. The host uses Isekai Core's `NumismaticClientCompat.createCurrencyTooltipComponent` per nonzero denomination. `select(control, selected)` stores activation separately from ListView's transient selection. Filters use full pointer controls and the host's vanilla tooltip layer, including unavailable refresh actions.
+
+`DialogueSurfaceAPI.create(context, renderer)` delegates to the internal Minecraft surface bridge. Its render-thread callback receives `DrawContext`, local GUI-unit width/height, and ancestor opacity. The bridge captures ancestor clipping and visibility on the UI thread, suppresses hidden/detached content immediately and flushes Minecraft vertices before restoring matrices. Callers must finish their drawing inside the callback.
+
+Panel motion starts on presentation: 260 ms entrance, 150 ms exit with standard easing, and 180 ms history reveal. Replacements wait for the outgoing fade; outgoing controls cannot submit. History hides raw item surfaces immediately. Keyboard selection retains the host's accent and animates its highlight.
+
+`DialogueObjectResult.Reason` distinguishes `SELECTED`, player `CANCELLED` and lifecycle `DISMISSED`. All empty selections still return `cancelled() == true`. A replacement, deadline or closure must not be treated as a request to reopen a menu. The server also rejects disabled entry IDs. `DialogueAPI.registerTradePanel` installs a host predicate for the existing trade action; return true when the host handled that entity, including a refused interaction.
+
+### Client registration and presentation
+
+| Entry point | Contract |
+| --- | --- |
+| `setPresentation(DialoguePresentation)` | Nonnull global factory set for subsequently created fragments; install before opening. |
+| `registerPersistent(Identifier, PersistDialogueScreenObject)` | Adds a contributor in insertion order; duplicate ID throws. |
+| `removePersistent(Identifier)` | Unregisters; missing ID is a no-op. |
+| `PersistDialogueScreenObject.compose(context, session, builder)` | Minecraft client-thread snapshot callback; session may be null. |
+| `DialogueScreenContext(width, height, handler)` | Scaled GUI dimensions and current Blabber handler; game-thread context. |
+
+An existing fragment captures its presentation factory at construction; changing the global factory does not replace that fragment's controls. Contributor registration uses an unsynchronised map: change it on the client thread, normally during initialisation. Contributor exceptions are not isolated inside capture, so a failing contributor can prevent the frame update.
+
+`DialoguePresentation` factories run on ModernUI's UI thread:
+
+| Method | Return / responsibility |
+| --- | --- |
+| `createCatalogueSurface(Context)` | A `LinearLayout` container; Blabber arranges its children. |
+| `createCatalogueHeading(Context, title, subtitle)` | Heading `View`. |
+| `createCatalogueEntry(Context)` | `Control(view, label)`; rows may be recycled and rebound. |
+| `createCatalogueAction(Context, primary)` | `Control(view, label)` for confirmation/cancellation. |
+| `createTooltipLayer(Context)` | Tooltip `View` installed after the other children. |
+| `bindTooltip(View, List<Text>)` | Attach styled requirement paragraphs to a control. |
+| `clearTooltips()` | Remove the active tooltip during replacement, history or cleanup. |
+
+The host uses `AdventurerSurface`, `AdventurerTitleBlock` and `AdventurerTooltipLayer`. Ordinary choices keep Blabber's option controls; the factory interface themes catalogue controls. Only unavailable ordinary choices receive unmet-requirement tooltips.
+
+### Draw-list commands
+
+The builder preserves command order and `build()` returns an immutable command list. It supports `sprite`, `fill`, `text` with or without a visible-length argument, and `centeredText`. Direct record constructors also exist; builder validation is not automatically applied to a directly constructed record.
+
+| Command / field | Meaning |
+| --- | --- |
+| `Sprite.texture` | Texture identifier. Rendering removes a leading `textures/` when opening the image. |
+| `Sprite.x, y, width, height` | Destination rectangle in scaled GUI coordinates. Non-positive width/height skips the sprite. |
+| `Sprite.u, v, sourceWidth, sourceHeight` | Source rectangle in image pixels, not normalised UVs. |
+| `Sprite.alpha` | Renderer clamps to 0–1 and converts to 0–255; builder does not clamp. |
+| `Fill.x, y, width, height, color` | GUI rectangle and packed ARGB colour. Builder records values directly. |
+| `Label.text, x, y` | Full string and GUI position. |
+| `Label.width, height` | Paragraph bounds; builder clamps each to at least 1. |
+| `Label.size, color` | Initial text size and packed ARGB. Supply a valid positive finite size. |
+| `Label.visibleCharacters` | UTF-16 end index, default full string length; renderer clamps and avoids splitting a surrogate pair. |
+| `Label.centered` | `text` uses false; `centeredText` uses true and full visibility. |
+
+The renderer scales the draw-list coordinate space to the view bounds. Paragraph layout measures the complete string before revealing it with a transparent tail; changing colour/visible length does not reflow text. It shrinks text size by ×0.94 until height fits or the size reaches at most ×0.52 of the original, then clips to the bounds. This is a bounded fitting attempt, not a guarantee that arbitrary text fits.
+
+Paragraphs use the selected ModernUI typeface and a 128-entry cache keyed by text, bounds, size and centring. Font changes clear layouts; resource refresh and fragment disposal clear image/layout caches.
+
+## Threading and lifecycle
+
+### Blocking interaction and wire ownership
+
+Server mutations require the server thread and throw off-thread. The read queries use the same unsynchronised pending map and should also run there. `showObject` requires both the session and a current Blabber dialogue handler.
+
+An object binds the exact screen handler, dialogue session UUID and one-use token. A response must match sync ID/token/current session and select an offered entry, or cancel a cancellable object. The runtime removes the token before invoking completion, so an accepted-choice callback can display the next object. Ordinary server choices are rejected while an object is active.
+
+Replacement calls the old cancellation callback before installing the new pending object. Do not open another object from that cancellation callback when a caller is already replacing it: the outer installation can overwrite the callback's object. Explicit cleanup also catches/logs callback exceptions.
+
+| Event | Pending object outcome |
+| --- | --- |
+| Accepted selection or allowed cancellation | Remove, synchronise removal, then invoke completion. |
+| Replacement or explicit clear | Cancel the old object and invoke cancellation completion. |
+| Screen closure, inactive context, deadline sweep, successful data reload | Clear and invoke cancellation completion. |
+| Disconnect or server stopping | Drop pending state without invoking completion. |
+
+Expiry is swept at end server tick; `isHolding`, `isCurrentObject` and response validation do not independently compare the deadline. Treat 300 seconds as cleanup timing, not an exact network receipt cutoff.
+
+`blabber:screen_object` carries sync ID, interaction revision, presence flag and token; a present object adds type, title, cancellable flag, panel settings, count and ID/label/display entries. Server action NBT is never sent; display item NBT is sent. `blabber:screen_object_result` returns sync ID, token and optional selected ID. The result payload comes from the server's matching entry.
+
+The client ignores packets for a different handler or an older interaction revision, and a removal only clears its matching token. It latches submission once per token; the UI latch remains pending through stale snapshots and only resets for a different token. Ordinary choice messages separately include sync ID, interaction revision and choice index, and await authoritative availability/state acknowledgement.
+
+### Snapshot and input lifecycle
+
+Both data and parent dialogue handlers use ModernUI's `MenuScreenFactory`. The controller captures an initial frame and updates it on end client tick, interactions and resource refresh. Persistent callbacks therefore run during those captures, not once per UI render frame. The UI consumes the latest snapshot and animates independently.
+
+An active object uses its prompt in the subtitle plate and advances a separate reveal clock while holding the ordinary line's clock. Ordinary line timing resets when the combined state key/text changes; changing only a revision does not restart an identical line. Reveal counts Unicode code points, with ordinary choices becoming ready 200 ms after completion. The captured speed is clamped to 1–100.
+
+| Context | Controls |
+| --- | --- |
+| Ordinary dialogue | Forward/back bindings or Up/Down select; Enter or inventory binding confirms; hover, click and wheel work on choices. |
+| Object catalogue | Up/Down or forward/back select; Page Up/Down moves 8 entries; wheel selects; row clicks select; Enter, inventory binding or the service-specific confirm action submits. |
+| Search field | Appears only when the panel enables search. Click it or press `/` to focus; case-insensitive whitespace-separated terms match translated labels, details and IDs together with category and inclusive copper-price bounds. Movement/inventory letters remain typing input; Enter still confirms. |
+| Cancellation | Escape closes history first, then leaves an active editor, otherwise cancels a cancellable object; it does not close a blocked noncancellable object. |
+| History | H or Shift+wheel in dialogue and panels, or clicking the hint; H remains text while editing; the fragment retains at most 128 lines. |
+
+Catalogue entries retain server order. Conversation replies submit with one click and have no generic footer. Disabled entries cannot submit. Empty source lists show only the subtitle while waiting; a filter with no matches shows an empty result, and neither can submit a selected entry. Catalogue filter/selection state is retained by layout and heading within the current fragment, including return from a trade quote; the cache holds at most 16 keys. The explicit list viewport clips animated rows before restoring the canvas for the footer.
+
+History is local to the fragment and hides ordinary/persistent visuals; it does not stop the underlying reveal clocks. Closing the dialogue discards that fragment's history. Resource reload refreshes labels, rebuilds controls and clears renderer caches.
+
+### NPC status contributor
+
+The host contributor draws only when session metadata identifies a base NPC. It renders favour/engagement, layered mood, personality and squad mode; follow slot numbering starts at 1. Favour progress clamps to 0–1, while Isekai Core supplies the maximum-favour predicate.
+
+Metadata keys and relationship semantics are documented in [NPC dialogue](/en/dev/npc-dialogue/) and [NPC emotion](/en/dev/npc-emotion/). The HUD compacts text to its available width using equalised caps and ellipses; if even the ellipsis cannot fit it emits empty text. Rendering does not mutate relationship state.
+
+## Verifying
+
+Use the dependency's existing `tools/dialogue/verify.gradle` harness from the Blabber checkout with `gradlew.bat --no-configure-on-demand -I tools/dialogue/verify.gradle checkDialogueInteraction`. Its source belongs to that dependency; do not copy it into the mod. The harness exercises native focus, search editing, selection, submission latches and composite row recycling between trade and ordinary entries without a GPU; visual game validation remains a separate check.
+
+Check stale/duplicate tokens, invalid entry IDs, noncancellable empty panels, replacement callbacks, timeout, reload, screen closure and disconnect. Confirm payload NBT never appears in the client packet and an accepted callback can open the next panel.
+
+In game, test navigation before clicking, search with movement/inventory letters, successive catalogue panels, cancelled searches, long translated text, surrogate pairs, multiple GUI scales, unavailable-choice tooltips, history restoration, and resource reload. Verify contributor code runs on the game thread and view factories on the UI thread.
+
+## Related
+
+- [Trading API](/en/dev/trading-api/) — quotes, bargaining and stock rotation.
+- [Wayfinding API](/en/dev/wayfinding-api/) — guarded asynchronous search and compass writes.
+- [NPC dialogue](/en/dev/npc-dialogue/) — admission, routes and transactions.
+- [Dialogue data](/en/wiki/dialogue-data/) — authored text and actions.
+- [Dialogue tools](/en/dev/dialogue-tools/) — generator and editor workflow.

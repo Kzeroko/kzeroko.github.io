@@ -56,11 +56,11 @@ const feed = `${localePath(lang, 'blog')}rss.xml`;
     <slot name="head" />
   </head>
 
-  <body class={bodyClass}>
-    {chrome === 'full' && <a class="skip-link" href="#main">{t('nav.skipToContent')}</a>}
+  <body class:list={[bodyClass, chrome === 'app' && 'is-app']}>
+    {chrome !== 'bare' && <a class="skip-link" href="#main">{t('nav.skipToContent')}</a>}
 
     {
-      chrome === 'full' && (
+      chrome !== 'bare' && (
         <SiteHeader lang={lang} pathname={pathname} translatedPaths={translatedPaths} />
       )
     }
@@ -70,7 +70,7 @@ const feed = `${localePath(lang, 'blog')}rss.xml`;
     </main>
 
     {chrome === 'full' && <SiteFooter lang={lang} />}
-    {chrome === 'full' && <SearchDialog lang={lang} />}
+    {chrome !== 'bare' && <SearchDialog lang={lang} />}
 
     <script>
       import { initReveal } from '../scripts/reveal';

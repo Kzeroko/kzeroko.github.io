@@ -1,0 +1,191 @@
+---
+title: "Cinematic scene runtime"
+description: "Scene ownership, trigger history, actor authority, late viewers and client cleanup."
+category: systems
+order: 71
+updated: 2026-09-26
+---
+
+A cinematic scene has one server timeline and a local playback for each viewer. The server owns actor bindings, world events and team sessions; clients own camera sampling, player steering and presentation, so a correct integration must release both sides.
+
+## What it does
+
+`internal.scene.ServerSceneManager` is an internal server entry point, not a public API facade. It starts definitions loaded from data packs and shares them with eligible viewers. Use the [scene data reference](/en/wiki/cinematic-scene-data/) for every authored field and the [camera API](/en/dev/camera-api/) for independent client-only animations.
+
+Trigger blocks add automatic admission, progress-based scene selection and persistent replay rules. They do not save an active timeline or resume interrupted playback after a server restart.
+
+## Runtime model
+
+| Owner | State and update point |
+| --- | --- |
+| `SceneDefinitionLoader` | Current definition map and revision, replaced on server data reload; active sessions retain their captured definition |
+| `ServerSceneManager` | Static map keyed by `team:<uuid>` or `player:<uuid>`; ticks at `END_SERVER_TICK`, removes disconnected viewers |
+| `ServerScenePlayback` | World, pivot, actors, viewer UUIDs, skip votes, fired event indices and age |
+| `ScenePuppetController` | Actor AI/sprint snapshots, cue-start markers and server path followers |
+| `ClientSceneManager` | One active or pending scene, exit transition, saved HUD/perspective and input ownership |
+| `ClientScenePlayback` | Actor entity IDs, local movement followers, presentation event markers and local age |
+| `SceneTriggerMemoryState` | Persistent trigger/audience history; distinct from active sessions |
+
+The server resolves actors once, claims them and then sends start packets. Each server tick prunes invalid viewers, admits eligible nearby viewers, stops an empty session, ticks puppets, fires due world events and increments age. It stops when age exceeds `lengthTicks`, so the final authored tick is included.
+
+Clients apply movement before entity ticks and advance presentation after entity ticks. A start packet includes current age, pivot, actor entity IDs and a reconstructed definition. The scene JSON is compressed into NBT with a 262144-byte compressed limit, and packets carry at most 64 actor bindings. Reconstruction through `SceneAuthoringDraft` normalises and rounds data; it is not a byte-for-byte copy of the source JSON. In particular, a camera node with `look_at` loses its authored `rot` on this route.
+
+### Admission and replacement
+
+Eligible viewers are alive, neither creative nor spectator, still connected and in the scene's world. Team identity comes through the IsekaiCore team bridge; an unteamed player uses a personal key. This repository selects the team owner's main-story progress when that owner is online, otherwise the triggering player's progress.
+
+| Audience mode | Initial and later admission |
+| --- | --- |
+| `TRIGGERING_PLAYER` / `triggering_player` | Triggering player only |
+| `TEAM_NEARBY` / `team_nearby` | Eligible same-team players within a spherical radius of the pivot |
+| `ALL_NEARBY` / `all_nearby` | Eligible players of any team within that sphere |
+
+Player actors are also added as viewers because their own clients drive their movement. They must still pass eligibility and world checks. A radius above zero enables subsequent admission checks; an existing viewer is not removed merely for leaving the radius. Non-actor viewers must continue meeting the audience's identity/team rule; actors bypass that identity rule, but not world or eligibility checks.
+
+Starting a scene replaces the current session for its team key and stops other sessions containing an initial viewer. Later audience refresh and player-actor admission do not perform that same conflict scan, so this is not a universal one-session-per-player guarantee. Avoid overlapping triggers with shared audiences or casts.
+
+`isPlaying(player)` first finds the player's current team session, then a session containing that viewer. A teammate may therefore report playing without being a viewer, and `stop(player, ...)` can stop that team session. Skip requests separately require actual viewer membership.
+
+### Trigger selection and replay
+
+The `isekaiexpansion:scene_trigger` block is invisible and has no collision. Its selectable outline and main-hand editor require creative mode plus permission level 2. Placement adopts the player's horizontal facing; the pivot is the block centre and its facing supplies yaw.
+
+Detection uses a cube with the configured radius as half-extent. This differs from the spherical audience search. Each server tick outside cooldown scans eligible players; the first player whose selected scene starts successfully consumes the trigger attempt. Rules are checked in list order against inclusive progress bounds, falling back to the default scene when none match. A matching rule with a missing definition does not fall through to a later rule or the default.
+
+| Replay mode | Memory and cooldown |
+| --- | --- |
+| `ONCE_PER_AUDIENCE` / `once_per_audience` | Saves the triggering team/personal key for this trigger and selected scene |
+| `GLOBAL_ONCE` / `global_once` | Saves the key `global` for this trigger and selected scene |
+| `REPEATABLE` / `repeatable` | No persistent memory; cooldown is at least 200 ticks (10 seconds) |
+
+Replay scope is independent of audience mode. For example, `all_nearby` with `once_per_audience` records only the triggering team's key, not every viewer's team. History is recorded when start is accepted, not when the scene completes, so skipping or disconnecting does not undo it. A player already associated with an active session is skipped by the trigger.
+
+Cooldown is shared by the block, not by each audience. The configured default is 80 ticks (4 seconds), clamped to 1–72000 ticks (0.05–3600 seconds), or 200–72000 ticks (10–3600 seconds) for repeatable mode. The remaining countdown is not saved; after reload only the configured duration survives.
+
+## Contracts
+
+### Actor and world authority
+
+Actor resolution and cue schemas are defined in the [data reference](/en/wiki/cinematic-scene-data/). All resolved actors are claimed, even those with no cues: mob navigation stops, AI is disabled and the scene acquires the NPC brain claim. On stop it restores saved AI and non-player sprint state, releases claims and clears scene movement/busy state. It does not restore positions, world time or weather.
+
+Snapshots are stored per actor key, not per unique entity. Do not bind several actor keys to the same entity and assume independent restoration. There is also no general cross-session actor lock in this manager.
+
+| Cue route | Authority and timing |
+| --- | --- |
+| Cue start | Fires once when server age equals its tick; distinct from world events, which fire once when due or overdue |
+| Player `walk` / `sprint` | Owning client writes movement through `PlayerLocomotionOverride.Source.CINEMATIC`; ordinary travel produces position updates |
+| Non-player `walk` / `sprint` | Server follower drives collision-aware movement, ground following and body/head steering |
+| `navigation` | Requests mob navigation to the endpoint for path-aware actors; not the camera follower route |
+| Other interpolated movement | Server interpolates along the authored path and places the actor; this is not ground-following gait |
+| Pose/teleport | Server placement; player placement uses network teleport |
+| Player animation | Client animation layer; NPC animation and body-emote routes remain server actor operations |
+
+Movement followers measure progress from actual positions. A blocked actor does not advance merely because time passed. The locomotion audit can warn that a path and duration disagree, but it does not extend the cue window or scene length. Player animation fade is bounded by cue duration, not used to retime the animation clip.
+
+World sound and particle events use world broadcasts, and time/weather change the world. The event's `visible_to_all` switch belongs to the Effek route; it is not a universal viewer filter. Stopping a scene prevents later events but does not roll back earlier ones.
+
+### Locks, skip votes and cleanup
+
+If either `lock_input` or `lock_movement` is enabled, the server disables item use, attack and jump under a unique `cinematic_scene:<uuid>` source. It deliberately leaves the action-system MOVE flag unset so player travel can run. Lock lifetime is remaining scene ticks plus fade-out ticks plus 20 ticks (1 second), with a minimum of 1 tick (0.05 seconds). Cleanup removes only this scene's action-lock source.
+
+The client forces rear third-person perspective, optionally hides the HUD, closes screens while input is locked and applies its cinematic movement override when requested. It saves and restores the prior perspective and HUD setting. While a scene is active it hides player entities not in the cast; this is not a rule that hides every non-cast entity.
+
+A skip request succeeds only for a current viewer when `allow_esc_skip` is true. Votes are unique per viewer and require every current viewer. Leaving viewers lose their votes and can reduce the quorum; late viewers increase it. Repeated voting returns the current vote state. The client displays votes through a keyed popup lasting 2400 ms, with 80 ms entry and 160 ms exit fades.
+
+Entry fade defers local playback and adds its duration to the received age, because the server keeps running. A late client primes only presentation still relevant at that age, rather than replaying expired subtitles or full animations. Movement follows the player's actual position. Server events are not replayed for late viewers.
+
+Exit fade stops local timeline work while retaining the last camera pose and locks until the callback restores state. Cancelling a pending start via normal `stop(false)` restores state but does not explicitly clear the fade controller; immediate replacement/disconnect cleanup does clear it. Disconnect also clears cinematic movement, input, subtitle and animation state. The shared shake/distortion controllers are cleared globally, so their effects are not isolated by scene ownership.
+
+Start and stop packets run through the client executor, and skip/update packets run through the server executor. Stop/skip packets have no scene token; coordinate other callers rather than assuming stale requests can be matched to a specific playback.
+
+### Subtitles and client settings
+
+Subtitles are immutable presentation snapshots passed from the client to a non-interactive ModernUI overlay. The shared `RetainedOverlay` owns attachment, detachment and atomic delivery; it ignores identical consecutive snapshots and applies the latest snapshot on attachment. The overlay keeps the latest pending snapshot and does not read config on the UI thread. It remains independent of vanilla HUD visibility. Text and speaker strings are resolved as translation keys with literal fallback.
+
+`FeatheredPlateView` supplies the shared background for cinematic subtitles and `CaptionLineView`, including NPC command feedback sent through `CaptionAPI` on `NPC_FEEDBACK`. A cached mesh interpolates a quintic opacity curve between nested rounded contours in one draw. Shared edges avoid overlapping opacity, and the outer contour is fully transparent. Both subtitle systems use this feather; there is no opaque border or stretched background texture.
+
+Geometry is rebuilt only when dimensions, colour, width fraction, feather profile or corner radius change. Detaching releases the cached arrays. Both subtitle and caption core corner radii use `10 dp` multiplied by their presentation scale; the transparent outer contour expands the rounding through the feather. Text reveal and movement reuse the mesh.
+
+`SubtitleFade` supplies both systems with quintic easing: entry lasts up to `360 ms`, natural exit up to `460 ms`, each capped at `35%` of the remaining cue time when its view is created. A delayed UI delivery starts at transparent while text reveal still catches up to its authored timestamp. Replacement or clearing fades from the displayed opacity over `360 ms`; an invisible outgoing line can be removed immediately. Feedback retirement preserves its existing age dimming without applying it twice, and stack layout changes interpolate from the displayed position instead of snapping.
+
+One cinematic cue is current at a time. Its outgoing view retains its own text and layout during the crossfade; rapid replacements keep earlier visible fades until they finish. A single overlay frame callback advances all retained cues. Reveal timestamps use wall-clock milliseconds with 50 ms per scene tick, while cue expiration is also checked against scene age. Consequently render-clock reveal is not a promise that text freezes with scene ticks. Theme values are captured when the cue is shown; editing config does not recolour an already published snapshot.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `cinematicSubtitleBandColor` | `string` | `"#0A0F18"` | Band RGB; malformed colour falls back to this value. |
+| `cinematicSubtitleBandOpacity` | `integer` | `88` | Percent, clamped to 0–100, converted to alpha by rounding ×2.55. |
+| `cinematicSubtitleBandWidthPercent` | `integer` | `96` | Band width fraction, clamped to 40–100%. |
+| `cinematicSubtitleTextWidthPercent` | `integer` | `62` | Text width fraction, clamped to 30–96%. |
+| `cinematicSubtitleSpeakerColor` | `string` | `"#FFD79A"` | Opaque speaker RGB; malformed colour uses this fallback. |
+| `cinematicSubtitleTextColor` | `string` | `"#F3F6FF"` | Opaque text RGB unless the cue has a nonzero alpha byte. |
+| `cinematicSubtitleScalePercent` | `integer` | `100` | Scale fraction, clamped to 60–160%. |
+
+These are client presentation options, not scene data or server-synchronised values. Colour parsing trims whitespace, accepts 6 or 8 hexadecimal digits with an optional leading `#`, and discards any supplied alpha; band opacity is separate. A cue colour whose alpha byte is zero inherits the configured body colour.
+
+### Trigger save data
+
+The following is block-entity NBT, not the scene JSON format. Editor updates run on the server, require the same creative/permission check, a trigger at the target position and distance at most 8 blocks. They validate ID syntax but do not require the referenced definition to exist.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Scene` | `identifier` | None | Default scene; invalid syntax becomes null on read. |
+| `SceneRules` | `array<object>` | `[]` | First 16 valid rules retained; absent/wrong list type gives no rules. |
+| `SceneRules[].Scene` | `identifier` | Required | Invalid identifier skips this rule. |
+| `SceneRules[].MinProgress` | `integer` | `0` | Inclusive lower bound; reversed bounds are swapped. |
+| `SceneRules[].MaxProgress` | `integer` | `0` | Inclusive upper bound; no positive-only restriction. |
+| `Radius` | `number` | `2.0` | Blocks. Configuration clamps to 0.25–128; NBT read applies only the 0.25 lower bound. |
+| `ReplayMode` | `string` | `"once_per_audience"` | Replay ID from the table above; blank/unknown values use default. |
+| `AudienceMode` | `string` | `"team_nearby"` | Audience ID from the table above; blank/unknown values use default. |
+| `CooldownTicks` | `integer` | `80` | Configured cooldown, sanitised for the replay mode; repeatable default becomes 200. |
+
+Mode readers trim and lowercase strings. Radius sanitisation is a numeric clamp, not an explicit finite-number check. Rule order is preserved; no overlap detection or sort is performed.
+
+Persistent history uses the server-scoped `isekaiexpansion/scene/trigger_memory_v2.dat` described by [persistent state](/en/dev/persistent-state/). The scope includes dimension, immutable block position and selected scene ID, so changing the scene or moving the block creates a different history key.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `version` | `integer` | `0` | Must equal 2; missing/wrong version logs a warning and discards loaded history. |
+| `entries` | `array<object>` | `[]` | Trigger scopes; missing/wrong list type gives an empty state. |
+| `entries[].world` | `identifier` | Required | Dimension ID syntax; invalid entry is skipped. |
+| `entries[].x`, `entries[].y`, `entries[].z` | `integer` | `0` | Trigger coordinates. |
+| `entries[].scene` | `identifier` | Required | Selected scene ID; invalid entry is skipped. |
+| `entries[].audiences` | `array<string>` | Required | Set of audience keys; missing list skips entry, duplicate scopes/keys merge. Blank keys normalise to `unknown`. |
+
+Only adding a new audience marks this state dirty. Writes sort scopes and audience keys and omit empty sets. This is trigger history, not a list of successful scene completions, and this class supplies no automatic pruning or reset command.
+
+## Extending it
+
+For an internal server integration, call from the server thread after definitions are loaded and the player is in a server world:
+
+```java
+boolean accepted = ServerSceneManager.play(
+        player,
+        new Identifier("isekaiexpansion", "hidden_hud_subtitle_scene"),
+        new SceneTransform(player.getPos(), player.getYaw())
+);
+```
+
+This overload uses only the triggering player as the audience and a zero admission radius. A missing scene returns false before replacing the existing session. True means playback was created, not that every requested viewer was admitted or that playback completed; a creative trigger player can yield no viewers and stop on the next tick.
+
+Use `playFromTrigger` with an explicit `SceneAudienceMode` when sharing is intentional. There is no automatic thread marshalling in these manager calls and no supported call before a server/player world exists. Keep client manager and camera classes off the dedicated-server path.
+
+To add a cue or event, update definition parsing, draft serialisation and the appropriate server/client dispatcher together. A parser-only addition can be lost during packet reconstruction. Preserve source-owned action cleanup and the player/non-player movement split.
+
+## Verifying
+
+- Start a known scene with a survival player, then with an ineligible player. Check accepted-start versus admitted-viewer behaviour.
+- Exercise all audience modes with another team, an unteamed player, a late arrival, a radius departure and a dimension change.
+- Verify first-match progress rules, offline team-owner fallback, missing definitions and repeatable cooldown. Restart the world and inspect persistent versus repeatable history.
+- Vote to skip, disconnect a voter, add a new viewer and repeat a vote. Confirm the current audience determines the quorum.
+- Put a walking actor against an obstacle; confirm collision affects actual progress and the scene still ends at its authored time.
+- Interrupt entry and exit fades, replace a scene and disconnect. Confirm perspective, HUD, movement and action locks are released.
+- Use the bundled `hidden_hud_subtitle_scene` to check subtitles with hidden HUD, theme inheritance and a late entry. These are verification procedures, not claims of completed multiplayer or visual tests.
+
+## Related
+
+- [Scene recorder and visual editor](/en/dev/scene-editor/) — capture, local editing and export.
+- [Dialogue camera](/en/dev/dialogue-camera/) — conversation framing and terrain fading.
+
+- [Cinematic scene data](/en/wiki/cinematic-scene-data/) — fields, coordinate space, cues and parser behaviour.
+- [Camera Scene API](/en/dev/camera-api/) and [camera animation assets](/en/dev/camera-animations/) — client-only tracks.
+- [NPC locomotion](/en/dev/npc-locomotion/) and [persistent state](/en/dev/persistent-state/) — adjacent ownership and storage contracts.

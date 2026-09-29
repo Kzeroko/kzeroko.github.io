@@ -1,0 +1,144 @@
+---
+title: "Effekseer 粒子"
+description: "异界扩展通过 EffekFxBuilder 桥接 AAAParticles 的 Effekseer 运行时：按方块数定尺寸、用动态输入驱动、以及受控的发射器生命周期。"
+category: client
+order: 10
+updated: 2026-09-18
+tagline: "玩法代码和 Effekseer 运行时之间的那一层桥。"
+tags: ['特效', 'aaaparticles', 'effekseer', '客户端']
+---
+
+Effekseer 是一个独立的粒子制作工具，[AAAParticles](https://modrinth.com/mod/aaa-particles) 是把 Effekseer 原生运行时搬进 Minecraft 的第三方模组——这两样都不是异界扩展实现的。异界扩展提供的是中间那一层桥：一个构建器，把一次玩法事件变成一个发射器，用方块数而不是 Effekseer 单位定尺寸，并让绑定在实体上的特效对该看到的人一直存在。
+
+## 入口
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .position(pos)
+    .scale(0.5F)
+    .spawn();
+```
+
+`FxSyncUtil.effek(World, Identifier)` 返回一个新的 `EffekFxBuilder`，后面的配置全部链式挂在它上面。在调用 `spawn()` 或 `spawnTracked()` 之前，什么都不会发生。
+
+| 组成 | 位置 |
+| --- | --- |
+| 构建器入口 | `net.kzeroko.isekaiexpansion.util.network.FxSyncUtil` |
+| 构建器 | `net.kzeroko.isekaiexpansion.internal.effek.EffekFxBuilder` |
+| 单位换算 | `net.kzeroko.isekaiexpansion.internal.effek.EffekSpace` |
+| 客户端受控发射器 | `net.kzeroko.isekaiexpansion.internal.effek.ClientTrackedFxRegistry` |
+| 特效资源 | `assets/isekaiexpansion/effeks/*.efkefc` |
+
+`FxSyncUtil` 里还有 `spawnStaticEffekFx`、`spawnEffekFx` 和一个受控版本。它们只是同一个构建器的薄封装，留给比构建器更早的调用点用。新代码直接用构建器。
+
+依赖写在 `build.gradle` 里，形式是 `cn.chloeprime:aaa_particles-fabric-${minecraft_version}:${aaa_particles_version}`，目前解析到 `2.2.3`。版本号在 `gradle.properties`。
+
+## 常见用法
+
+### 在固定位置生成
+
+`position(Vec3d)` 设置世界绝对坐标，并清掉此前在同一个构建器上设过的实体绑定。`at(Vec3d)` 是它的短名字，行为一样。
+
+### 跟随实体
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .bind(entity)
+    .head()
+    .offset(new Vec3d(0.0D, 0.5D, 0.0D))
+    .spawnTracked();
+```
+
+`bind(Entity)` 把发射器挂到实体上。`head()` 改为挂在头部而不是脚下，`offset(Vec3d)` 在实体空间里再偏移一段，`rigidBind()` 让整个特效跟随实体的变换，而不只是跟随原点。`bindIf` 和 `headIf` 多收一个布尔值，调用方就不用为此写分支。
+
+### 用方块数决定大小，而不是 Effekseer 单位
+
+AAAParticles 2.2.3 没有任何隐藏的单位换算：原始缩放为 `1.0` 时，一个 Effekseer 世界单位就是一个方块，发射器缩放直接乘在制作时的尺寸上。
+
+这就让原始缩放变成一个没人读得懂的数字。更好的做法是在 Effekseer 编辑器里量一个跨度，把除法交给构建器：
+
+```java
+FxSyncUtil.effek(world, effekId)
+    .position(pos)
+    .scaleToBlockDiameter(3.0F, 100.0F)
+    .spawn();
+```
+
+意思是「这个特效制作时的直径是 100 Effekseer 单位，请把它渲染成 3 个方块宽」。构建器算出的原始缩放是 `0.03`。
+
+`scaleToBlockRadius` 和 `scaleToBlockSpan` 是同一套计算，只是名字对应你量的是什么。量半径就用半径那个，量直径就用直径那个，并把这个测量值记在资源旁边——运行时没有任何办法把它反推回来。
+
+原始的 `scale(float)` 仍然保留，给已经手调好的数值用。无论走哪条路，构建发射器时最终缩放都会被限制在 `0.0…100.0`。
+
+### 用玩法数值驱动它
+
+`parameter(int index, float value)` 传一个 Effekseer 动态输入。AAAParticles 只把它存成没有类型的 `(index, float)` 对，含义完全由 Effekseer 资源里的表达式决定——那些表达式读 `@In0`…`@In3`，写 `@O.x`…`@O.w`。
+
+Effekseer 对外只开放四个输入，所以合法下标是 `0`、`1`、`2`、`3`。
+
+| 下标 | Effekseer | 本模组的约定 |
+| --- | --- | --- |
+| `0` | `@In0` | 强度。`0`–`1` 是正常区间，超过 `1` 表示过载。 |
+| `1` | `@In1` | 主尺寸——通常是半径或长度的倍率。 |
+| `2` | `@In2` | 次要变体——混色、扰动，或者子类型。 |
+| `3` | `@In3` | 透明度或时长——不透明度、淡出强度、持续时间倍率。 |
+
+单个资源可以自定义含义，但那就必须写进这份资源的说明里。同一个资源里一个下标对应两种含义，结果就是特效在一条代码路径上看着没问题，换一条就不对了。`DevLootBeamEffek` 把物品提示框的颜色通过输入 `0`–`3` 传进去，需要换色的特效基本都可以照抄这个写法。
+
+### 中途切换状态
+
+`trigger(int index)` 在发射器创建时发一个 Effekseer 触发器。触发器是事件不是数值：用它启动子节点、结束蓄力循环、发射光束或开始淡出。同样是四个下标，`0`–`3`。
+
+一个「蓄力到释放」的特效，做法是一个具名且持久的发射器，用 `@In0 = chargeProgress` 驱动辉光，再发一个触发器结束蓄力节点、开始释放。生成之后再改输入或再发触发器，需要发射器是具名的：AAAParticles 用发射器类型、特效 ID 和名称三者来查找发射器，名称由 `named(Identifier)` 指定。用同样的三者再生成一个，就会顶掉前一个。
+
+## 方法一览
+
+每个方法都返回构建器本身。没调用过的方法按默认值处理。
+
+| 方法 | 默认值 | 作用 |
+| --- | --- | --- |
+| `position(Vec3d)` / `at(Vec3d)` | 无 | 世界绝对坐标，并清掉实体绑定。 |
+| `bind(Entity)` | 不绑定 | 把发射器挂到实体上。 |
+| `bindIf(boolean, Entity)` | 不绑定 | 条件为真时才绑定。 |
+| `head()` / `headIf(boolean)` | 脚下 | 挂在头部而不是实体原点。 |
+| `offset(Vec3d)` | 无 | 在绑定基础上再加一个实体空间偏移。 |
+| `rotation(float, float, float)` / `rotation(Vec3d)` | 无 | 固定的发射器旋转。 |
+| `rotateFromVelocity()` | 关 | 用被绑定实体的速度推算旋转。 |
+| `rigidBind()` | 关 | 整个特效跟随实体变换。服务端会强制走受控路径。 |
+| `scale(float)` | `1.0` | 原始 Effekseer 缩放，构建时限制在 `0.0…100.0`。 |
+| `scaleToBlockSpan(desired, authored)` | `1.0` | 用量出来的跨度算原始缩放。 |
+| `scaleToBlockRadius` / `scaleToBlockDiameter` | `1.0` | 同一套计算，名字对应你量的是什么。 |
+| `speed(float)` | `1.0` | 相对播放速度。AAAParticles 是在 Java 侧推进发射器进度的，除非资源本来就是这么做的，长时间存在的发射器不要改它。 |
+| `parameter(int, float)` | 无 | 一个 Effekseer 动态输入，下标 `0`–`3`。可重复调用。 |
+| `trigger(int)` | 无 | 生成时发一个 Effekseer 触发器，下标 `0`–`3`。可重复调用。 |
+| `named(Identifier)` | 匿名 | 给发射器命名，之后才能更新或替换它。 |
+| `force()` / `forceIf(boolean)` | 关 | 用远距离范围发送生成封包。 |
+| `backingStatusEffect(Identifier)` | 无 | 被绑定实体上的该状态效果消失时，客户端注册表会停掉这个发射器。 |
+| `persistent(boolean)` | `false` | 之后才开始追踪该实体的玩家也会收到这个发射器。 |
+| `spawn()` | — | 生成发射器，没有返回值。 |
+| `spawnTracked()` | — | 启动一个服务端受控发射器，返回它的实例 ID。 |
+
+## 线程与生命周期
+
+**`spawn()` 两端都能调**。在逻辑服务端它发送 AAAParticles 的生成封包，在逻辑客户端它直接创建本地发射器。唯一的例外是绑定了实体的刚性绑定，它总是走受控路径，这样整体变换模式才不会在过网络时丢掉。
+
+**`spawnTracked()` 实际只在服务端成立**。不在逻辑服务端调用，或者没有绑定实体，它会退回到 `spawn()` 的行为并返回 `null`。正常走通时，它返回一个 `UUID`，留着用来停掉这个特效。
+
+**受控发射器有三种结束方式**：服务端按实例 ID 停掉它；被绑定实体身上的支撑状态效果消失后，客户端注册表停掉它；或者实体本身要消失时，`stopAllForEntity` 清掉挂在它身上的全部发射器。既没有支撑状态效果、又没人留住 ID 的发射器会一直播到资源自己结束——用在一次命中特效上没问题，用在光环上就是泄漏。
+
+**`persistent(true)` 是有代价的**。之后才开始追踪该实体的玩家会补收到这个发射器，光环需要这个行为，一次性的命中特效不需要。
+
+<Callout type="caution" title="同名发射器会互相顶掉">
+发射器类型、特效 ID 和名称三者一起才是一个发射器的身份。用同样的三者再生成一个，前一个会被悄悄替换掉。所以按实体区分的特效必须把实体写进名称里——`effek/example/release/<uuid>`——否则两个玩家放同一个技能时会抢同一个发射器。
+</Callout>
+
+## 升级 AAAParticles
+
+`EffekSpace` 里那套方块换算，前提是 AAAParticles 自己不做单位换算。这一点是对着 2.2.3 确认的：`ParticleEmitterInfo.spawnInWorld` 把世界坐标和缩放原样传给 `ParticleEmitter`，渲染器只按摄像机位置做平移，没有乘换算系数。
+
+升版本的时候，重新读一遍 `ParticleEmitterInfo.spawnInWorld`、`ParticleEmitter.setScale` 和 `EffekRenderer`。如果出现了换算系数，就在同一个提交里改掉 `EffekSpace.MINECRAFT_BLOCKS_PER_EFFEKSEER_WORLD_UNIT` 和这一页。
+
+## 相关资料
+
+- [Effekseer 动态参数参考](https://effekseer.github.io/Help_Tool/en/ToolReference/dynamicParameter.html)
+- [Effekseer 触发器教程](https://effekseer.github.io/Help_Tool/en/ToolTutorial/15.html)

@@ -1,0 +1,146 @@
+---
+title: "教程系统"
+description: "客户端教程定义、进度、输入处理、目标区域与边界编辑器。"
+category: systems
+order: 145
+updated: 2026-09-19
+---
+
+教程包括分步引导、特定界面引导和短提示。完成记录按版本保存在本地文件中，同一游戏安装会在不同世界与服务器间共享这些记录；服务端只能请求播放，不持有教程进度。
+
+## 它做什么
+
+服务端使用 `api.tutorial.TutorialAPI`，客户端使用 `api.client.tutorial.TutorialClientAPI`。定义、步骤、目标、矩形与图片类型位于 `api.client.tutorial`。位于 `client.tutorial` 的管理器、注册表、区域报告器和编辑器是实现入口，不是公共门面。
+
+教程在客户端初始化时通过 Java 注册，没有教程 JSON 加载器。服务端数据包 `isekaiexpansion:trigger_tutorial` 只携带教程标识符与重播布尔值，不传输定义或完成记录。
+
+## 运行时模型
+
+### 定义类型与内置教程
+
+| 类型 | 触发与完成 |
+| --- | --- |
+| `GuidedTutorialDefinition` | 显式请求；其他教程正在运行时，普通请求进入队列。完成或跳过都会保存完成记录。 |
+| `ScreenTutorialDefinition` | 打开匹配界面时发现；要求没有活动教程、排队请求或边界编辑器。关闭或离开匹配界面会取消，不记为完成。 |
+| `ShortTutorialDefinition` | 立即显示弹窗并立即记录完成，不等待展示时长结束。 |
+
+| 内置标识符 | 版本 | 内容 |
+| --- | --- | --- |
+| `isekaiexpansion:adventurer_basics` | 2 | 12 个步骤：欢迎、前进、跳跃、生命状态、等级、舒适度、主动技能、技能选择、技能界面、任务、表情和结束。前进需按住 1200 ms，技能选择需按住 700 ms。仅加入时的数据包同步会请求，不会在每次重载时请求。 |
+| `isekaiexpansion:inventory_playerex_tabs` | 1 | 4 个物品栏步骤：主要标签、扩展标签、钱袋和队伍。标签使用报告区域，钱袋和队伍使用相对矩形。 |
+| `isekaiexpansion:tutorial_restart_hint` | 1 | 持续 5200 ms 的提示；分步教程结束后，尚未看过时请求。 |
+
+同时只能有一个交互教程。队列内的分步教程 ID 去重，当前已播放的 ID 不再入队。强制重播分步教程会打断当前教程，但不会清空原有队列。未知 ID 会记录警告。普通请求不能打开界面教程；重播会清除其完成记录，且仅在对应界面已打开、玩家存在、没有其他活动教程时立即开始。
+
+管理器在客户端 tick 末尾运行。失去焦点、过场输入锁、目标上下文不可用或边界编辑器开启时，会隐藏引导并重置按住进度。HUD 步骤要求没有打开界面；界面步骤要求当前界面匹配。已安排的推进在编辑器检查后、多数上下文检查前执行，不会再次完整验证原动作。
+
+### 进度存储
+
+游戏目录中的 `isekaiexpansion-tutorials.txt` 使用以下文本格式：
+
+```text
+format 1
+completed isekaiexpansion:adventurer_basics 2
+```
+
+| 标记 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `format` | 标记与整数 | 写出 1 | 当前读取器忽略该行，仅用于标注格式。 |
+| `completed` | 记录标记 | 完成记录必需 | 必须恰好有 3 个空白分隔项：标记、合法标识符、正整数版本。 |
+| 教程标识符 | 标识符 | 无完成记录 | 读取时不检查是否已注册。重复记录保留最高版本。 |
+| 版本 | 正整数 | 缺失时为 0 | 保存版本不低于当前定义版本时，普通播放会跳过。 |
+
+空行、以 `#` 开头的注释、格式错误的记录、无效 ID 与无效版本均忽略。写出时按 ID 排序，先写同目录 `.tmp` 文件，再尝试原子替换；不支持时改用普通替换。读取或写入 I/O 失败会记录警告。活动步骤与队列不保存。断开连接清空运行状态，完成记录仍然保留。
+
+## 约定
+
+### 定义与步骤字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `id` | 标识符 | 必需，非 null | 唯一注册键；重复 ID 抛出异常。 |
+| `version` | 整数 | 必需，正数 | 希望已完成的客户端重新看到教程时，提高版本。 |
+| `steps` | 步骤列表 | 交互教程必需 | 非空且复制为不可变列表，不接受 null 元素。 |
+| `screenClassName` | 字符串 | 界面教程必需 | 非空白的完整类名；每一步都必须使用类名字符串完全相同的界面目标。重复界面触发器会抛出异常并撤销新 ID 的注册。 |
+| `titleKey`、`bodyKey` | 翻译键字符串 | 步骤与短提示必需 | 非 null、非空白；展示时解析翻译。 |
+| `durationMs` | Long | 短提示必需 | 至少 1 ms。 |
+| `advanceMode` | 枚举 | 步骤必需 | `HOLD_CONFIRM`、`KEY_PRESS`、`KEY_HOLD` 或 `ACTION`。 |
+| `keyBindingTranslationKey` | 可空字符串 | hold 工厂为 null | 按键模式要求非空白；动作步骤中仅作输入提示，不是完成信号。 |
+| `keyHoldDurationMs` | Long | 非按住模式为 0 | `KEY_HOLD` 必须为正，其余模式必须为 0。 |
+| `actionId` | 可空标识符 | 非动作工厂为 null | `ACTION` 必需；仅当前步骤收到匹配通知时完成。 |
+| `target` | 可空目标 | null | 控制高亮与上下文；null 目标仍属于 HUD 上下文。 |
+| `image` | 可空图片 | null | 可选插图；`withImage` 返回新步骤并拒绝 null。 |
+
+运行时沿当前界面的父类链匹配。注册顺序决定第一个匹配的界面教程，不会优先选择最具体的类。若第一个匹配项已完成，也不会继续查找其他匹配教程。
+
+### 输入与时长
+
+| 输入 | 时长 | 结果 |
+| --- | --- | --- |
+| 按住 E | 1150 ms | 推进 `HOLD_CONFIRM`；按键绑定无法解析时，也作为按键步骤的后备操作。 |
+| 按下已解析的绑定键 | 立即提出推进请求 | 推进 `KEY_PRESS`。 |
+| 按住已解析的绑定键 | 编写时指定的正时长 | 推进 `KEY_HOLD`。 |
+| `notifyAction(actionId)` | 立即提出推进请求 | 仅推进上下文可用、ID 匹配的当前 `ACTION` 步骤；不会重放更早的动作。 |
+| 按住 Escape | 1500 ms | 跳过整个交互教程，并保存为已完成。 |
+| 按住重启绑定键，默认为 F10 | 1650 ms | 在世界中且无活动教程时，清除全部教程完成记录并重新开始冒险基础。 |
+| 已安排的步骤过渡 | 130 ms | 延迟执行已接受的推进；所有时长使用墙钟毫秒。 |
+
+引导期间会消费 E 和 Escape，包括过渡后的松键保护。其他匹配绑定键与鼠标键在安排推进后仍可传递给游戏。按住 Escape 会取消待执行推进及其他按住进度。动作步骤没有 E 后备操作。松开绑定键会重置计时。
+
+### 目标与插图
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `reporterId` | 可空标识符 | 固定矩形为 null | 请求当前帧区域；它与后备区域至少提供一项。 |
+| `fallbackBounds` | 可空相对矩形 | 纯报告目标为 null | 无匹配报告时使用；既无报告也无后备区域时不显示高亮，不会自动完成。 |
+| `screenClassName` | 字符串 | 界面目标必需 | 非空白，也控制步骤何时可用。 |
+| `x`、`y` | 有限浮点数 | 相对矩形必需 | 非负，占整个缩放后屏幕的比例。 |
+| `width`、`height` | 有限浮点数 | 相对矩形必需 | 正数；右边界与下边界不能超过 1 + 0.00001。转换到像素时舍入并限制为至少 1 像素。 |
+| `texture` | 标识符 | 图片必需 | 非 null 纹理资源。 |
+| `aspectRatio` | 有限浮点数 | 完整图片必需 | 正数，在图片载入前决定占位布局；区域工厂由区域尺寸计算。 |
+| `maxHeightDp` | 整数 | 图片工厂为 92 | 至少 8 dp。 |
+| `region` | 可空像素区域 | null | 可选裁剪，包含 `left`、`top`、`right`、`bottom`；宽高必须为正。记录本身不拒绝负起点或超出纹理边缘的区域。 |
+
+内部 `TutorialHudBounds` 保留一帧内请求 ID 的最后一个有效报告。`TutorialScreenBounds` 只接受同一请求界面实例的报告，并合并有效匹配矩形。两者均忽略非正尺寸。应在对应帧重置后按缩放后的 GUI 像素报告；界面报告不是持久注册。图片缺失时仍保留编写的占位与边框。
+
+## 扩展方式
+
+在客户端初始化器中注册下例，并在两个语言组装文件中提供翻译键。导入来自 `api.client.tutorial`、Minecraft `Identifier` 与 `java.util.List`。
+
+```java
+public static void registerExampleTutorial() {
+    Identifier tutorialId = new Identifier("example", "first_jump");
+    TutorialClientAPI.register(new GuidedTutorialDefinition(
+            tutorialId, 1, List.of(
+                    TutorialStep.hold("tutorial.example.welcome.title",
+                            "tutorial.example.welcome.body"),
+                    TutorialStep.keyPress("tutorial.example.jump.title",
+                            "tutorial.example.jump.body", "key.jump")
+            )));
+}
+```
+
+| 调用 | 侧别 | 效果 |
+| --- | --- | --- |
+| `TutorialAPI.trigger(player, id)` | 服务端 | 向玩家发送普通请求；不在服务端查询注册表或完成状态。 |
+| `TutorialAPI.forceTrigger(player, id)` | 服务端 | 发送重播请求。 |
+| `TutorialClientAPI.register(definition)` | 客户端 | 注册定义，应在客户端初始化时调用。 |
+| `TutorialClientAPI.show(id)` | 客户端 | 遵守保存进度的播放请求。 |
+| `TutorialClientAPI.replay(id)` | 客户端 | 重播分步或短提示定义，或重置界面教程资格。 |
+| `TutorialClientAPI.notifyAction(id)` | 客户端 | 向当前步骤报告已完成的本地动作。 |
+
+以上门面参数均不能为 null。播放与动作调用直接修改客户端管理器，应在客户端线程调用；跨线程分发时使用 `MinecraftClient.execute`。先注册再请求。不要在专用服务端初始化中引用客户端定义或类；服务端只需标识符与服务端门面。
+
+编写相对目标时，按 Control + 重启绑定键打开边界编辑器，用鼠标左键拖出矩形，按 Enter 将 Java 目标表达式复制到剪贴板与聊天。Escape 取消。选区至少为 4 × 4 缩放像素。界面模式捕获当前界面的类名，具体界面实例变化时关闭；HUD 模式在打开界面时关闭。调整尺寸会保留归一化选区并结束拖动。工具输出 6 位小数，不会修改源码。
+
+## 验证
+
+使用权限等级 2 的命令 `/ise dev tutorial show <id> [targets]` 与 `/ise dev tutorial replay <id> [targets]`。省略目标要求执行者为玩家。补全只列出 3 个内置 ID，但允许输入任意标识符；成功数量统计数据包接收者，不代表实际显示次数。
+
+检查普通播放、强制重播、提高版本、跳过、断线，以及同一安装切换世界的行为。检查界面关闭重开、父子类触发顺序、报告器缺失、GUI 缩放、按键绑定不可用，以及动作通知早于步骤的情况。确认结束后松开 E/Escape 不会立即打开物品栏或暂停。用专用服务端验证定义仅在客户端注册，并在完成或重启后查看进度文件。
+
+## 相关页面
+
+- [命运天平 API](/zh-cn/dev/fate-balance-api/) — 另一种由服务端持有游戏状态的客户端呈现。
+- [持久状态](/zh-cn/dev/persistent-state/) — 与教程完成记录不同的世界存储。
+

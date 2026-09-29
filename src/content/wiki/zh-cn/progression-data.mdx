@@ -1,0 +1,174 @@
+---
+title: "身份进阶图数据"
+description: "身份图字段、前置关系、消耗、校验与重载行为。"
+category: data
+order: 135
+updated: 2026-09-19
+---
+
+进阶图将一个 Origins 身份层中的身份映射为稳定节点，并用有向边定义前置关系。它决定玩家可以解锁和重返哪些身份；节点位置与阶位标签只影响展示。
+
+## 文件放在哪里
+
+路径为 `data/<namespace>/progression_graphs/<path>.json`，资源 ID 为 `<namespace>:<path>`。每个文件定义一张图。同一资源路径由通常的数据包优先级选择文件；替换文件之间不会合并节点。
+
+不同图 ID 之间，同一身份层的同一目标只能归属一张图。系统按图 ID 的字典序处理，后遇到的冲突图会整张被拒绝。同一目标出现在不同身份层中则不冲突。
+
+内置文件为 `isekaiexpansion:origin`、`isekaiexpansion:class` 与 `isekaiexpansion:profession`。修改内置分支时应替换对应图文件；另加一个包含相同身份层与目标的文件会发生归属冲突。
+
+## 最小示例
+
+以下将内置种族图的基础龙节点缩减为必填字段。它能加载，但必须添加其他节点与连接后才会提供身份切换。
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "dragon_base",
+      "target": "isekaiorigins:dragon",
+      "position": [
+        0,
+        0
+      ]
+    }
+  ]
+}
+```
+
+## 字段
+
+### 图
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `layer` | `identifier` | 必填 | Origins 身份层；打开界面或切换身份时解析，JSON 读取时不查注册表。 |
+| `mode` | `enum(EVOLUTION, PROMOTION)` | 必填 | 展示模式。忽略首尾空白与大小写；两种模式使用相同的解锁规则。 |
+| `nodes` | `array<object>` | 必填 | 至少 1 个节点；为符合网络限制，最多使用 512 个。字段见下表。 |
+| `edges` | `array<object>` | `[]` | 有向前置关系。空数组表示节点互不连接；网络兼容上限为 1024 条。 |
+
+### 节点
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `nodes[].id` | `string` | 必填 | 图内存档键，匹配 `[a-z0-9_.-]{1,64}`，不得重复。 |
+| `nodes[].target` | `identifier` | 必填 | 目标 Origin 身份；同一图中及同一身份层的各图之间不得重复。实际切换时检查资格。 |
+| `nodes[].rank` | `string` | `"base"` | 展示标签；空白也视为 `base`。最多 64 个字符。优先使用 `screen.isekaiexpansion.progression.rank.<小写 rank>` 翻译，否则显示整理后的文本。 |
+| `nodes[].position` | `array<number>` | 必填 | 恰好 2 个有限坐标 `[x, y]`，各为 −4–4。x 正方向向右，y 正方向向下；不影响前置关系。 |
+| `nodes[].hold_ticks` | `integer` | `30` | 客户端长按确认时长：10–200 刻（0.5–10 秒），默认 30 刻（1.5 秒）。越界拒绝，不截断。 |
+| `nodes[].icon` | `identifier` | `null` | 贴图资源；缺省显示头像占位图。加载时只检查 ID 语法，不检查贴图是否存在；使用完整 `textures/...png` 路径。 |
+| `nodes[].name` | `string` | `""` | 覆盖 Origin 名称的翻译键；空白使用身份名，无法解析时使用目标 ID。网络上限 256 个字符。 |
+| `nodes[].description` | `string` | `""` | 覆盖 Origin 描述的翻译键；空白使用身份描述或缺失描述提示。网络上限 256 个字符。 |
+| `nodes[].requirements` | `array<object>` | `[]` | 首次解锁必须满足全部条件；空数组无额外条件。网络兼容上限为 16 项。 |
+
+### 连接
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `edges[].from` | `string` | 必填 | 已存在的前置节点 ID；不能自连，也不能重复同一有向连接。 |
+| `edges[].to` | `string` | 必填 | 已存在的目标节点 ID；全部入边的前置节点均须满足。有向环会使整图被拒绝。 |
+
+### 条件
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `nodes[].requirements[].type` | `enum(PLAYER_LEVEL, EXPERIENCE_LEVEL, ADVANCEMENT, ITEM)` | 必填 | 条件类型；忽略首尾空白与大小写。行为见下表。 |
+| `nodes[].requirements[].target` | `identifier` | `null` | `ITEM` 与 `ADVANCEMENT` 必填，分别为物品或进度 ID；其他类型不使用。填写后均检查 ID 语法。 |
+| `nodes[].requirements[].amount` | `integer` | `1` | 最低等级或物品数量，必须至少为 1；`ADVANCEMENT` 同样要求正数，但不再使用其数值。 |
+| `nodes[].requirements[].consume` | `boolean` | `false` | 只有 `ITEM` 与 `EXPERIENCE_LEVEL` 可设为 `true`。首次解锁时支付，重返已记录节点不重复收费。 |
+
+| 类型 | 检查 | 消耗与例外 |
+| --- | --- | --- |
+| `PLAYER_LEVEL` | Isekai Core 玩家等级 ≥ `amount`。 | 不可消耗；与原版经验等级不同。 |
+| `EXPERIENCE_LEVEL` | 原版经验等级 ≥ `amount`。 | 可选消耗扣除等级，不是原始经验点。创造模式仍须满足等级，但不支付。 |
+| `ADVANCEMENT` | 指定进度存在且已完成。 | 不可消耗；未知进度不能通过检查。 |
+| `ITEM` | 物品已注册且背包数量 ≥ `amount`。 | 可选消耗物品。创造模式跳过数量与支付，但物品 ID 仍须有效。 |
+
+全部条件先基于支付前的状态检查，再依次扣除消耗。校验不会汇总同一物品的重复消耗或多条经验等级消耗。同一种消耗资源应合并为一项条件，不要将分别满足每行理解为足以支付总额。
+
+首次解锁至少需要一个入边前置节点，而且每个前置节点都必须是当前身份或已记录解锁。没有入边的未访问节点不能通过此界面解锁。重返已记录节点时跳过前置与条件，但目标仍须有效，并与当前身份处于同一无向连通分量。
+
+## 完整示例
+
+以下为现有龙分支添加演示消耗。这些消耗只是编写示例，内置龙分支当前的条件列表均为空。可在测试数据包中替换 `isekaiexpansion:origin`；注意，这份精简节点列表也会替换掉其他内置种族节点。
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "dragon_base",
+      "target": "isekaiorigins:dragon",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "raevyx",
+      "target": "isekaiorigins:raevyx",
+      "rank": "advanced",
+      "position": [
+        0,
+        -2
+      ],
+      "hold_ticks": 30,
+      "icon": "isekaiexpansion:textures/gui/icon/origins/hdicon_raevyx.png",
+      "requirements": [
+        {
+          "type": "player_level",
+          "amount": 20
+        },
+        {
+          "type": "experience_level",
+          "amount": 12,
+          "consume": true
+        },
+        {
+          "type": "advancement",
+          "target": "minecraft:story/enter_the_nether"
+        },
+        {
+          "type": "item",
+          "target": "minecraft:amethyst_shard",
+          "amount": 8,
+          "consume": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "dragon_base",
+      "to": "raevyx"
+    }
+  ]
+}
+```
+
+## 校验
+
+缺失必填字段、ID 语法错误、不支持的模式或条件类型、数组形状错误、坐标非有限或越界、长按时长无效、条件数量非正、节点 ID 或目标重复、连接端点不存在、自连、重复边及有向环都会使该文件被拒绝。加载器记录错误并继续处理其他图，最后用成功解析且通过归属检查的图替换旧目录。加载失败的图不会保留旧版本。
+
+未知键会被忽略。空对象缺少必填字段，空节点数组也会失败。显式 `null` 不等于省略：可选字段通常会尝试转换已存在的值，因此转换失败。请使用正确的 JSON 字符串、整数和布尔值；部分基础类型转换较宽松，但不构成额外支持的字段类型。
+
+图加载时不解析语法有效的身份层、Origin、物品或进度 ID。实际切换时，目标不能是空身份，身份层必须启用，且目标必须属于该玩家可用的层成员或被 Origins 标记为特殊身份。未知物品或进度条件在求值时失败。贴图是否存在由客户端资源决定。此加载器不负责 Origin 的普通选择规则，应在身份定义中另行配置。
+
+整个目录最多使用 64 张图，每图最多 512 个节点、1024 条边，每节点最多 16 项条件。阶位标签最多 64 个字符，名称与描述键最多 256 个字符。这些是网络限制，JSON 构造阶段未全部执行；超大图可能加载成功却在同步时失败。
+
+图 ID 与节点 ID 是存档键。重命名不会迁移解锁历史；复用已保存的节点 ID 会让新目标继承该节点的解锁状态。删除的 ID 不会自动从玩家存档中清除。
+
+## 重载
+
+定义作为服务端数据加载，支持 `/reload`。整次重载成功后，会向在线客户端推送目录与玩家状态，并使已打开的会话失效，即使内容没有变化也如此。确认节点前应重新打开界面。
+
+目录版本由有序图内容计算，包括展示字段与列表顺序。加入服务器时，客户端可复用版本相同的目录，但始终接收自己的最新状态。图重载后，已受理的转换仍保留待切换目标；支付与中断顺序见[身份进阶运行时](/zh-cn/dev/progression/)。
+
+## 相关页面
+
+- [身份与进阶](/zh-cn/wiki/identity/)——操作方式、现有分支与重返已解锁身份。
+- [身份进阶运行时](/zh-cn/dev/progression/)——会话、持久化、数据包与转换。
+- [身份图标](/zh-cn/dev/origin-icons/)——贴图路径与头像渲染。
+- [变身数据](/zh-cn/wiki/morph-data/)——身份授予的能力与形态。

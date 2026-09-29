@@ -1,0 +1,127 @@
+---
+title: "Morph client presentation and compatibility"
+description: "Pulse-driven model swaps, first-person arms, cameras, input, HUD, textures and client extension hooks."
+category: client
+order: 115
+updated: 2026-09-19
+---
+
+Morph presentation is a client state machine layered over the server component. It coordinates the visible form with Particlize coverage while input, collision dimensions and native species simulation retain their own authority.
+
+## What it does
+
+`ClientMorphRenderManager` resolves a player to the currently visible unspawned form. The entity dispatcher selects that form's renderer inside the host's render call. Player-rig forms also open `HumanoidMorphRenderScope` to borrow the host animation pose. These types live under client/internal implementation packages rather than a public client facade.
+
+## Runtime model
+
+### Model swap and render ordering
+
+The component's half-transition predicate does not directly decide the rendered model. `MorphPresentationController` waits for the morph pulse to reach `COVERED` or `COMPOSING`, then reveals the incoming form or hides the outgoing form. If no pulse exists, settled `ACTIVE` reveals the form and settled `NONE` clears it. An outgoing presentation can remain while coverage is still pending even after the authoritative component clears.
+
+The dispatcher resolves presentation before wrapping Particlize and shader capture. Detailed surface Particlize takes precedence over ShaderFX capture. Shadow passes respect Particlize suppression and bypass the normal capture wrapper. AcceleratedRendering pipeline selection is scoped and restored in `finally`; it is not a blanket claim that every third-party render layer supports every effect.
+
+Presentation updates copy host state while optionally preserving native form rotation. For forms without player-rig control or a registered form ticker, fallback animation stacks advance at most once per host age tick. Registered tickers own their species advancement; rendering must not add a second tick.
+
+### Input and HUD
+
+Active modular forms intercept attack/use inputs when no screen is open. Primary press repeats every 2 client ticks; secondary sends press/release edges without that repeat loop. Server cadence and cooldown remain authoritative. Opening a screen or leaving the accepted state releases held ability inputs. Join clears remembered input so a previous connection cannot leave a held button latched.
+
+Attack, use and block breaking are blocked during transitions and for modular forms; active player rigs retain player controls. Entering a non-player-control phase cancels an ongoing human weapon upswing. Sneaking while an active player rig is sprinting cancels sprint.
+
+Special travel normally uses jump double-tap within 400 ms. `PRESS` handlers activate on the first jump press, but deactivation still takes the double-tap branch. The client predicts only when the handler allows it, then sends the authoritative request. Jump/sneak are suppressed by an open screen; movement bytes come from the player's movement axes and are not separately screen-gated in this controller.
+
+The ModernUI HUD is hidden with no player/world, an open screen, disabled HUD or no morph. Player-rig forms use a compact display without ability cards. Primary always shows the chain state rather than a primary cooldown; secondary shows display-resolved cooldown and a readiness bar. Card labels are literal `LMB` and `RMB`, even though input follows the configured attack/use bindings.
+
+For unlimited forms, the main bar shows transition progress and stays full while active. For timed forms it shows remaining-duration fraction, decreasing only while active. The HUD extrapolates from a captured monotonic clock at 20 ticks per second; it does not mutate server cooldown. Updates coalesce before posting to the UI thread. Drift tolerance is the larger of 0.002 progress or 0.1 seconds at the current rate.
+
+## Contracts
+
+### Textures and feature layers
+
+`MorphSkinRegistry` discovers PNGs under `textures/morphs` on client resource reload. Candidate paths and skin precedence are in [morph data](/en/wiki/morph-data/). A variant provider that owns form textures disables this generic override.
+
+`MorphTextureOverrideScope` remaps only the renderer's original texture ID, and restores the prior scope on close. Other feature textures remain unchanged unless they use that exact same ID. The RenderLayer mixin covers entity solid, cutout, no-cull, no-cull Z-offset, translucent, translucent-cull, translucent-emissive, smooth-cutout, no-outline and alpha constructors. It does not intercept arbitrary renderer-specific texture plumbing.
+
+HUD ability translation checks `morph_ability.<namespace>.<ability-path>.<entity-namespace>.<entity-path>`, then the generic ability key, then the raw ability path. Slashes become dots in translation keys. Add translations through `language_assemble`.
+
+### First-person player rigs
+
+Player Animator's first-person pass keeps the host player renderer for player-rig presentations, then substitutes the appropriate form arm. During the fully covered swap, hands are suppressed. Punchy yields when Player Animator's `THIRD_PERSON_MODEL` mode owns those hands, preventing both paths from drawing them.
+
+`MorphFirstPersonArmRenderer` supports a `BaseNpcEntity` through `GeoHumanNpcRenderer.renderFirstPersonArm`, or a living renderer whose model exposes the requested arm through the biped/named-child bridge. A tagged entity with an unsupported renderer or absent arm can render no replacement arm; membership in `morph_player_rigs` alone is insufficient.
+
+The caller's already-posed arm supplies the transform. Vanilla-model replacement temporarily resets the form arm transform, makes it visible, renders it and restores both properties in `finally`. Gecko NPC rendering uses its dedicated arm path. The ordinary humanoid-player arm path is documented separately in [humanoid runtime](/en/dev/humanoid-runtime/).
+
+Player Animator alignment offsets its model space by vanilla pose eye height minus the smoothed camera eye height. Baselines are 0.4 for swimming/fall-flying/spin attack, 1.27 crouching and 1.62 otherwise. It applies only when the local first-person camera focuses that player and ignores offsets within 0.0001. This aligns hands to a changing camera; it does not change the player's collision box.
+
+### Camera and perspective
+
+| Setting / value | Default | Contract |
+| --- | --- | --- |
+| `morphPerspectiveMode` | `AUTO_THIRD_PERSON` | Local config, morph category. |
+| `AUTO_THIRD_PERSON` | selected | On entry from `NONE`, non-player rigs switch to rear third person and remember the old view. |
+| `KEEP` | unselected | Does not apply automatic perspective switching. |
+
+On exit to `NONE` or disconnect, the controller restores the old perspective only if the current view still equals the perspective it applied. A manual view change is respected. Switching between existing forms does not recreate that initial entry event.
+
+`MorphCameraSubject` prefers the viewer's own dimension-active form, otherwise a mounted player's supported carrier form. Providers are sampled only in third person. `MorphCameraPose` contains backward distance, lateral shift, vertical shift and pitch offset; the record itself performs no numeric validation.
+
+The backward distance enters vanilla collision clipping. Lateral/vertical offsets apply afterward without that same clip call, and final pitch clamps to −90…90. Cutscene camera blending runs after the morph camera adjustment. A provider must not assume it has exclusive camera ownership.
+
+### Client extension hooks
+
+These are client implementation registries, not `api.client` facades. Register during client initialisation only.
+
+| Registry / callback | Registration key | Behaviour |
+| --- | --- | --- |
+| `MorphClientAbilityPreviewRegistry` / `handle(player, morph, form, slot, action)` | exact entity type | Duplicate throws. Runtime callback failure logs and removes the preview. Built-in warden activation sends status 4 for melee or 62 for sonic charge. |
+| `MorphClientFormSkillPreviewRegistry` / `handle(player, morph, form, actionId, inputAction)` | entity type + action ID | Duplicate throws; failing callback is removed for that pair. |
+| `MorphCameraRegistry` / `sample(player, morph, form, tickDelta)` | exact entity type | Duplicate throws. Null sample deactivates that provider; sample failure removes it. Switching provider resets the previous provider. |
+| `MorphPassengerPoseRegistry` / `apply(host, form, passenger, seatIndex, matrices, tickDelta)` | exact entity type | Requires active carrier, mount handler and real passenger index. Duplicate throws; failure removes the pose. |
+
+Ability and form-skill preview packets go to tracking players plus the host, then execute on the client thread only while that player's form is active. They carry a host entity ID and slot/action information, not a form revision; do not treat a preview packet as proof of the originating session after a rapid form switch.
+
+`MorphCameraRegistry.reset` clears the active provider and calls its reset hook without a general exception guard. Keep reset safe even after partial initialisation or failed sampling. Passenger pose hooks should restore any temporary matrix changes they own when they return or fail.
+
+### Compatibility boundaries
+
+| Integration | Actual bridge |
+| --- | --- |
+| Player Animator / Better Combat | Host pose and held-item transforms drive compatible player-rig forms; fallback animation advancement is once per host tick when no dedicated ticker owns it. |
+| Better Animations | Optional reflective lean/squash bridge; skipped while sprinting or sneaking, neutralised while fall-flying. Reflection/type failure disables this bridge for the process. |
+| Crawl | Optional reflective crawling state for player rigs; applies crawl orientation from the host renderer. Resolution failure gives no integration, later invocation failure disables it. |
+| Presence Footsteps | Non-player rigs use the form's generator only when the engine enables that form and authored locomotion exists for its exact entity ID. Vanilla step sound is suppressed only when such a generator exists. |
+| Punchy | Uses morph arm substitution for supported player rigs and shares Particlize coverage; avoids duplicating Player Animator-owned hands. |
+| Saints Dragons | Loaded only when the mod is present. Client bootstrap catches linkage/runtime failure and logs it; native species registration and simulation require the common bridge too. |
+
+Sound source selection follows `usesMorphDimensions`. Form sound state is synchronised before native step, hurt, death or ambient lookup. Player-rig footsteps remain on the normal player path; absence of a Presence Footsteps form definition should not suppress the native fallback.
+
+Body-relative visuals use `EntityVisualBounds`: current bounding-box dimensions and current pose eye height. Its geometry key includes dimensions/eye height quantised at 10000, pose, morph revision and the dimension-owner flag. Anchors add a fraction of that live height to the chosen feet position. This is a bounds contract, not a sampled rendered mesh or a guarantee of exact pulse-timed model geometry.
+
+## Extending it
+
+Keep four concerns separate: server phase, client visible presentation, collision dimensions and native rotation. Use the presentation resolver for rendering, component state for authority, live bounds for spatial attachments and registered native tickers for species animation. Avoid copying a single phase check into all four paths.
+
+A new player-rig renderer must provide compatible body/arm names and first-person extraction. A new modular species can add preview, camera and passenger pose hooks without replacing the host input or world entity. Pair native tick ownership with detach cleanup, and restore all scoped textures, matrices and render pipeline state.
+
+UI updates belong on ModernUI's UI thread; gameplay input sampling remains on the client tick thread. Do not read or mutate the live world from an asynchronous UI animation callback. Test resource reload and reconnect because renderer registries and failed-integration flags have different lifetimes.
+
+## Verifying
+
+Use an owner and observer on a dedicated server. Enter and exit with normal, delayed and missing pulse effects; check that the old form stays covered until the swap and that the component's dimension changes still behave correctly. Repeat in shadow passes, detailed Particlize, ShaderFX and screen previews.
+
+Test first/third person, manual perspective changes, mounted carrier cameras, camera obstruction and cutscene overlap. For player rigs, check both hands with Punchy and Player Animator, changing eye height and unsupported arm geometry.
+
+Hold primary, tap/hold secondary, open a screen mid-hold, change key bindings and reconnect. Compare client input cadence with server acceptance. Verify a `PRESS` travel form's entry and double-tap exit independently.
+
+Inspect HUD at empty/full progress and different refresh rates, timed expiry, long translations and compact player-rig mode. Check texture overrides with distinct feature textures and with a feature deliberately sharing the base ID. Compare Presence Footsteps authored and unauthored forms.
+
+## Related
+
+- [Saints Dragons bridge](/en/dev/morph-dragons/)
+
+- [Morph lifecycle](/en/dev/morphing/)
+- [Morph services](/en/dev/morph-api/)
+- [Morph data](/en/wiki/morph-data/)
+- [Humanoid runtime](/en/dev/humanoid-runtime/)
+- [Particlize](/en/dev/particlize/)

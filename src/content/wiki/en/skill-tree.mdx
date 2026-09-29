@@ -1,0 +1,166 @@
+---
+title: "Wheel of Fate"
+description: "Spend main-tree points on seven constellations, passive powers and shared attribute paths."
+category: core
+order: 36
+updated: 2026-09-24
+---
+
+The Wheel of Fate is the shared main skill tree, with 379 nodes arranged around Appraisal. Its normal spending limit is 100 points, so choosing routes and a constellation's final power matters more than filling the whole graph.
+
+## What your points buy
+
+| Feature | Current value |
+| --- | --- |
+| Main category | `isekaiskills:main`, open by default |
+| Starting points | 1 |
+| Points on a player-level increase | The increase in IsekaiCore level |
+| Normal spending limit | 100 |
+| Root | Appraisal, costs 1; unlock it yourself |
+| Constellations | 7, with 48 nodes each |
+| Shared confluence nodes | 42, alongside the root and constellation nodes |
+
+With ordinary progression from level 1, the starting point plus level gains gives a point budget equal to your player level, up to the normal spending limit. Vanilla experience levels do not supply these points. Other point sources or administrator actions can change the stored total.
+
+Appraisal grants `isekaiskills:spassive_appraisal`, a passive marker for integrations. It does not add attributes or implement an inspection overlay itself; what an overlay reveals depends on the integration that consumes the marker.
+
+## Choose a constellation
+
+| Constellation | Primary attribute | Midway passive | Capstones (exclusive) |
+| --- | --- | --- | --- |
+| Aegis | Constitution | Unbroken Body | World Anchor / Guardian Aegis |
+| Warbrand | Strength | Battle Instinct | Colossus Slayer / War God's Echo |
+| Gale | Dexterity | Archer's Tempo | Horizon Piercer / Windrunner |
+| Moonblade | Technique | Perfect Form | Thousandfold Insight / Bloodless Edge |
+| Oracle | Perception | Sixth Sense | Causality Sight / Predator's Certainty |
+| Astral | Intelligence | Astral Circuit | Archmage Formula / Mana Sovereign |
+| Sanctum | Belief | Merciful Heart | Saint's Covenant / Miracle Weaver |
+
+Each constellation has 5 stages. Within a stage, routes lead from an entry node to a deeper node, then to a weave and the stage gate. A junction accepts **1 incoming route** in the bundled tree; several incoming lines do not mean you must buy every predecessor.
+
+The following gates also require your IsekaiCore player level and points already spent across the **whole category**. The spent-point requirement is checked before buying the node.
+
+| Gate | Player level | Points already spent | Node cost |
+| --- | --- | --- | --- |
+| Stage 1 | 10 | 8 | 2 |
+| Stage 2: midway passive | 20 | 17 | 3 |
+| Stage 3 | 35 | 32 | 2 |
+| Stage 4 | 50 | 47 | 2 |
+| Stage 5 | 70 | 67 | 2 |
+| Either capstone | 90 | 82 | 8 |
+
+The capstones of the same constellation exclude each other. Spending in another constellation can satisfy a gate's category-wide spending threshold; it does not replace the incoming route or player-level check.
+
+Confluence nodes connect neighbouring constellations in the table's order, wrapping from Sanctum to Aegis. Their level requirements are 5, 15, 25, 42, 60 and 80, moving outwards. Each costs 2 and adds +1 to each neighbouring primary attribute. These are endpoints: buying one does not open a route into the next constellation.
+
+Buying every available node in a constellation, Appraisal and 1 of its capstones costs 90 points. That is a full-branch total, not the shortest route to the capstone. The entire graph has 764 points of configured costs; excluding 1 capstone per pair leaves 708, well above the normal budget.
+
+## Attribute nodes and passive powers
+
+| Node kind | Cost | Reward |
+| --- | --- | --- |
+| Constellation calling | 1 | +2 primary attribute |
+| Ordinary primary attribute | 1 | +1 primary attribute |
+| Enhanced primary attribute | 2 | +3 primary attribute |
+| Ordinary secondary attribute | 1 | Ordinary value below |
+| Enhanced secondary attribute | 2 | Enhanced value below |
+| Constellation weave | 3 | +1 primary attribute and the ordinary secondary value |
+| Confluence | 2 | +1 to each of its primary attributes |
+
+The tables below show the actual additive attribute values. Fractional critical and evasion values use their raw fraction: +0.03 means +3 percentage points. A flat movement-speed addition stays a flat value; Windrunner's +0.01 is not an unconditional percentage multiplier. See [Attributes and effects](/en/wiki/attributes-and-effects/) for how each attribute is used.
+
+| Attribute | Ordinary node | Enhanced node |
+| --- | --- | --- |
+| Max Shield Gauge | +6 | +15 |
+| Tenacity | +2 | +6 |
+| Shield Gauge Regen Speed | +0.1 | +0.25 |
+| Armor Penetration | +2 | +6 |
+| Melee Crit. Chance | +0.01 | +0.03 |
+| Melee Crit. Damage | +0.03 | +0.09 |
+| Range Crit. Chance | +0.01 | +0.03 |
+| Range Crit. Damage | +0.03 | +0.09 |
+| Ability Haste | +2 | +6 |
+| Evasion | +0.01 | +0.03 |
+| Debuff Accuracy | +2 | +6 |
+| Stealth Efficiency | +3 | +8 |
+| Max Astral Energy | +5 | +15 |
+| Energy Regen Speed | +0.05 | +0.15 |
+| Magic Crit. Damage | +0.03 | +0.09 |
+| Heal Amplification | +2 | +6 |
+| Shield Power | +2 | +6 |
+
+Midway passives cost 3; capstones cost 8. Their additions are:
+
+| Power | Flat attribute additions |
+| --- | --- |
+| Unbroken Body | Constitution +4; Tenacity +5 |
+| World Anchor | Constitution +6; Knockback Resistance +0.15; Environmental Resistance +5 |
+| Guardian Aegis | Max Shield Gauge +15; Shield Power +8; Shield Gauge Regen Speed +0.25 |
+| Battle Instinct | Strength +4; Armor Penetration +3 |
+| Colossus Slayer | Strength +5; Armor Penetration +7; Melee Crit. Damage +0.1 |
+| War God's Echo | Strength +6; Omnivamp +3; Enmity +5 |
+| Archer's Tempo | Dexterity +4; Range Crit. Chance +0.03 |
+| Horizon Piercer | Dexterity +5; Range Crit. Damage +0.1; Armor Penetration +5 |
+| Windrunner | Dexterity +5; Evasion +0.04; Movement Speed +0.01 |
+| Perfect Form | Technique +4; Ability Haste +3 |
+| Thousandfold Insight | Technique +5; Melee Crit. Chance +0.03; Range Crit. Chance +0.03 |
+| Bloodless Edge | Technique +5; Melee Crit. Damage +0.12; Omnivamp +3 |
+| Sixth Sense | Perception +4; Evasion +0.02 |
+| Causality Sight | Perception +5; Melee Crit. Chance +0.02; Range Crit. Chance +0.02; Magic Crit. Chance +0.02 |
+| Predator's Certainty | Perception +5; Debuff Accuracy +6; Stealth Efficiency +8 |
+| Astral Circuit | Intelligence +4; Max Astral Energy +10 |
+| Archmage Formula | Intelligence +6; Magic Penetration +7; Magic Crit. Damage +0.08 |
+| Mana Sovereign | Intelligence +5; Max Astral Energy +20; Energy Regen Speed +0.15; Ability Haste +8 |
+| Merciful Heart | Belief +4; Heal Amplification +5 |
+| Saint's Covenant | Belief +6; Shield Power +10; Tenacity +5 |
+| Miracle Weaver | Belief +5; Heal Amplification +10; Ability Haste +8 |
+
+## Learnable active powers
+
+| Constellation | Active power | Power ID |
+| --- | --- | --- |
+| Aegis | Aegis Domain | `isekaiskills:active_aegis_domain` |
+| Warbrand | Heroic Rush | `isekaiskills:active_heroic_rush` |
+| Gale | Starfall Volley | `isekaiskills:active_starfall_volley` |
+| Moonblade | Thousandfold Edge | `isekaiskills:active_thousandfold_edge` |
+| Oracle | Providence Mark | `isekaiskills:active_providence_mark` |
+| Astral | Astral Nova | `isekaiskills:active_astral_nova` |
+| Sanctum | Sanctuary | `isekaiskills:active_sanctuary` |
+
+Each listed power has 3 ranks. Its nodes sit in stages 3, 4 and 5, require player levels 30, 50 and 70, and cost 0 points once the route is available. Repeated unlocks raise the same power's rank.
+
+These powers currently have **no combat effect**. Their configured cooldown and astral-energy cost are both 0; unlocking or placing one on the learned-skill loadout does not give it the attacks, protection or healing suggested by its name. Their rank and loadout integration exist, while their effect bodies are empty.
+
+## Use the skill-tree screen
+
+Open the skill tree with its assigned key. Select a node to see its cost, prerequisites, local condition and exclusions; hold the primary mouse button on an eligible node, or hold Enter or Space, for 1.2 seconds to request an unlock.
+
+| Control or state | Behaviour |
+| --- | --- |
+| Drag | Pan; moving more than 5 interface units cancels the hold |
+| Mouse wheel | Zoom around the pointer |
+| Arrow keys | Select a nearby node in that direction |
+| Home | Fit the graph |
+| `=` / `-` | Zoom in / out |
+| Search | Match localised titles and descriptions; cycle through matches |
+| Escape or skill-tree key | Close; the skill-tree key does not close while a text field has focus |
+| Pending request | Further unlocks wait for the response, up to 5 seconds |
+
+Releasing the button, leaving the graph, losing focus, changing category or losing eligibility cancels an unfinished hold. A completed hold submits a request; the unlock animation waits for the server to show the node as unlocked. A timeout means confirmation was not observed, not that the server rolled the request back.
+
+The screen refreshes its snapshot every 150 milliseconds. It shows inaccessible categories but prevents their unlocks. Race, class and discipline requirements can restrict other categories; they do not make the shared main tree exclusive to a race or class.
+
+## Progression and other systems
+
+| Change | Effect on the tree |
+| --- | --- |
+| Player level increases | Adds the level difference to the main tree |
+| Player level is reverted | Resets main-tree unlocks and sets automatic points to the new level minus 1 |
+| Player level is reset | Erases the main category's saved state |
+| A requirement stops being met | Blocks a new unlock; this check alone does not revoke an unlocked node |
+| Requirement data is reloaded | Server checks use the new data; reconnect to refresh the client's requirement catalogue |
+| Learned-skill loadout | Active-power ranks use the same learned-power source and reconcile with loadout changes |
+
+## Where the data lives
+
+The bundled graph is under `data/isekaiskills/puffish_skills/categories/main/`; additional conditions are in `data/isekaiexpansion/skill_requirement/main.json`. See [Skill-tree data](/en/wiki/skill-tree-data/) for local conditions and power rewards, [Progression](/en/wiki/leveling/) for level behaviour, and [Skill-tree runtime](/en/dev/skill-tree/) for implementation and authoring tools.

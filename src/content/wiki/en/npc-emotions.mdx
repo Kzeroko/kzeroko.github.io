@@ -1,0 +1,118 @@
+---
+title: "NPC moods and personalities"
+description: "How named characters react, recover and expose mood information to dialogue."
+category: core
+order: 70
+updated: 2026-09-19
+---
+
+Named NPCs react emotionally to damage, gifts, consumables and their current activity. Mood is the current state; personality shapes the strength and recovery of that response. Mood intensity is separate from favor.
+
+## Reading a mood
+
+Each mood holds immediate impulse, lingering memory and situational context separately, each from 0–100. Displayed intensity is their sum, capped at 100. The primary mood is selected through activation thresholds and switching rules.
+
+| Mood | Name | Typical source or meaning |
+| --- | --- | --- |
+| `composed` | Composed | Settled baseline; no stronger active emotion. |
+| `joyful` | Joyful | Positive gifts and consumed food or drink. |
+| `affectionate` | Affectionate | Positive gift reactions scaled by attachment. |
+| `flustered` | Flustered | Gift-related embarrassment or emotional exposure. |
+| `excited` | Excited | Combat, attacks and consumables. |
+| `focused` | Focused | Work at an activity point and combat. |
+| `bored` | Bored | Sustained inactivity without another activity. |
+| `uneasy` | Uneasy | Damage, danger and low health during combat. |
+| `hurt` | Hurt | Damage from a friendly/trusted player. |
+| `angry` | Angry | Damage and hostile reactions. |
+| `exhausted` | Exhausted | Low health and its lingering effects. |
+
+Ordinary citizens and other non-unique NPCs do not run this persistent emotional simulation. Dialogue reports `composed` at intensity 0 with no secondary mood. Body emotes and emoji stickers are separate presentation systems, so their playback does not establish a mood intensity.
+
+## What changes it
+
+| Situation | Reaction |
+| --- | --- |
+| Positive gift | Adds joy, affection and fluster, while soothing boredom, hurt and anger. |
+| Accepted gift with 0 favor gain | Brief fluster and slight boredom relief; this does not mean the gift was rejected. |
+| Eating or drinking | Small joy/excitement response; soothes boredom and exhaustion. |
+| Performing an attack | Brief excitement/focus; soothes boredom. |
+| Damage from a friendly or trusted player | Hurt and anger. |
+| Other damage | Uneasiness; another living attacker also causes anger. |
+| Damage during combat | Can also add excitement; critically low health adds exhaustion and uneasiness. |
+
+These reactions come from actual events. Simply standing near a player does not continually generate affection or joy. Positive events can soften negative intensity without clearing all lingering memory.
+
+### Current situation
+
+| Condition | Base context target |
+| --- | --- |
+| Ordinary state | Composed 9 |
+| Sleeping | Composed 22 |
+| Busy at an activity point | Focused 34 × energy |
+| In combat | Focused 16 × courage; excited 23 × energy × courage |
+| Awake and health fraction below 0.50 | Exhausted 38 × danger; also uneasy 25 × danger × inverse courage in combat |
+| Sustained inactivity | After 25 once-per-second idle samples, ramps over 100 samples toward bored 30 × energy |
+
+Danger is `(0.50 - healthFraction) / 0.50`. Personality further scales each mood target; overlapping sources use the larger target. Dialogue, activity points, combat, item use, sleep or movement interrupts boredom accumulation. Unloaded time does not add an equivalent number of idle samples.
+
+## Recovery and switching
+
+Impulse recovers faster and memory more slowly, both by linear intensity loss. Context approaches the current situational target. Soothing removes impulse first, then context, then memory. Recovery speed varies with mood and personality.
+
+| Rule | Value |
+| --- | --- |
+| Context update and ordinary primary-mood resolution | Every 20 ticks (1 second) |
+| Decisive lead allowing an early switch | 3.5 intensity |
+| Current-mood dwell condition | 60 ticks (3 seconds); a decisive lead or current mood below threshold allows an earlier switch |
+| Elapsed-world-time recovery cap after loading | 7 days |
+| Maximum time applied to each context step | 2 seconds |
+
+The strongest other active non-composed mood can appear as a secondary mood. Remaining hurt after a gift does not mean the gift had no effect: it may have reduced an intensity that has not yet recovered fully.
+
+## Personalities
+
+Personality changes temper, recovery, energy, empathy, pride, attachment, courage, composure and overall reactivity. It is character configuration and does not change with the current primary mood. These are the stable dialogue keys and in-game names; the developer reference contains the complete numeric profiles.
+
+| Personality | Name |
+| --- | --- |
+| `default` | Default |
+| `tsundere` | Tsundere |
+| `optimistic` | Optimistic |
+| `yandere` | Yandere |
+| `gloomy` | Gloomy |
+| `kuudere` | Kuudere |
+| `genki` | Genki |
+| `loyal` | Loyal |
+| `shy` | Shy |
+| `dojikko` | Dojikko |
+| `lazy` | Lazy |
+| `tennen` | Tennen |
+| `chatterbox` | Chatterbox |
+| `mukuchi` | Mukuchi |
+| `ojou_sama` | Ojou-sama |
+| `onee_san` | Onee-san |
+| `tomboy` | Tomboy |
+| `bookworm` | Bookworm |
+| `trickster` | Trickster |
+| `cowardly` | Cowardly |
+| `justice` | Justice |
+| `workaholic` | Workaholic |
+| `chuunibyou` | Chuunibyou |
+
+## Information available to dialogue
+
+NPC dialogue supplies this metadata as read results, not as a mood configuration file to place in a data pack. Fallbacks describe an NPC without emotional simulation; personality still comes from the character's configuration.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `isekaiexpansion:npc_mood_key` | string | `composed` | Dominant mood key. |
+| `isekaiexpansion:npc_mood_intensity` | float | `0` | Dominant intensity divided by 100, clamped to 0–1. |
+| `isekaiexpansion:npc_secondary_mood_key` | string | `""` | Strongest other active non-composed mood, or empty. |
+| `isekaiexpansion:npc_secondary_mood_intensity` | float | `0` | Secondary intensity divided by 100, clamped to 0–1. |
+| `isekaiexpansion:npc_personality_key` | string | `default` | Configured personality key; independent of the current mood. |
+
+Use stable string keys in dialogue, not display names or internal ordinals. This provider does not add these fields to non-NPC dialogue.
+
+## Data ownership and related pages
+
+Mood and personality values are built into the mod. There is no dedicated mood JSON directory replaceable with `/reload`. See [NPC emotion runtime](/en/dev/npc-emotion/) for formula and personality changes, and [emoji data](/en/wiki/emoji-data/) for the separate sticker resource format.

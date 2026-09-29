@@ -1,0 +1,353 @@
+---
+title: "Spell data"
+description: "Current spell stages, projectiles, visuals, binding pools, item assignments and astral-energy maps."
+category: data
+order: 40
+updated: 2026-09-24
+---
+
+Spell Engine owns spell definitions, binding pools and item assignments; IsekaiExpansion adds a separate astral-energy map. This page is checked against Spell Engine 1.10.7+1.20.1 and covers the active-spell, projectile, visual and item formats used by this integration.
+
+## Where the files live
+
+| Resource | Path | Identity |
+| --- | --- | --- |
+| Spell | `data/<namespace>/spell/<path>.json` | Spell ID is `namespace:path`. |
+| Binding pool | `data/<namespace>/tags/spell/<path>.json` | Spell registry tag; use its ID without # in a container's pool. |
+| Item assignment | `data/<namespace>/spell_assignments/<item-path>.json` | Namespace and path select the item ID. |
+| Astral energy | `data/<namespace>/spell_energy/<path>.json` | Each file maps spell-ID strings to costs. |
+
+Same-path spell/assignment resources are selected by data-pack priority, not merged field by field. Energy files merge by iteration order without an explicit sort; avoid defining a spell's energy in multiple files. The bundled spell reference directories are examples outside the live `spell/` path and do not register their nested examples as playable spells.
+
+## Minimal example
+
+This reduced form of the bundled arcane-blast reference uses direct damage and aimed targeting, with no required external item or sound. Save it at a live spell path in your pack; the existing reference folder itself is not loaded as a spell.
+
+```json
+{
+  "school": "spell_power:arcane",
+  "active": {
+    "cast": {}
+  },
+  "target": {
+    "type": "AIM",
+    "aim": {}
+  },
+  "deliver": {
+    "type": "DIRECT"
+  },
+  "impacts": [
+    {
+      "action": {
+        "type": "DAMAGE",
+        "damage": {}
+      }
+    }
+  ]
+}
+```
+
+## Fields
+
+Defaults below apply when a field is omitted, not when an explicit null is supplied. The dependency's JSON model is permissive; a default of null can still be unusable for the selected execution branch.
+
+### Casting, targeting, impacts and costs
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `school` | `identifier` | `null` | Required for a usable magic spell; selects its registered power school. |
+| `type` | `enum` | `ACTIVE` | ACTIVE, PASSIVE or MODIFIER; this example is an active spell. |
+| `tier` | `integer` | `1` | Primary catalogue/binding tier; no range check in the JSON model. |
+| `sub_tier` | `integer` | `1` | Secondary ordering within a tier. |
+| `group` | `string` | `""` | Groups related spells for catalogue ordering. |
+| `range` | `number` | `50` | Targeting range in blocks before runtime modifiers. |
+| `learn` | `object` | `null` | Provide an object to make the spell available for binding. |
+| `learn.level_cost_per_tier` | `integer` | `3` | Binding level cost multiplier per tier. |
+| `learn.level_requirement_per_tier` | `integer` | `10` | Binding level requirement multiplier per tier. |
+| `active` | `object` | `null` | Active-spell configuration; provide for a timed active cast. |
+| `active.cast` | `object` | `{}` | Casting stage; omitted children take the defaults below. |
+| `active.cast.duration` | `number` | `0` | Seconds; 0 is instant. Use a positive finite value for timed casting. |
+| `active.cast.type` | `enum` | `STANDARD` | STANDARD, CHANNEL or CHARGE. Duration 0 makes the cast instant. |
+| `active.cast.haste_affected` | `boolean` | `true` | Allows dependency haste handling. |
+| `active.cast.movement_speed` | `number` | `0.2` | Movement-speed multiplier during casting. |
+| `active.cast.channel` | `object` | `null` | Provide for CHANNEL; no effect on other cast types. |
+| `active.cast.channel.ticks` | `integer` | `0` | Total deliveries over the duration, not an interval in game ticks. Use a positive count. |
+| `active.cast.channel.release_fx` | `boolean` | `false` | Whether channel deliveries replay release effects. |
+| `active.cast.animation` | `object` | `null` | Player-animation object described below. |
+| `active.cast.start_sound` | `object` | `null` | Sound at casting start. |
+| `active.cast.sound` | `object` | `null` | Casting sound object. |
+| `active.cast.particles` | `array<object>` | `[]` | Continuous particle groups, using the particle table below. |
+| `target` | `object` | `{}` | Target search configuration. |
+| `target.type` | `enum` | `CASTER` | NONE, CASTER, AIM, BEAM, AREA or FROM_TRIGGER; provide the matching sub-object when required. |
+| `target.cap` | `integer` | `0` | Positive values cap target count; 0 means no cap. |
+| `target.aim` | `object` | `null` | AIM targeting options. |
+| `target.aim.required` | `boolean` | `false` | Requires an aimed entity to cast. |
+| `target.aim.sticky` | `boolean` | `false` | Keeps an already selected entity during casting. |
+| `target.aim.use_caster_as_fallback` | `boolean` | `false` | Falls back to the caster when aim finds no entity. |
+| `target.aim.reposition_vertically` | `number` | `0` | Vertical adjustment of an aimed position, ignored for entity targets. |
+| `deliver` | `object` | `{}` | Delivery stage. |
+| `deliver.type` | `enum` | `DIRECT` | DIRECT, PROJECTILE, METEOR, CLOUD, SHOOT_ARROW, AFFECT_ARROW, MELEE, STASH_EFFECT or CUSTOM. |
+| `deliver.delay` | `integer` | `0` | Delivery delay in ticks. |
+| `deliver.custom` | `object` | `null` | Required for a useful CUSTOM delivery. |
+| `deliver.custom.handler` | `identifier` | `null` | ID of an installed handler; a missing handler gives no successful custom delivery. |
+| `impacts` | `array<object>` | `[]` | Effects applied by the chosen delivery. An empty list supplies no impacts. |
+| `impacts[].chance` | `number` | `1` | Probability of this impact; author in 0–1. |
+| `impacts[].school` | `identifier` | `null` | Overrides the root school for this impact; null inherits. |
+| `impacts[].action` | `object` | `null` | Required action block for each useful impact. |
+| `impacts[].action.type` | `enum` | `null` | Action kind; DAMAGE and HEAL below use their corresponding objects. |
+| `impacts[].action.apply_to_caster` | `boolean` | `false` | Redirects this action to the caster. |
+| `impacts[].action.allow_on_center_target` | `boolean` | `true` | Allows an area impact to affect its centre target. |
+| `impacts[].action.min_power` | `number` | `1` | Lower bound used for action power. |
+| `impacts[].action.max_power` | `number` | `999999` | Upper bound used for action power. |
+| `impacts[].action.damage` | `object` | `null` | DAMAGE settings. |
+| `impacts[].action.damage.spell_power_coefficient` | `number` | `1` | Damage multiplier on resolved spell power. |
+| `impacts[].action.damage.knockback` | `number` | `1` | Knockback multiplier. |
+| `impacts[].action.damage.bypass_iframes` | `boolean` | `true` | Allows damage through ordinary immunity frames. |
+| `impacts[].action.heal` | `object` | `null` | HEAL settings. |
+| `impacts[].action.heal.spell_power_coefficient` | `number` | `1` | Healing multiplier on resolved spell power. |
+| `impacts[].visuals` | `object` | `{}` | Impact particles and models; not a root particles field. |
+| `impacts[].sound` | `object` | `null` | Impact sound. |
+| `release` | `object` | `{}` | Presentation when the spell releases. |
+| `release.animation` | `object` | `null` | Player-animation object. |
+| `release.visuals` | `object` | `{}` | Release particle/model bundle. |
+| `release.sound` | `object` | `null` | Release sound. |
+| `release.pitch_shift` | `number` | `0` | Charge-dependent addition to release sound pitch. |
+| `cost` | `object` | `{}` | Dependency costs, separate from astral energy. |
+| `cost.batching` | `boolean` | `false` | Defers cost handling to end of tick for batched triggers. |
+| `cost.exhaust` | `number` | `0.1` | Exhaustion added on payment. |
+| `cost.durability` | `integer` | `1` | Host-item durability cost. |
+| `cost.effect_id` | `identifier` | `null` | Status effect removed when cost is paid. |
+| `cost.cooldown` | `object` | `{}` | Cooldown settings. |
+| `cost.cooldown.group` | `string` | `null` | Optional shared cooldown group. |
+| `cost.cooldown.attempt_duration` | `number` | `0` | Attempt cooldown in seconds. |
+| `cost.cooldown.duration` | `number` | `0` | Successful-cast cooldown in seconds. |
+| `cost.cooldown.proportional` | `boolean` | `false` | Scales cooldown with casting/channel progress. |
+| `cost.cooldown.haste_affected` | `boolean` | `true` | Allows haste to alter cooldown. |
+| `cost.cooldown.hosting_item` | `boolean` | `true` | Also imposes cooldown on the host item. |
+| `cost.item` | `object` | `null` | Item payment/check; absent means no item cost. |
+| `cost.item.id` | `string` | `null` | Item ID or #tag. Supply a valid installed item/tag. |
+| `cost.item.amount` | `integer` | `1` | Required item amount. |
+| `cost.item.consume` | `boolean` | `true` | False checks availability without consuming. |
+
+Other action kinds are STATUS_EFFECT, FIRE, SPAWN, SUMMON, TELEPORT, COOLDOWN, AGGRO, DISRUPT, IMMUNITY, VELOCITY and CUSTOM. Each requires its own branch-specific payload. Passive triggers, modifiers, charge bonuses and those payloads are owned by the [versioned Spell Engine schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java); they are not extra IsekaiExpansion fields.
+
+### Projectile and meteor layout
+
+Projectile and meteor launch settings are separate from the projectile's flight data. The model rows beginning `models[]` are relative to `client_data.composite_model.models[]`.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `deliver.projectile` | `object` | `null` | PROJECTILE launch configuration. |
+| `deliver.projectile.launch_properties` | `object` | `{}` | Launch speed and repeated launches. |
+| `deliver.projectile.launch_properties.velocity` | `number` | `1` | Initial projectile velocity. |
+| `deliver.projectile.launch_properties.extra_launch_mod` | `integer` | `-1` | For channels, extra launches occur when delivery index modulo this value is 0. Use −1 to disable filtering or a positive divisor; 0 can divide by zero. |
+| `deliver.projectile.launch_properties.extra_launch_count` | `integer` | `0` | Extra projectiles after the initial launch. |
+| `deliver.projectile.launch_properties.extra_launch_delay` | `integer` | `2` | Spacing of extra launches in ticks: 2 ticks (0.1 seconds). |
+| `deliver.projectile.launch_properties.sound` | `object` | `null` | Launch sound; uses the shared sound fields. |
+| `deliver.projectile.projectile` | `object` | `null` | Projectile flight, collision and visual data; provide for PROJECTILE. |
+| `deliver.projectile.projectile.divergence` | `number` | `0` | Projectile directional spread. |
+| `deliver.projectile.projectile.homing_angle` | `number` | `1` | Homing turn parameter. |
+| `deliver.projectile.projectile.client_data` | `object` | `null` | Client presentation. |
+| `deliver.projectile.projectile.client_data.composite_model` | `object` | `null` | Composite visual model. |
+| `deliver.projectile.projectile.client_data.composite_model.models` | `array<object>` | `[]` | Model components. |
+| `models[].orientation` | `enum` | `TOWARDS_MOTION` | TOWARDS_CAMERA, TOWARDS_MOTION or ALONG_MOTION; projectile model orientation. |
+| `models[].rotate_degrees_per_tick` | `number` | `2` | Continuous rotation in degrees per tick. |
+| `models[].rotate_degrees_offset` | `number` | `0` | Static rotation offset in degrees. |
+| `models[].use_held_item` | `boolean` | `false` | Use held-item model source instead of fx.model_id. |
+| `models[].fx` | `object` | `{}` | Model effect; fields below. |
+| `models[].fx.model_id` | `identifier` | `null` | Model resource ID. |
+| `models[].fx.scale` | `number` | `1` | Model scale. |
+| `models[].fx.light_emission` | `enum` | `GLOW` | NONE, GLOW, GLOW_TRANSLUCENT or RADIATE. |
+| `deliver.meteor` | `object` | `null` | METEOR launch configuration. |
+| `deliver.meteor.launch_height` | `number` | `10` | Height above the target in blocks. |
+| `deliver.meteor.launch_radius` | `number` | `0` | Horizontal launch spread around the target. |
+| `deliver.meteor.launch_properties` | `object` | `{}` | Same fields as projectile launch_properties. |
+| `deliver.meteor.projectile` | `object` | `null` | Same projectile data shape as PROJECTILE. |
+| `area_impact` | `object` | `null` | Secondary area application after an impact; not inside deliver. |
+| `area_impact.radius` | `number` | `1` | Base radius in blocks. |
+| `area_impact.extra_radius` | `object` | `{}` | Power-scaled radius addition. |
+| `area_impact.extra_radius.power_coefficient` | `number` | `0` | Extra radius = coefficient × min(cap, power). |
+| `area_impact.extra_radius.power_cap` | `number` | `0` | Maximum power used by the extra-radius term. |
+| `area_impact.visuals` | `object` | `{}` | Particle/model bundle at area centre. |
+| `area_impact.sound` | `object` | `null` | Area-impact sound. |
+
+Flight motion, collision perks, entity placement, cloud/melee delivery and model animation transforms extend this shape in the [same versioned schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java). Do not transplant fields from the older flat projectile format.
+
+### Shared animation, sound and particle objects
+
+Paths here are relative shapes: `animation` and `sound` can occur at cast/release/impact sites; `particles[]` names one particle-group list entry. Continuous cast particles are a list, while impact/release effects use a `visuals` bundle.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `animation.id` | `identifier` | `""` | Animation resource ID; use an object, not a bare string. |
+| `animation.speed` | `number` | `1` | Playback-speed multiplier. |
+| `animation.overrides` | `array<object>` | `[]` | Ordered conditional alternatives; first matching alternative selects its ID. |
+| `animation.overrides[].id` | `identifier` | `""` | Alternative animation ID. |
+| `animation.overrides[].equipment` | `object` | `null` | Equipment predicate; provide both slot and item when used. |
+| `animation.overrides[].equipment.slot` | `enum` | `null` | MAINHAND, OFFHAND, FEET, LEGS, CHEST or HEAD. |
+| `animation.overrides[].equipment.item` | `string` | `null` | Item selector evaluated in the selected slot. |
+| `animation.overrides[].two_handed_weapon` | `boolean` | `null` | Alternative check for the held weapon's two-handed status. |
+| `sound.id` | `identifier` | `null` | Registered sound ID. |
+| `sound.volume` | `number` | `1` | Sound volume. |
+| `sound.pitch` | `number` | `1` | Base pitch. |
+| `sound.randomness` | `number` | `0.1` | Positive values randomise pitch within base ± randomness; nonpositive uses base pitch. |
+| `visuals.particles` | `array<object>` | `[]` | Particle-group list. |
+| `visuals.models` | `array<object>` | `[]` | Model-effect list; same model-effect fields as projectile fx below. |
+| `particles[].id` | `identifier` | `null` | Registered particle ID. |
+| `particles[].appearance` | `object` | `{}` | Per-particle appearance settings; supported by Spell Engine's own particle factory. |
+| `particles[].appearance.color` | `integer` | `-1` | Packed RGBA tint; −1 leaves the texture untinted. |
+| `particles[].appearance.motion` | `enum` | `null` | Inherit entry motion, or STATIC, FLOAT, ASCEND, DECELERATE, BURST, DRIFT. |
+| `particles[].batch` | `object` | `{}` | Spawn geometry and velocity settings. |
+| `particles[].batch.shape` | `enum` | `CIRCLE` | Batch shape; examples use CIRCLE, PIPE or SPHERE. Full enum is linked below. |
+| `particles[].batch.count` | `number` | `1` | Emission count/rate. Below 1 gives periodic emission in continuous tick-driven effects. |
+| `particles[].batch.vertical_origin` | `number` | `0.5` | Origin height as a fraction of entity height. |
+| `particles[].batch.min_speed` | `number` | `0` | Lower initial-speed bound. |
+| `particles[].batch.max_speed` | `number` | `0` | Upper initial-speed bound. |
+
+The [particle format](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java) also defines lifetime, opacity, scaling, attachment and batch geometry controls. [Model effects](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java) define transforms and timed animations. These are dependency formats; use the linked release when extending beyond the fields above.
+
+### Item assignments and pools
+
+This assignment uses a subset of the bundled staff's spells:
+
+```json
+{
+  "spell_container": {
+    "access": "CONTAINED",
+    "pool": "isekaiexpansion:tier1",
+    "spell_ids": [
+      "isekaiexpansion:healing"
+    ]
+  }
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spell_container` | `object` | `absent` | Container override; {} intentionally disables casting from the item default. |
+| `spell_container.access` | `enum` | `NONE` | ANY, NONE, MAGIC, ARCHERY, CONTAINED or TAG; uppercase and case-sensitive. |
+| `spell_container.access_param` | `string` | `""` | Spell tag ID for TAG access, without #. |
+| `spell_container.pool` | `string` | `""` | Binding pool tag ID, without #. |
+| `spell_container.slot` | `string` | `""` | Equipment-source slot restriction; empty gives no restriction. |
+| `spell_container.max_spell_count` | `integer` | `0` | Binding capacity; codec has no range clamp. |
+| `spell_container.spell_ids` | `array<string>` | `[]` | Held spell IDs. Lowercased and stripped of characters outside a–z, 0–9, / . _ : -; duplicates are not removed by the constructor. |
+| `spell_container.extra_tier_binding` | `integer` | `0` | Additional per-tier binding count; effective mutex count is max(0, value + 1). |
+| `spell_choice` | `object` | `absent` | Optional choice override, separate from the container. |
+| `spell_choice.pool` | `string` | `""` | Choice pool tag ID; empty means no choices. |
+
+Resolution is per-stack saved data, then assignment, then item default, then fallback. An assignment containing a container also suppresses the item's default choice unless the assignment supplies a choice. Explicit per-stack choice data still wins. A container with NONE access can store spells for equipment-source provision without acting as a casting resolver itself.
+
+A pool uses the [registry-tag format](https://wiki.fabricmc.net/tutorial:tags):
+
+```json
+{
+  "values": [
+    "isekaiexpansion:healing",
+    "isekaiexpansion:clarity"
+  ]
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `values` | `array<string>` | required | Spell IDs or #tag references, using the string-entry form shown here. |
+| `replace` | `boolean` | `false` | True replaces lower-priority contributions to the same tag; false combines them. |
+
+### Astral energy
+
+The bundled healing entry is:
+
+```json
+{
+  "isekaiexpansion:healing": 12
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `isekaiexpansion:healing` | `integer` | `0` when absent from the resolved map | Example dynamic spell-ID key. Here it sets base cost to 12; every nonempty key is accepted without checking spell existence, and values must be positive to be inserted. |
+
+There is no wrapper or metadata field. Other keys are other spell-ID strings. Final costs also use scroll, talent, origin and airborne modifiers; channels pay per successful delivery.
+
+## Full example
+
+This adds binding, a timed cast, casting particles, release animation and cooldown. The cast duration is 1 second and cooldown is 3 seconds.
+
+```json
+{
+  "school": "spell_power:arcane",
+  "tier": 1,
+  "range": 24,
+  "learn": {},
+  "active": {
+    "cast": {
+      "duration": 1,
+      "animation": {
+        "id": "spell_engine:one_handed_projectile_charge"
+      },
+      "particles": [
+        {
+          "id": "spell_engine:magic_spell",
+          "appearance": {
+            "color": 4278190335,
+            "motion": "FLOAT"
+          },
+          "batch": {
+            "shape": "CIRCLE",
+            "count": 4,
+            "min_speed": 0.05,
+            "max_speed": 0.1
+          }
+        }
+      ]
+    }
+  },
+  "target": {
+    "type": "AIM",
+    "aim": {}
+  },
+  "deliver": {
+    "type": "DIRECT"
+  },
+  "impacts": [
+    {
+      "action": {
+        "type": "DAMAGE",
+        "damage": {
+          "spell_power_coefficient": 1
+        }
+      }
+    }
+  ],
+  "release": {
+    "animation": {
+      "id": "spell_engine:one_handed_projectile_release"
+    }
+  },
+  "cost": {
+    "cooldown": {
+      "duration": 3
+    }
+  }
+}
+```
+
+To channel, set cast type to CHANNEL and provide its channel object with a positive total delivery count. For custom delivery, set delivery type to CUSTOM and its custom handler to an installed handler ID. Data alone cannot create a new custom handler.
+
+## Validation
+
+Spell definitions use the dependency's generic JSON decoder. Unknown fields are ignored; missing fields retain model defaults. There is no uniform schema-wide range clamp or validation that every referenced asset, school, handler and nested object exists. Wrong structural types can fail decoding; unknown enum strings or explicit nulls can survive as null and fail later when the selected branch executes. An empty object is therefore not a useful spell even if decoding succeeds. Use finite numbers, valid installed identifiers and the exact uppercase enum values.
+
+Assignment files require an object containing `spell_container` or `spell_choice`. Empty text, a non-object root, a bare container or a wrapper whose members both fail decoding is warned about and skipped. Members decode independently: a valid choice can survive a bad container. An explicit empty container is accepted to override and disable an item's default. Unknown fields are ignored; invalid access enum spelling fails that member. On startup the assignment map is replaced by successfully parsed entries.
+
+Energy application clears the old map first. An empty object contributes nothing. Empty keys and nonpositive values log errors and skip that entry. Values use integer conversion rather than strict integer validation; author integer JSON numbers. A conversion exception logs and stops the rest of that file, preserving entries already inserted; other files continue. Spell IDs are not parsed or checked by this loader, so misspellings can silently remain unused.
+
+## Reloading
+
+Treat spell definitions as world-registry data and item assignments as server-start data in this pinned dependency version: restart/reopen the world after changing them. The dependency synchronises the spell registry and assignment data when clients join. Resource images, models and animations still need the matching client resource pack.
+
+IsekaiExpansion energy files reload with server data, but the resolved energy map is currently sent to clients only on join. Reconnect after `/reload` to refresh client energy checks and tooltips. This differs from formats such as emoji data that explicitly broadcast after successful reload.
+
+## Related
+
+[Spell integration](/en/dev/spell-integration/) covers custom handlers, payment and saved item data. [Elements](/en/wiki/elements/) explains the player-facing schools.

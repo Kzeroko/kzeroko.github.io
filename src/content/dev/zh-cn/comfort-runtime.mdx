@@ -1,0 +1,64 @@
+---
+title: "舒适度运行机制"
+description: "玩家舒适度状态、存档、同步与内部调用。"
+category: systems
+order: 10
+updated: 2026-09-27
+---
+
+舒适度由玩家组件`isekaiexpansion:comfort`保存，在服务端推进，自动同步，并在重生时复制。本页说明内部状态与钩子；游戏规则见[舒适度](/zh-cn/wiki/comfort/)，数据包编写见[食物舒适度数据](/zh-cn/wiki/comfort-food/)。
+
+## 它做什么
+
+`ComfortSystem.initCommon`注册食用和食物数值回调，并初始化食物表网络同步。`ComfortSystem.get(player)`返回内部组件。目前没有公共Comfort API门面，不应把这些内部类视为稳定集成约定。
+
+原版饥饿效果生效时，食物数值回调把饱食恢复和饱和度倍率都乘以×0.7，饱食恢复结果再转为整数。这与一餐给予的舒适度数值分开计算。
+
+## 运行时模型
+
+`ComfortComponent.serverTick`先核对移动修饰符，再检查自然衰减能否推进。`changeComfort`先应用命运修正，再限制范围并同步；`setComfort`直接限制范围。即使舒适度已经到达边界，食物历史变化仍会同步。
+
+以下NBT字段属于玩家存档，不是数据包格式：
+
+| NBT键 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `comfort` | `integer` | `100` | 当前值，读取时限制在0–100。 |
+| `comfortTick` | `integer` | `0` | 自然衰减已累计刻数，负数改为0。 |
+| `decayIntervalTicks` | `integer` | `1200` | 沿用旧名称的结算间隔：1200刻（60秒），至少1刻（0.05秒）。 |
+| `recentFood0`…`recentFood5` | `item id` | 不存在 | 最近食物排在最前。非法ID、缺失注册项和空气变为空槽；写入时删除空槽字段。 |
+
+读取NBT会使已应用区间的缓存失效，下一次服务端刻重新核对移动修饰符。移动修饰符使用固定UUID，区间变化时替换原修饰符。
+
+## 约定
+
+组件采用`RespawnCopyStrategy.ALWAYS_COPY`。玩家数值和历史通过组件同步，食物表则在数据包内容同步时单独发送，两者不是同一条同步路径。
+
+`ComfortPlayerEntityMixin`在`applyDamage`返回后计算舒适度损失，并包装挖掘速度。`ServerWorldComfortMixin`在`wakeSleepingPlayers`开头、睡眠标记仍存在时调用恢复。`ComfortSystem`使用`isSleeping`和`canResetTimeBySleeping`筛选，清醒玩家不会获得睡眠恢复。
+
+### 命运天平饮食
+
+`MealComfort.base`通过`FateBalanceAPI.foodComfort`调整品质修正后的食物数值。只有基础值为正时，所选效果钩子才累加带正负号的加值。`ComfortComponent.previewFoodComfort`继续应用`MealComfortRules`重复进食与性格计算。提示与服务端食用共用此函数，只有实际食用会写入饮食历史。
+
+`getFoodGainMultiplier`只对历史中已出现的食物应用重复进食倍率。睡眠恢复在性格倍率之前乘以`FateBalanceAPI.sleepComfortMultiplier`。门面委托给已注册效果，不检查种族或职业归属。
+
+## 扩展方式
+
+内部服务端逻辑先获取组件，再指定变化原因。下面的调用会应用命运修正，并走组件正常的范围限制与同步逻辑：
+
+```java
+void grantComfort(ServerPlayerEntity player, int amount) {
+    ComfortSystem.get(player).changeComfort(amount, ComfortChangeCause.FOOD);
+}
+```
+
+实际进食需要更新重复记录时使用`addFoodComfort`。`setDecayIntervalTicks`将间隔限制为至少1刻（0.05秒），变化时同步；`resetDecayIntervalTicks`恢复1200刻（60秒）。这些方法不转交线程，应从所属服务端游戏逻辑调用。
+
+## 验证
+
+保存并重载当前历史，顺序须保持最近食物在前。间隔字段只使用`decayIntervalTicks`。测试重生复制、区间切换、舒适度已满时重复进食，以及修改衰减间隔。加入独立服务器并重载食物数据，确认两条同步路径。
+
+让同一世界中一个玩家睡眠、另一个保持清醒，检查世界唤醒恢复。带饥饿效果食用缩放后有小数部分的食物，确认饱食值转整数的结果。
+
+## 相关页面
+
+区间效果见[舒适度](/zh-cn/wiki/comfort/)，物品ID映射见[食物舒适度数据](/zh-cn/wiki/comfort-food/)。

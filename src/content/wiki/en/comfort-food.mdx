@@ -1,0 +1,68 @@
+---
+title: "Comfort food data"
+description: "Assign signed Comfort values to registered food items."
+category: data
+order: 10
+updated: 2026-09-27
+---
+
+A Comfort food file maps item IDs directly to signed integers. It changes the base food value; repetition, well-made quality and the player's Comfort rules apply when the food is eaten.
+
+## Where the files live
+
+Use `data/<namespace>/comfort_level/*.json`. Each file can contain several foods; its namespace identifies the resource, not the items it may reference. The loader sorts resource identifiers and processes them in that order, so a later resource overwrites an earlier value for the same item. A resource with the same path in another pack follows normal data-pack resource selection before this merge.
+
+## Minimal example
+
+The bundled bread entry uses this complete file:
+
+```json
+{
+  "minecraft:bread": 3
+}
+```
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `minecraft:bread` | `integer` | `0` when absent from all files | Example of a dynamic item-ID key. The value adds 3 base Comfort here. Every key must resolve to a registered food item; unknown and non-food items are skipped with a warning. |
+
+There are no fixed wrapper keys. Replace `minecraft:bread` with the ID of the food you are editing, or add further item-ID entries. Zero and negative values are accepted; the loader does not clamp values to the player's Comfort range.
+
+Well-made quality is read from item save data, not from this file:
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `WellMadeFood` | `object` | absent | Compound containing the food's quality. A missing or non-compound value gives no quality adjustment. |
+| `WellMadeFood.Bonus` | `integer` | `0` | Only levels 1–3 are used. Other values give no quality adjustment. Positive base Comfort is multiplied by `1 + 0.33 × level`; negative base Comfort is divided by it, then truncated towards zero. |
+
+## Fate Balance meal tags
+
+Palates belong to [Fate Balance](/en/wiki/fate-balance/). Edit item tags under `data/isekaiexpansion/tags/items/fate_balance/meals/`: `fresh_produce.json`, `bread.json`, `cooked_fish.json`, `carrots.json` and `spicy_foods.json`. They use Minecraft item-tag syntax. Optional external entries let absent foods be skipped; the spicy tag includes `expandeddelight:chili_pepper` when installed.
+
+Quality adjusts the base food value first. For a positive base, the selected palate adds +4 for matching meals or subtracts 3 for meals outside a restrictive palate. A zero or negative base bypasses palate changes. Positive adjusted values then use repetition and personality; negative values skip repetition. The food tooltip follows the same calculation. An empty food family makes its palate choices unavailable.
+
+## Validation
+
+An empty object contributes nothing. There is no required food entry. Every property is treated as an item ID, so a supposed metadata key is checked as an item rather than silently ignored.
+
+Values are read through integer conversion, not a strict integer validator: numeric fractions are truncated and numeric strings can be accepted. Write signed integer JSON numbers within the 32-bit range. There is no explicit range rejection or clamp in this loader; do not rely on overflow conversion.
+
+Malformed item IDs, unregistered items and non-food items are skipped individually. A conversion failure on a valid food value stops the rest of that file and logs an error. Values already inserted from that file remain; other resources still load. A malformed root is likewise logged and skipped. An empty text file is invalid JSON, unlike `{}`.
+
+## Reloading
+
+These are server data resources loaded at startup and by `/reload`. Each successful application replaces the resolved food map, so removing an entry restores its base value to `0`. Data-pack synchronisation sends the resolved map to clients for their food display.
+
+The developer command generates suggested values for registered food, rather than exporting your resolved overrides:
+
+```text
+/ise dev dumpFoodComfort
+```
+
+It writes `config/isekaiseries/ktm2foodcomfort.json`. Copy intentional entries into a data pack; the generated file is not automatically loaded as a food resource.
+
+## Related
+
+See [Comfort](/en/wiki/comfort/) for repetition and the player's final Comfort changes.

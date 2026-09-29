@@ -1,0 +1,83 @@
+---
+title: "交易 API"
+description: "在对话中打开服务端管理的交易面板，并沿用NPC货物提供接口。"
+category: api
+order: 145
+updated: 2026-09-26
+---
+
+`TradingAPI`在已有的Blabber实体对话中展示商人的货物。报价、库存和支付由服务端管理，展示、导航与一次性回复token由Blabber管理。玩家规则见[交易](/zh-cn/wiki/trading/)。
+
+## 入口
+
+入口为`net.kzeroko.isekaiexpansion.api.trading.TradingAPI`，委托内部`DialogueTrading`服务。内置的`blabber:open_trade`与`isekaiexpansion:open_npc_trade`动作都调用此服务，不再保留独立NPC交易界面或交易索引数据包。
+
+## 常见用法
+
+### 打开当前说话者的商店
+
+在服务端线程的对话动作中调用：
+
+```java
+Blabber.getActiveDialogueEntity(player)
+        .ifPresent(merchant -> TradingAPI.open(player, merchant));
+```
+
+导入`io.github.ladysnake.blabber.Blabber`与上述门面。目标须为实现`Merchant`的`MobEntity`，或`BaseNpcEntity`，且当前对话必须绑定此实体。准入失败返回false；门面不会另起对话或移动商人。
+
+### 提供NPC货物
+
+覆写`BaseNpcEntity.getNpcTradeOffers(ServerPlayerEntity)`，沿用`npcTradeOffers()` / `npcTradeOffer()`构建器。服务通过NBT复制返回列表，保留附加元数据。使用次数按条目位置与产物物品保存，因此需要保持条目顺序稳定；关系阶层价格仍由提供方决定。
+
+村民继续受[交易覆盖](/zh-cn/wiki/trade-overrides/)管理。换货经覆盖管理器重建；职业没有覆盖定义时，通过原版或模组的工厂钩子生成已达到的每一级货物。
+
+公开商人可覆写 `BaseNpcEntity.canTradeWith(player)`；默认调用 `NpcAccessPolicy.trusted`，隶属归属独立于好感授予权限。
+
+
+## 方法一览
+
+| 入口 | 线程与约定 |
+| --- | --- |
+| `TradingAPI.open(player, merchant)` | 仅服务端线程、已有对话；返回准入结果，打开阻塞目录并保留handler和场景。 |
+| `BaseNpcEntity.getNpcTradeOffers(player)` | 服务端货物提供接口，关系可影响价格；服务持有工作副本与每日次数记录。 |
+| `DialogueAPI.registerTradePanel(opener)` | Blabber依赖接口，在通用初始化时注册；已处理商人时返回true，包括拒绝，避免落入原版界面。 |
+
+`TradeTransaction`先取`getAdjustedFirstBuyItem()`，再计算议价折扣。支付前检查两种材料、货币余额和产物容量，清理货币展示元数据，并用Isekai Core的`NumismaticCompat.tryPay`从背包和钱包支付。找零可能在扣款时占用空间；余下产物交给`offerOrDrop`，不会丢失。
+
+原版`Merchant.trade`处理次数与交易效果。顾客只在同步回调期间设置，并在`finally`中清除，不会跨越AI刻；经验通过商人接口增加。随后重新准备村民报价。NPC工作副本更新使用次数记录，不向Numismatic交易handler追加自动填充钩子。
+
+客户端收到的结构化`DialogueScreenObject.Exchange`来自支付所用的同一份`TradeTransaction.Quote`。货币展示使用Isekai Core的`NumismaticClientCompat`；非货币材料仍是带数量的物品模型。划线旧价是议价前已计算声望的报价，不是工厂原始成本。客户端不重新计算折扣，铁匠目录费用也复用此渲染器。
+
+### 实体持久化字段
+
+`IsekaiCommerce`延迟创建，只对已有交易状态的实体写入。这是内部存档，不是数据包格式。
+
+| 字段 | 类型 | 默认值 | 行为 |
+| --- | --- | --- | --- |
+| `Rotation` | `long` | `0` | 消耗换货机会时递增；读档下限为0。 |
+| `Refresh` | `boolean` | `false` | 保留一次村民换货机会，补货置true，换货清除。 |
+| `Previous` | `list<string>` | `[]` | 上一批交易ID，加权选择据此优先挑未出现的条目。 |
+| `NpcDay` | `long` | Minimum long | NPC上次记录的世界日；日期改变时清空NPC次数与议价记录。 |
+| `Negotiations` | `compound` | Empty | 玩家UUID对应失败值0，或成功折扣5、10、15；缺键表示尚未尝试。 |
+| `Stock` | `compound` | Empty | NPC条目位置与产物物品构成键，值为已使用次数。 |
+| `IsekaiOfferId` | `string` | Empty | 单独保存在交易NBT中的权威条目ID，复制交易时保留。 |
+
+## 线程与生命周期
+
+所有玩法操作都在服务端线程运行；从其他线程打开会抛出异常。一名商人同时只接待一名交易玩家，避免准备声望价格时改动另一位玩家的报价；已有原版交易顾客时也会拒绝其他玩家。会话记录实体、对话UUID、货物列表、轮换次数与NPC世界日。死亡、移除、维度或距离变化、战斗、惊慌、轮换或NPC日期改变都会使其失效。距离上限4格，距离平方为16。重载关闭正在交易的会话；断线与服务器停止清理运行时映射。
+
+选择条目时重新核对原货物对象，确认时再检查当前成本、产物、议价价格、库存、资金和背包，随后交换一次。Blabber先作废token，再执行回调。目录中取消会结束交谈，详情中取消会返回目录。生命周期清理不会重新打开面板；没有活动对象的交易会话会在服务端刻关闭。
+
+村民补货清除各玩家议价结果并授予一次换货机会。换货增加轮换次数，但保留议价结果。加权选择保留必选条目，优先抽取未出现的非必选ID；候选不足时允许重复。轮换次数与上一批ID随实体保存，重新载入后仍可稳定生成。形状匹配的交易保留使用次数、需求、特殊价格与Numismatic声望。
+
+## 验证
+
+运行`./gradlew.bat compileJava assembleLanguageFiles`。依赖的 UI 检查见[对话 UI](/zh-cn/dev/dialogue-ui/)。
+
+游戏内检查纯货币与混合支付、收购、资金不足、满背包、售罄、连续成交、移动或战斗打断、补货后换货、存档重载，以及议价失败后重新交谈。加权覆盖和NPC提供方都要验证。比较交易前后的声望报价，并确认商人不会跟随玩家。
+
+## 相关页面
+
+- [交易](/zh-cn/wiki/trading/)——玩家规则与折扣。
+- [对话对象与UI](/zh-cn/dev/dialogue-ui/)——面板约定与分段字幕。
+- [NPC对话](/zh-cn/dev/npc-dialogue/)——准入与路由。

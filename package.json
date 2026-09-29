@@ -13,7 +13,8 @@
     "check": "astro check",
     "sync": "astro sync",
     "astro": "astro",
-    "assets": "node scripts/generate-static-assets.mjs"
+    "assets": "node scripts/generate-static-assets.mjs",
+    "test:dialogue": "node --test tests/dialogue-studio.test.mjs"
   },
   "dependencies": {
     "@astrojs/mdx": "^4.3.13",

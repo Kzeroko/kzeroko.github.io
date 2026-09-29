@@ -1,0 +1,147 @@
+---
+title: "Status effects"
+description: "The complete registered effect catalogue, removal rules, periodic damage and spell vulnerability behaviour."
+category: combat
+order: 15
+updated: 2026-09-26
+---
+
+Status effects can modify attributes, control actions, carry a combat stack or run their own update. Their removal rules matter as much as their bonuses: milk, harmful-effect cleansing and ordinary expiry do not all use the same contract.
+
+## Reading the catalogue
+
+The tables show the registered effects at level I, which corresponds to amplifier 0. “Base” and “total” distinguish the operation used by a proportional attribute modifier; flat numbers are additive. Spirit Mantle explicitly keeps the same modifiers at every amplifier. An effect's duration usually comes from the weapon, potion, power or command applying it.
+
+“Milk-clearable” describes this mod's milk hook. An effect marked “No” can still end naturally or be removed by its owning gameplay system. Energy Inefficiency additionally survives the general clear-all path because it is persistent. Harmful-effect cleanses exclude beneficial, unclearable and persistent effects.
+
+## Registered effects
+
+### Combat and weapon effects
+
+| Effect and ID | Milk-clearable | Level I modifiers and behaviour |
+| --- | --- | --- |
+| Spirit Mantle · `isekaiexpansion:spirit_mantle` | Yes | Aether Power +20% total; attack damage +15% total; attack speed +10% total; movement speed +10% total; Tenacity +20; Energy Regen Speed -50% total. Fixed-strength stance: its modifiers do not scale with amplifier. |
+| Heavenly Mantra · `isekaiexpansion:tenju` | No | attack speed +0.05; attack damage +0.5; knockback resistance +0.25; armour toughness +0.5; armour +1. Removed from server players without an origami weapon in either hand. |
+| Pandora's Vision · `isekaiexpansion:pandoras_vision` | Yes | movement speed +0.03. The paired Pandora weapons use this state for their on-hit branch. |
+| Pandora's Dance · `isekaiexpansion:pandoras_dance` | Yes | attack speed +0.15. Together with Pandora's Vision, changes the paired weapon's on-hit branch. |
+| Enhanced Strength · `isekaiexpansion:enhanced_strength` | Yes | attack damage +150% total; attack knockback +2.2 |
+| Demonic Power · `isekaiexpansion:demonic_power` | Yes | movement speed +0.05; attack damage +5 |
+| Fire of Rebirth · `isekaiexpansion:fire_of_rebirth` | No | Heals one fifth of missing health per pulse; the interval uses 50 ticks shifted by amplifier. |
+| Stagger · `isekaiexpansion:stagger` | Yes | Prevents hand swings through the status hook. |
+| Flawless Return · `isekaiexpansion:ego_return` | No | Stack marker granted by the weapon's special arrow; no periodic update is implemented in the effect. |
+| Into the Groove · `isekaiexpansion:groove` | No | attack speed +0.1. Removed from server players when neither hand holds Raven. |
+| Adapt · `isekaiexpansion:adapt` | No | On application, server players gain armour equal to 25% of their current armour. Requires Raven in either hand to remain. |
+| Ittou Shura · `isekaiexpansion:ittou_shura` | No | movement speed +100% base; attack damage +150% base; attack speed +30% base. Fall immunity; requires Intetsu in the main hand. Removal applies Energy Inefficiency for 24000 ticks (1200 seconds), amplifier 2. |
+| Foresight · `isekaiexpansion:foresight` | No | Dodge effect; requires a qualifying permanent magic weapon in either hand. Attacking or a completed damage call removes it; non-creative players recoil on removal. |
+| Provoke · `isekaiexpansion:provoke` | No | Periodically attracts eligible mobs to the affected player; creative and spectator players are excluded. Aggro Generation scales its search. |
+| Shadow Phase · `isekaiexpansion:shadow_phase` | No | Forces invisibility and blocks passive detection; a nearby hostile in the 2-block expanded search box breaks it. |
+| Charm · `isekaiexpansion:charm` | Yes | Installs charm target and movement control for mobs, initially using the closest player within 16 blocks. |
+| Fear · `isekaiexpansion:fear` | Yes | movement speed -20% total. Installs fleeing control and remembers the inflictor; stronger levels use deeper fear settings. |
+| Bonus Damage · `isekaiexpansion:bonus_damage` | Yes | For server-player attacks, makes amplifier + 1 extra applications, each at 10% × (1 + Bonus Damage Level) of the hook amount. |
+| Mind's Eye · `isekaiexpansion:minds_eye` | Yes | Melee Crit. Chance +0.05 |
+| Shatter Strike · `isekaiexpansion:shatter_strike` | Yes | Melee Crit. Damage +0.1 |
+| Lock-on Weakness · `isekaiexpansion:lock_on_weakness` | Yes | Range Crit. Chance +0.05 |
+| Fatal Pierce · `isekaiexpansion:fatal_pierce` | Yes | Range Crit. Damage +0.1 |
+| Astral Concentration · `isekaiexpansion:astral_concentration` | Yes | Magic Crit. Chance +0.05 |
+| Astral Annihilation · `isekaiexpansion:astral_annihilation` | Yes | Magic Crit. Damage +0.1 |
+| Magic Field · `isekaiexpansion:magic_field` | Yes | Energy Regen Speed +0.2; Max Astral Energy +20 |
+| Silence · `isekaiexpansion:silence` | No | Applies the registered silence action restriction. |
+| Armor Break · `isekaiexpansion:armor_break` | Yes | armour -10% total |
+| Inversed Breathing · `isekaiexpansion:inversed_breathing` | Yes | Allows water breathing; on land drains a player's air and deals scaled damage when it runs out. |
+| Burning · `isekaiexpansion:burning` | Yes | Periodic fire damage; see the damage-over-time table. |
+| Bleeding · `isekaiexpansion:bleeding` | Yes | Periodic generic damage; see the damage-over-time table. |
+| Poisoned · `isekaiexpansion:poisoned` | Yes | Periodic magic damage; see the damage-over-time table. |
+| Searched · `isekaiexpansion:searched` | Yes | Marks the entity for Search Magic presentation and synchronised disposition. |
+| Death Defiance · `isekaiexpansion:death_defiance` | Yes | Forces the supported lethal-hit survival check, retaining 1 health; void and sickness bypass it. |
+
+### Alchemy effects
+
+| Effect and ID | Milk-clearable | Level I modifiers and behaviour |
+| --- | --- | --- |
+| Health Potion Fatigue · `isekaiexpansion:health_potion_fatigue` | No | Blocks starting another matching health potion at 5 stacks; duration 1500 ticks (75 seconds). |
+| Astral Energy Potion Fatigue · `isekaiexpansion:energy_potion_fatigue` | No | Blocks starting another matching energy potion at 5 stacks; duration 1200 ticks (60 seconds). |
+| Phantom Veil · `isekaiexpansion:phantom_veil` | Yes | Stealth Efficiency +60; Evasion +0.15; movement speed +10% total. Blocks passive detection; a hostile in the 3-block expanded search box breaks it. Render alpha 0.30. |
+| Aegis Ward · `isekaiexpansion:aegis_ward` | Yes | armour +8; armour toughness +4; knockback resistance +0.35; Tenacity +25; Shield Power +20; generic spell resistance +30; armour +20% total; armour toughness +15% total; generic spell resistance +20% total |
+| Battle Frenzy · `isekaiexpansion:battle_frenzy` | Yes | attack damage +25% total; attack speed +20% total; Enmity +30; armour -20% total |
+| Fleetfoot · `isekaiexpansion:fleetfoot` | Yes | movement speed +28% total; Evasion +0.1; Ability Haste +20; Stamina +15 |
+| Arcane Replenishment · `isekaiexpansion:arcane_replenish` | Yes | Energy Regen Speed +0.6 |
+
+### Origin effects
+
+| Effect and ID | Milk-clearable | Level I modifiers and behaviour |
+| --- | --- | --- |
+| Brink of Survival · `isekaiexpansion:human_brink_of_survival` | Yes | Tenacity +45; Enmity +10; Shield Power +10; movement speed +25% total |
+| Heroic Trail · `isekaiexpansion:human_heroic_trail` | Yes | Burst Damage +15 |
+| Energy Overload · `isekaiexpansion:energy_overload` | No | Server players gain Dys Aether +10, removed with the effect; amplifier does not change this grant. |
+| Ancient Blood · `isekaiexpansion:demon_ancient_blood_regen` | No | Server players gain energy recovery +1.5 + 0.5 × amplifier, removed with the effect. |
+| Dwarf Stone Form · `isekaiexpansion:dwarf_stone_form` | No | movement speed -55% total; knockback resistance +1. Also blocks starting a sprint. |
+| Drunken Battle Blood · `isekaiexpansion:dwarf_drunken_battle_blood` | Yes | Tenacity +45 |
+| Stone Rage · `isekaiexpansion:dwarf_stone_rage` | Yes | attack damage +3% total; Earth spell power +4% total |
+| Elf Wind Guidance · `isekaiexpansion:elf_wind_guidance` | No | movement speed +60% base |
+| Soul Snare · `isekaiexpansion:kitsune_soul_snare` | Yes | movement speed -35% total. On eligible removal, grants Loss of Spirit for 40 ticks (2 seconds), adding at least amplifier + 1 stacks up to 5. |
+| Loss of Spirit · `isekaiexpansion:kitsune_loss_of_spirit` | Yes | movement speed -100% total. Registers high silence. Players stagger and cannot use items, move or jump for 40 ticks (2 seconds); this action restriction leaves attacks available. |
+| Afterimage Wound · `isekaiexpansion:kitsune_afterimage_wound` | Yes | Harmful attack-category marker; no attribute modifier or periodic tick is declared here. |
+| Spiritual Step Haste · `isekaiexpansion:kitsune_spiritual_step_haste` | Yes | spell haste +0.2 |
+| Soul Burn · `isekaiexpansion:kitsune_soul_burn` | Yes | Magic Penetration +0.03; spell critical damage +0.06 |
+| Umbral Stealth · `isekaiexpansion:feline_umbral_stealth` | Yes | Stealth Efficiency +80; movement speed +30% total. Render alpha 0.35; the effect itself does not force invisibility or completely block detection. |
+| Shadow Blade · `isekaiexpansion:feline_shadow_contract` | Yes | Omnivamp +2 |
+| Rakshasa Form · `isekaiexpansion:oni_rakshasa_form` | Yes | attack speed +20% total |
+| Bloodthirst War Madness · `isekaiexpansion:oni_bloodthirst_war_madness` | Yes | Stack resource for Rakshasa combat; capped at 8 by its origin handler and tied to the form's remaining duration. |
+| Kishin Physique · `isekaiexpansion:oni_kishin_physique` | Yes | Melee Crit. Damage +0.15; Omnivamp +20 |
+| Tidal Rejuvenation · `isekaiexpansion:mermaid_tidal_rejuvenation` | Yes | Heal Amplification +100. Also heals max(0.1, 1.5% of maximum health) every 40 ticks (2 seconds), before healing amplification. |
+| Tidal Escape · `isekaiexpansion:mermaid_tidal_escape` | Yes | Tenacity +25; movement speed +20% total |
+| Acid Pressure · `isekaiexpansion:slime_acid_pressure` | Yes | Armor Penetration +50; Debuff Accuracy +200; Bonus Damage Level +2 |
+| Slime Strong Acid · `isekaiexpansion:slime_strong_acid` | No | Every 20 ticks (1 second), deals 2 + 1.2 × amplifier execution damage and damages each equipped damageable stack by 2 + amplifier. |
+| Celestial Feather · `isekaiexpansion:wingedspirit_celestial_feather` | Yes | Evasion +0.25; Ability Haste +65. Also grants fall immunity. |
+
+### Home effects
+
+| Effect and ID | Milk-clearable | Level I modifiers and behaviour |
+| --- | --- | --- |
+| Rested · `isekaiexpansion:home_rested` | Yes | Maximum health +5%; gained from qualifying home sleep. |
+| Hearthbound · `isekaiexpansion:hearthbound` | Yes | Maximum health +2% and movement speed +1% per tier; see My Home. |
+
+## Periodic damage
+
+For these formulas, `a = max(0, amplifier)`. Ordinary periodic ticks have no attacker attribution and mark their damage as periodic with no ordinary hurt cooldown.
+
+| Effect | Damage per pulse | Interval |
+| --- | --- | --- |
+| Burning | `1 + 0.5 × a`, fire | `max(10, 40 >> min(a, 4))` ticks |
+| Bleeding | `1 + 0.35 × a`, generic | `max(10, 40 >> min(a, 4))` ticks |
+| Poisoned | `1 + 0.4 × a`, magic | `max(12, 50 >> min(a, 4))` ticks |
+| Slime Strong Acid | `2 + 1.2 × a`, execution; equipment durability loss `2 + a` | 20 ticks (1 second) |
+
+The shift halves the base interval once per step before the minimum applies. Updates depend on remaining duration being divisible by the interval. Poisoned uses ordinary magic damage calls and does not implement a “leave 1 health” rule.
+
+## Magic vulnerabilities and exhaustion
+
+These additional registered effects use Spell Power's vulnerability implementation. The dependency behaviour below was checked in the local official-source snapshot `9cdd503`, whose build declares `1.6.0` for Minecraft `1.20.1`, corresponding to the configured `1.6.0+1.20.1` dependency. This is source verification, not a binary-equivalence check.
+
+Each current definition calls the vulnerability setter twice. In that source, the setter stores a single school and replaces the earlier call. Therefore only the **last** school survives:
+
+| Effect and ID | Surviving school | Replaced school |
+| --- | --- | --- |
+| Electrified · `isekaiexpansion:electrified` | Water | Frost |
+| Iced · `isekaiexpansion:iced` | Lightning | Water |
+| Ignite · `isekaiexpansion:ignite` | Lightning | Wind |
+| Wet · `isekaiexpansion:wet` | Frost | Earth |
+| Luminous · `isekaiexpansion:luminous` | Arcane | Dark |
+| Shadowed · `isekaiexpansion:shadowed` | Arcane | Light |
+
+The surviving tuple is `(1.15, 0, 0.10)`: added base-power multiplier, added critical chance and added critical damage. Spell Power multiplies it by `amplifier + 1`, adds contributions from applicable effects, and uses `base × (1 + added multiplier)`. At amplifier 0, an isolated matching effect therefore yields `2.15 × base`, not `1.15 × base`; it adds 0 critical chance and 0.10 critical damage. The replaced `(1.30, 5, 0.20)` tuple is not a second active school bonus. Iced also carries movement speed -10% total at level I.
+
+Energy Inefficiency · `isekaiexpansion:energy_inefficiency` applies movement speed -15% total and Aether Power -25% total at level I. It also blocks normal energy checks and sprint starts, and multiplies incoming damage by 1.3 in the registered damage pipeline. It is unclearable and persistent.
+
+## Potion duration and stacking
+
+The health and energy fatigue effects cap at 5 stacks. Their potion-use checks block another drink at the cap; fatigue is not a progressively smaller restoration multiplier.
+
+Grade G potions apply Phantom Veil for 900 ticks (45 seconds), Aegis Ward for 1800 ticks (90 seconds), Battle Frenzy for 1200 ticks (60 seconds), and Fleetfoot for 1800 ticks (90 seconds). A repeated drink while the matching effect is active raises its amplifier up to 1. Battle Frenzy's potion additionally requests potion-sickness damage equal to 15% of maximum health, bounded by current health minus 1 before the damage pipeline. The effect grants no life-steal modifier.
+
+## Related
+
+- [Attributes and effects](/en/wiki/attributes-and-effects/)
+- [Combat runtime](/en/dev/combat-runtime/)
+- [My Home](/en/wiki/my-home/)
+- [Identity and progression](/en/wiki/identity/)

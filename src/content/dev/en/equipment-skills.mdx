@@ -1,0 +1,105 @@
+---
+title: "Equipment skill runtime"
+description: "Item templates, upgrade flags, awakening, tooltip selection and manual skill-gem dispatch."
+category: systems
+order: 184
+updated: 2026-09-26
+---
+
+Equipment skill templates are item-defined behaviour backed by per-stack unlock state. This page documents internal helpers in `item.IUpgradable` and `util.item`; manual skill gems remain a separate path in `internal.gem.proc.EquipmentSkillGemResolver`.
+
+## What it does
+
+`IsekaiSkillTemplate` defines `APPP`, `APPL`, `APLL`, `ALLL`, `PPPP`, `AP`, `AL`, `PP` and `LL`. Its name length determines 2 or 4 slots. It does not register executable skills: each item checks its own unlock flags in use/hit hooks.
+
+`Raven` supplies `APPP`, an upgrade material array and its own active/passive implementation. `ItemTooltipUtil` maps template letters to active/passive/linked labels and maps W/A/S/D to slots 1/2/3/4. [Equipment skills](/en/wiki/equipment-skills/) is the player-facing guide.
+
+## Runtime model
+
+### Item state
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `ise_upgradable` | `list<compound>` | Absent: all locked | Only upgradeable items get a list view; template name length determines the slot count. |
+| `ise_upgradable[].skill_<n>` | `boolean` | false | Slot flag indexed from 1, `skill_1` through the template length. The reader scans the whole list; later duplicate flags overwrite earlier values. |
+| `ise_quality` | `list<compound>` | Absent: 0 counts | Per-upgrade quality counts; independent of unlocking state. |
+| `ise_quality[].raw` | `int` | 0 | Cursor upgrades increment raw quality. Reader returns the first correctly typed matching entry; no range clamp. |
+| `ise_quality[].refined` | `int` | 0 | Smithing-result injection increments refined quality; same first-entry read rule. |
+| `ise_awaken` | `int` | 0 | Separate awakening level. Setter requires a registered modifier item and current level 0, caps above at 5 but does not clamp negative input. |
+
+
+`ItemUpgradeUtil.upgrade(stack, skill, quality)` ignores non-upgradeable items. A valid skill index starting at 1 changes the first matching flag or inserts a compound in lexical key order. Quality handling then runs separately: it ensures both quality entries exist and increments every matching entry for the selected quality. Supplying an invalid skill can therefore still increase quality. Repeated direct calls also increase quality for already unlocked skills; callers must guard their own idempotence.
+
+`isUnlocked(stack, skill)` contains an upper-bound gap: it rejects `index > size`, not `index >= size`. Asking for template length + 1 on a nonempty view can throw. Validate the range starting at 1 before calling.
+
+### Inventory and smithing paths
+
+`IsekaiEvents` registers `CommonEventFactory.OnItemClicked.upgradableClicked` before `testAwakened`. The upgrade click consumes a matching cursor material and unlocks the first locked matching slot as `RAW`. An `UpgradeOverrideItem` unlocks all remaining slots and consumes 1 even when there were none; there is no creative exemption in this callback.
+
+`SmithingScreenHandlerMixin` separately reads input indices 0 and 1, builds an output copy and applies `REFINED` upgrades. Its take predicate allows either a matching ordinary smithing recipe or equality between input 0 and output item types. This is an injection into vanilla's handler, not a custom ingredient layout or a documented guarantee that arbitrary items can enter those slots. Preserve this distinction when changing Minecraft smithing integration.
+
+The awakening click decrements a diamond block **before** checking the current level or registry eligibility. A capped or ineligible target can therefore consume a block without advancing. The setter admits only items in `WeaponModifiers.MODIFIERS`; levels above 0 and below 5 increment by 1. These are current behaviours to account for, not transactional rollback guarantees.
+
+Refined quality also has durability consumers in the common `ItemStackMixin`: maximum durability is multiplied by `1 + 0.07 * refined` and truncated to an integer. For a damageable item used by a server player, a random value below `0.10 * refined` cancels the entire durability-damage call. The chance has no explicit upper clamp. Raw quality does not enter these two checks.
+
+### Awakening modifiers
+
+`IsekaiEvents` routes `weaponStatsModifier` through IsekaiCore's `ONE_SEC_INTERVAL` event. The callback ignores nonplayers and client worlds. It prefers an awakened registered main-hand item; otherwise an offhand entry must have a modifier allowing offhand. Once that test passes, it applies the selected item's whole list.
+
+| Awakening level | Modifier stack multiplier |
+| --- | --- |
+| Below 1 | 0 |
+| 1–2 | 1 |
+| 3–4 | 2 |
+| 5 or higher | 4 |
+
+The bundled registry contains Raven's +2 attack damage and +0.1 melee critical-chance additions per stack, both with offhand disabled. Modifier UUIDs are fixed by registration. The no-eligible-item branch removes every registered modifier; switching directly between eligible items does not first remove all previous registrations. New entries must account for that lifecycle.
+
+### Manual gem dispatch
+
+`TriggerEquipmentSkillPacket` has no payload and calls `tryTriggerFirst` on the server. Selection scans `MAINHAND → OFFHAND → HEAD → CHEST → LEGS → FEET`, then ascending socket index within the active profile count. It requires a `SKILL` socket, no lock or crack, a stored compatible gem and a `TRIGGERABLE` definition.
+
+Selection happens before readiness checks. The first eligible gem blocks later ones when its absolute socket cooldown is in the future or astral energy is insufficient. Creative mode bypasses energy only. Successful readiness pays energy, calls `SkillPowerUtil.triggerSkill` without awaiting an execution result and writes a positive cooldown.
+
+The cooldown is `max(0, round(baseTicks * max(0, 1 - cooldownMult * skillLevel)))`, with nonnegative base ticks and skill level. No chance roll occurs. Full gem NBT, proc routing and cooldown persistence are documented in [gem runtime](/en/dev/gem-system/).
+
+## Contracts
+
+- **Item arrays must match templates**: callers index the material array for displayed slots. Keep its length aligned with the template and validate skill indices.
+- **State is mutable ItemStack NBT**: perform gameplay writes on the owning inventory/server path. Helpers offer neither locking nor a transaction. Do not call them from rendering code.
+- **Quality is accounting, not a generic damage multiplier**: storing `raw` or `refined` does not itself apply a stat modifier.
+- **Awakening is independent**: `ise_awaken` neither sets `ise_upgradable` nor changes socket or experience state.
+- **Gem activation owns costs, not success acknowledgement**: failure inside the selected skill does not refund the already paid energy or suppress the resolver's cooldown.
+- **Client key guards are not server validation**: normal input is blocked by a screen, NPC command widget or disabled actions; the packet handler itself only delegates to the gem resolver.
+
+The equipment-skill key defaults to unbound. The separate `OpenUpgradableScreenPacket` checks for an upgradeable main-hand item and opens an extended handler carrying an ItemStack. Its customisation screen's confirmation callback only closes and logs; the handler's action methods are empty. The old development-key opener is commented out. Do not present this screen as a working purchase or upgrade transaction.
+
+## Extending it
+
+For a new item, implement `IUpgradable`, choose a template and return an equally sized material array. Gate each actual ability using a valid index starting at 1; the template alone does not execute it.
+
+```java
+if (stack.getItem() instanceof IUpgradable item
+        && skill >= 1 && skill <= item.getTemplate().name().length()
+        && !ItemUpgradeUtil.isUnlocked(stack, skill)) {
+    ItemUpgradeUtil.upgrade(stack, skill, ItemUpgradeUtil.Quality.RAW);
+}
+```
+
+This internal example only mutates unlock state; its caller must validate ownership, pay material costs and synchronise the changed inventory. For a gem ability, extend the triggerable skill registry and gem definition instead of adding a template letter.
+
+Shared weapon values live in [balance profiles](/en/dev/balance-profiles/). Raven uses the same profile for its ability checks, timers and tooltip values.
+
+## Verifying
+
+- Inspect all 9 templates and their slot counts; compare tooltip selectors with the item's actual use/hit hooks.
+- Unlock each Raven slot with its matching material; verify the crystal path at partial and full unlock, and creative consumption.
+- Exercise missing, duplicated and malformed upgrade/quality NBT. Test the index boundary and invalid-index quality mutation explicitly.
+- Awaken through levels 1–5, then test the capped click's material consumption. Equip/unequip and check modifier removal; include direct swaps if adding another registered weapon.
+- Put triggerable gems in both hands and armour; verify slot order, locked/cracked skips and no fallback when the first selected gem is unavailable.
+- Check energy shortage, creative mode, skill rejection and cooldown scaling to 0. Save/reload and extract/reinsert to confirm socket cooldown persists.
+- Treat smithing-slot acceptance and the customisation screen as separate integration checks; a generated output or visible button is not proof of a completed transaction.
+
+## Related
+
+[Equipment skills](/en/wiki/equipment-skills/), [gem runtime](/en/dev/gem-system/), [skill runtime](/en/dev/skill-tree/) and [forgery runtime](/en/dev/forgery-runtime/) cover the neighbouring systems.

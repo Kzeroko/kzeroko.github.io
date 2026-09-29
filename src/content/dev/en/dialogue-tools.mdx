@@ -1,0 +1,119 @@
+---
+title: "Dialogue Studio"
+description: "Node editor for bilingual NPC dialogue: wire states together, write both languages in place, generate in bulk, and import or export resource bundles."
+category: assets
+order: 125
+updated: 2026-09-26
+---
+
+Dialogue Studio is a node editor for Blabber dialogue in the site's theme. Each state is a node, each reply is a wire to the state it leads to, and both languages are written on the node itself. Documents keep the current Blabber format; the Studio only adds paths, node positions and bilingual text around them.
+
+## What you are making
+
+Open [Dialogue Studio](https://kentomahou.com/en/tools/dialogue-studio/). The English route is `/en/tools/dialogue-studio/` and the Chinese route is `/zh-cn/tools/dialogue-studio/`. The site repository owns the tool; this repository owns the game resources.
+
+Work happens in a session: one workspace kept in the browser's IndexedDB. You can keep several sessions, switch between them without losing anything, and download any of them as a workspace backup. A workspace uses `isekai-dialogue-workspace` version `1`:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `format` | string | required | Always `isekai-dialogue-workspace`. |
+| `version` | integer | required | Always `1`; any other value is rejected. |
+| `name` | string | absent | Session name, restored when the backup is opened as a new session. |
+| `documents` | array | required | At most 5,000 entries. |
+| `documents[].path` | string | required | Resource path relative to `blabber_dialogues/`, lowercase, ending in `.json`, no `.` or `..` segments. Duplicates are rejected. |
+| `documents[].dialogue` | object | required | The Blabber document, unchanged. |
+| `documents[].layout` | object | absent | Node positions: state name → `[x, y]`. Editor-only; never exported as a game resource. A malformed layout is dropped, not rejected. |
+| `translations.en_us` | object | required | Key → English text. Values must be strings; `""` means not written yet. |
+| `translations.zh_cn` | object | required | Key → Chinese text, same rules. |
+
+Translations are optional at every step. A resource export writes every referenced key in both languages and uses `""` for absent or whitespace-only text. Only structural errors block an export.
+
+## Requirements
+
+The tool runs in the browser with no service, API key or extra npm dependency. If the browser blocks storage, the session is kept in memory only and the status bar says so; download a backup before closing the tab in that case.
+
+| Limit | Value | What happens past it |
+| --- | --- | --- |
+| Dialogues per workspace | 5,000 | Generation and import stop with an error. |
+| States per dialogue | 2,000 | Structural error. |
+| Imported file | 64 MB | The file is refused. |
+| ZIP entries | 20,000 | The ZIP is refused. |
+| ZIP uncompressed size | 256 MB | The ZIP is refused. ZIP64 archives are not read. |
+| Undo history | 200 steps | Oldest steps drop. History lives in memory and clears on reload. |
+
+An imported file becomes a dialogue only if it is JSON with a `states` object and its resulting path passes the path rule above. Other files are listed as skipped with the reason. A dialogue with structural problems still imports; the Issues tab and the file tree mark it until it is fixed.
+
+## Steps
+
+1. Bring dialogue in. **Import** accepts dialogue JSON, `en_us.json` / `zh_cn.json`, a workspace backup and ZIP files; **A whole folder** takes a picked folder. You can also drop files and folders anywhere on the Studio. Anything under a `blabber_dialogues/` folder keeps the path after it, so the mod's `src/main/resources/data/isekaiexpansion/blabber/blabber_dialogues` folder imports as-is. When an incoming path already exists you choose **Replace them** or **Keep mine**. A workspace backup opens as a new session, or merges into the open one.
+2. Or generate a family in **Generate**. Pick a template (simple, branching, NPC trade, conditional reply, or the open dialogue), a scope — `unique`, `common`, `simple`, `combat`, `citizen`, `villager` or `allegiance` — and toggle routes, relationship tiers, phases and genders. The panel runs the generator on every change and shows the file count, the first paths and any skipped combinations. Scenario variants are `0–5`, matching runtime lookup. Existing paths are skipped or stop the run, whichever you choose. `$key` in a template becomes the resource's key prefix.
+3. Build the graph. Drag from a reply's port (●) onto a node to link it; drop on empty space and the node library opens there, and the new node is linked. Double-click the canvas to add a node, or right-click for more. The library holds dialogue, end and confirmation states, plus ready-made states with `isekaiexpansion:open_npc_trade`, `blabber:open_trade`, `isekaiexpansion:give_item`, `isekaiexpansion:emoji`, `blabber:redirect`, `blabber:command` and `isekaiexpansion:open_guild_bounties`. New text gets keys under the dialogue's prefix: `<prefix>.<state>` for the line and `<prefix>.<state>.reply_<n>` for replies, where the prefix is `dialogue.isekaiexpansion.` followed by the path with `/` as `.`.
+4. Edit a node in the **Inspect** tab. Change its ID, type and start flag; write the line and each reply in English and Chinese side by side; set each reply's destination and condition; add, order and fill actions from a form; or edit the node JSON directly. Custom fields the form does not know are kept. When the selected language is empty, nodes show the other language's text, tagged 中 or EN, instead of the key.
+5. Delete, copy and paste freely. Deleting a node unlinks the replies that pointed at it; they show a red port and count as errors until relinked, and a deleted start moves the start to the first remaining node. Pasting renames clashing IDs (`line` → `line_2`), keeps links between pasted nodes, keeps links to states the target already has, and unlinks the rest. Keys that belonged to the source dialogue are copied to fresh keys under the target prefix with their text; shared keys such as a common "continue" stay shared.
+6. Write text in bulk in the **Text** view. Filter by status (unfinished, English missing, Chinese missing, complete) and scope (workspace, folder, dialogue), and run find & replace across the filtered keys. **Copy for AI** puts the unfinished filtered keys on the clipboard with their source locations; **Paste text** merges the filled result back. Empty values never overwrite text already written.
+7. Check structure in the **Issues** tab and play the dialogue in **Play**. Conditions and actions are listed in the playthrough but not run.
+8. Export. **Resource bundle** covers the whole session; **Selected files** and a folder's menu export part of it. A file's menu or the inspector exports one dialogue as JSON. Language files, the translation to-do and a workspace backup are also in the Export menu.
+9. Review the bundle, copy the dialogue files into `src/main/resources/data/isekaiexpansion/blabber/blabber_dialogues/`, merge the language fragments into `language_assemble/categories/dialogues` and run `./gradlew.bat assembleLanguageFiles`.
+
+Moving or renaming a dialogue, or a whole folder, can also rename the keys that follow its old path and carry their text across; old keys nothing uses any more are removed. Duplicating a dialogue gives the copy its own keys by default.
+
+The everyday, romance and command presets in Generate fill routes, relationship tiers and phases. Romance includes bond conversations and responses to the Engage Ring. Presets author dialogue only; the game still controls proposal eligibility and spouse binding. See [NPC favour and romance](/en/wiki/leveling/).
+
+## Declaring it
+
+The runtime chooses a dialogue by resource path; generating a file does not register a new menu route. See [Dialogue data](/en/wiki/dialogue-data/) for the game format and [allegiance runtime](/en/dev/npc-allegiance/) for racial owner routes.
+
+The validator rejects a missing start, unlinked or dangling replies, unknown state types, singular `action`, malformed action containers, an `isekaiexpansion:emoji` action without an `emoji` ID, and reachable states with no path to an ending. It warns about unreachable states and start-state actions. Custom action codecs still need an in-game reload check.
+
+A resource bundle contains:
+
+| Path | Meaning |
+| --- | --- |
+| `data/isekaiexpansion/blabber/blabber_dialogues/<path>` | Each dialogue, as written. |
+| `language_assemble/categories/dialogues/en_us.json` | Every referenced key, English. A merge fragment. |
+| `language_assemble/categories/dialogues/zh_cn.json` | Every referenced key, Chinese. A merge fragment. |
+| `translation-todo.json` | Keys with a language still missing. Not a game resource. |
+| `manifest.json` | Bundle format, file list and languages. |
+| `studio/workspace.json` | The session, node layout included, so the bundle reopens in the Studio. Not a game resource. |
+| `README.txt` | Installation notes in both languages. |
+
+`translation-todo.json` lists only unfinished keys; the language files also contain completed ones. Workspace backups keep dictionary entries no dialogue references; resource exports include only referenced keys.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `format` | string | `isekai-dialogue-translation-todo` | Identifies this hand-off file. |
+| `version` | integer | `1` | Current hand-off schema. |
+| `entries` | array | always present; may be empty | Unfinished translation keys. |
+| `entries[].key` | string | always present | Exact key to preserve while writing. |
+| `entries[].missing` | array | `en_us`, `zh_cn` or both | Languages whose text is absent or whitespace-only. |
+| `entries[].sources` | array | nonempty | All document references to this key. |
+| `entries[].sources[].path` | string | always present | Relative dialogue resource path. |
+| `entries[].sources[].pointer` | string | always present | JSON Pointer to the text component that contains the key. |
+
+**Copy for AI** produces a brief that **Paste text** and **Import** both read back:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `format` | string | `isekai-dialogue-text-brief` | Identifies the brief. |
+| `version` | integer | `1` | Current brief schema. |
+| `instructions` | string | always present | Writing rules for the person or AI filling it in. |
+| `entries` | array | always present | One entry per unfinished key in the current filter. |
+| `entries[].key` | string | always present | Exact key to preserve. |
+| `entries[].en_us` | string | `""` when unwritten | English text. |
+| `entries[].zh_cn` | string | `""` when unwritten | Chinese text. |
+| `entries[].used_in` | array | nonempty | `<path>#<JSON Pointer>` for every use of the key. |
+
+Writers and AI agents fill language values while preserving keys, paths, actions and requirements. Either language can come back on its own; the remaining empty values stay available for later.
+
+## Checklist
+
+- Download a backup before clearing browser data or moving to another device. Sessions live in one browser only.
+- Empty text is fine while authoring and handing off. Review both languages and the exact resource paths before shipping game content.
+- Clear the Issues tab, then test every branch in the game, including custom actions and denied requirements.
+- Use **Sessions → Clean up** to drop unused text keys and unreachable nodes before a final export.
+- In the site repository, run `npm.cmd run test:dialogue`, `npm.cmd run check` and `npm.cmd run build:fast`.
+
+## Related
+
+- [Dialogue data](/en/wiki/dialogue-data/) — runtime fields and routing.
+- [NPC dialogue runtime](/en/dev/npc-dialogue/) — server admission and transactions.

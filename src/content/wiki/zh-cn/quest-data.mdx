@@ -1,0 +1,179 @@
+---
+title: "任务数据"
+description: "配置任务标识、前置任务、领取条件与结算冷却。"
+category: data
+order: 90
+updated: 2026-09-24
+---
+
+任务定义将目标、奖励和玩家或队伍的领取规则组合在一起。任务目录整体校验后才会替换：定义或前置关系图出错时，系统保留上一版目录。
+
+## 文件放在哪里
+
+路径为 `data/<namespace>/quests/**/*.json`，每个文件定义一个任务。例如 `data/example/quests/misc/visit.json` 默认对应 `example:misc/visit`，显式 `id` 可以改写该标识。同一路径由常规资源包优先级选择文件；不同有效文件声明相同任务 ID 时，任务目录重载被拒绝。
+
+任务定义属于服务端数据。标题和描述来自客户端的 `assets/<namespace>/lang/en_us.json` 与 `zh_cn.json`，不是任务 JSON 中的字段。当前仓库 `docs/examples/quests/` 中的示范任务是编写参考文件，不是已安装的玩法内容。
+
+## 最小示例
+
+下例保留了示范文件中 visit-location 目标的必要结构。将它保存为 `data/example/quests/first_tick.json`。由于没有位置过滤条件，领取后下一次符合条件的玩家刻即可完成；要指定目的地，需添加目标条件。
+
+```json
+{
+  "tier": "misc",
+  "prerequisites": [],
+  "objectives": [
+    {
+      "id": "visit",
+      "progress_type": "boolean",
+      "type": "isekaiexpansion:visit_location",
+      "data": {}
+    }
+  ],
+  "rewards": []
+}
+```
+
+## 字段
+
+### 根对象
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `id` | `identifier` | 文件资源 ID | 改写任务标识；标识语法错误时拒绝定义。 |
+| `tier` | `string` | 必填 | 选择下表中的任务层级；空白或未知值被拒绝。 |
+| `chapter` | `identifier` | misc 与 bounty 为 isekaiexpansion:side_stories；其余为 isekaiexpansion:prologue | 分组标识，去除首尾空白；空值被拒绝。省略命名空间时使用 isekaiexpansion，不检查独立章节注册。 |
+| `prerequisites` | `array<object>` | 必填 | 所列完成要求必须全部满足；空数组表示没有前置任务。 |
+| `conditions` | `object` | 无额外领取限制 | 容纳 pick；容器类型错误时拒绝。 |
+| `conditions.pick` | `object / array<object>` | 恒真 | 领取时计算的通用条件树；数组表示所有子条件同时满足。 |
+| `complete_cooldown` | `array<object>` | [] | 下文的结算冷却规则；空数组不施加这两类限制。 |
+| `objectives` | `array<object>` | 必填 | 非空目标列表，必须完成全部目标。 |
+| `rewards` | `array<object>` | 必填 | 按顺序执行的奖励列表；空数组不发奖，允许重复条目。 |
+| `client_visible` | `boolean` | misc 与 bounty 为 true；其余为 false | 常规客户端同步包含该定义及其档案状态；不阻止服务端激活任务。 |
+| `misc_picker_weight` | `integer` | 1 | 正整数相对抽取权重。非 misc 层级只要出现此字段就被拒绝，即使值为 1。 |
+| `misc_pools` | `array<string>` | misc 为 [default]；其余为 [] | 仅限 misc 的任务池。空数组或全空白条目变为 default；重复项合并，未知名称被拒绝。 |
+| `bounty` | `object` | bounty 必填；其余不填写 | 实体委托元数据，见[悬赏数据](/zh-cn/wiki/bounty-data/)；其他层级填写会被拒绝。 |
+| `mainstory_progress` | `object` | 不限制整数范围 | 仅限主线层级；非主线层级出现此字段即被拒绝。 |
+| `mainstory_progress.min` | `integer` | -2147483648 | 领取者剧情进度的下界，包含边界。 |
+| `mainstory_progress.max` | `integer` | 2147483647 | 包含边界的上界；小于 min 时拒绝。 |
+
+| 层级常量 | 可用 JSON 名称 | 选择规则 |
+| --- | --- | --- |
+| `MAINSTORY` | mainstory, main_story | 一次性任务：有过完成或失败记录后均不可重新领取。 |
+| `IMPORTANT_MAINSTORY` | important_mainstory, important_main_story | 同样使用一次性规则和剧情进度过滤。 |
+| `MISC` | misc, misc_quest, misc_quests | 按任务池加权抽取；成功完成会解锁重复领取。 |
+| `BOUNTY` | bounty | 告示板加权张贴；经接待员确认的有效契约授权推进，签发方接待员办理结算；纸质副本可缺失。 |
+
+层级与任务池名称去除首尾空白、忽略大小写，并将空格和连字符转为下划线。任务池常量为 `DEFAULT`、`TOWN`、`COMBAT`、`DEBUG`、`ADVANCEMENT`、`CRAFTING`、`FORGERY`、`ALCHEMY`；对应 JSON 名称为 `default`、`town`、`combat`、`debug`、`advancement`、`crafting`、`forgery`、`alchemy`。
+
+常规领取路径只允许未组队玩家或队长操作。已激活任务和未满足的前置要求会阻止领取，之后还要检查冷却和领取条件。主线按剧情进度下界、任务 ID 排序，选择首个符合条件的定义。杂项任务在指定池及可选章节的合格候选中按相对权重抽取；权重不能绕过资格检查。已完成的 misc 任务还必须保持重复领取解锁状态。
+
+### 前置任务、目标与奖励
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `prerequisites[].quest` | `identifier` | 必填 | 同一成功加载目录中的其他任务。自引用、重复引用、目标缺失或环路均拒绝重载。 |
+| `prerequisites[].minimum_completions` | `integer` | 1 | 所需成功完成次数，至少为 1；失败次数不计入。 |
+| `objectives[].id` | `string` | 必填 | 非空白，在任务内唯一；也用于生成翻译键。 |
+| `objectives[].progress_type` | `string` | 必填 | numeric 累积数值，boolean 使用标志完成。忽略大小写、去除首尾空白并规范化连字符。 |
+| `objectives[].required` | `integer` | 1 | 正整数数值目标；boolean 必须恰好为 1。 |
+| `objectives[].type` | `identifier` | 必填 | 已注册的目标类型，例如 isekaiexpansion:visit_location；未知类型拒绝重载。 |
+| `objectives[].data` | `object` | 必填 | 类型专用字段、内容触发器及受支持的失败规则；只有不要求字段的类型才能使用空对象。 |
+| `objectives[].conditions` | `object / array<object>` | 恒真 | 目标事件过滤树；叶子类型与 conditions.pick 不同。 |
+| `rewards[].type` | `identifier` | 必填 | 已注册奖励类型；未知类型拒绝重载。 |
+| `rewards[].data` | `object` | 必填 | 奖励专用参数；不会隐式补为空对象。 |
+| `data.progress_per_tick` | `integer` | 1 | visit_location 每个合格玩家刻增加的正整数进度；boolean 仍在首个合格事件完成。 |
+
+[任务目标](/zh-cn/wiki/quest-objectives/)列出目标参数与事件过滤器，[任务奖励](/zh-cn/wiki/quest-rewards/)说明奖励参数和接收者选择。
+
+### 领取条件
+
+条件对象使用 `type` 和 `data`。条件节点位置上的数组是 `isekaiexpansion:all` 的简写。下表描述领取及目标内容触发器使用的通用条件，**不适用于目标事件过滤器的叶子类型**。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `identifier` | 必填 | 已注册通用条件类型；下表内置类型均使用 isekaiexpansion。 |
+| `data` | `object` | 必填 | 条件参数；未知参数不会添加检查。 |
+| `data.children` | `array<object>` | [] | all、any、not 的递归子条件，子条件也可以使用简写数组。 |
+| `data.min` | `integer` | -2147483648 | 下表范围条件的下界，包含边界。 |
+| `data.max` | `integer` | 2147483647 | 包含边界的上界；低于 min 时拒绝。 |
+| `data.value` | `boolean` | true | has_team 期望的组队状态。 |
+| `data.target_rank` | `string` | 实际必填 | 晋升目标；省略后先变为空字符串，再因未知值被拒绝。 |
+| `data.crossed_only` | `boolean` | false | objective_progress 还要求本次事件使进度跨入范围。 |
+
+| 类型 | 含义 |
+| --- | --- |
+| `isekaiexpansion:all` | 所有子条件通过，遇到首个失败即停止；空列表通过。 |
+| `isekaiexpansion:any` | 任一子条件通过即可，首个成功后停止；空列表失败。 |
+| `isekaiexpansion:not` | 对恰好 1 个子条件取反；其他数量被拒绝。 |
+| `isekaiexpansion:player_level` | 领取者或事件玩家的异界核心等级位于 min–max；无玩家时失败。 |
+| `isekaiexpansion:player_rank` | 玩家冒险者阶级数值位于 min–max；无玩家时失败。 |
+| `isekaiexpansion:adventurer_rank_promotion_ready` | 异界核心判断玩家满足 target_rank 晋升条件；本条件不执行晋升。 |
+| `isekaiexpansion:has_team` | 实际组队状态等于 value；个人档案不算队伍。 |
+| `isekaiexpansion:team_member_count` | 同一任务档案的在线玩家数位于 min–max。 |
+| `isekaiexpansion:team_average_level` | 同档案在线玩家的异界核心平均等级向下取整后位于 min–max。 |
+| `isekaiexpansion:team_average_rank` | 在线成员的冒险者阶级数值均值向下取整后位于 min–max。 |
+| `isekaiexpansion:objective_progress` | 当前目标进度位于 min–max；领取上下文没有当前目标，因此此叶子在领取时恒假。 |
+| `isekaiexpansion:sequence` | 有状态的内容触发条件；在 conditions.pick 任意深度出现都被拒绝，详见任务目标。 |
+
+在线成员检查不统计离线队友，也不要求同维度。若找不到匹配的在线成员，但存在操作玩家，则使用该玩家作为后备成员。
+
+`objective_progress` 将 boolean 的 false/true 映射为 0/1。数值型 `crossed_only` 要求旧进度低于 min、新进度处于包含边界的范围内；直接跳过 max 不满足条件。布尔跨越要求 false → true，同时仍须满足范围检查。普通领取条件应使用玩家或队伍叶子，不应依赖目标进度。
+
+冒险者阶级由异界核心管理。已依据所消费版本 `0.4.0-build60` 对应的本地源码仓库检查：可用晋升目标为 `copper`、`silver`、`gold`、`diamond`、`mythril`、`adamantite`、`stormyx`、`celestium`，去除首尾空白并忽略大小写；此处拒绝 `none`。就绪要求目标是下一阶，且初次晋升以外还须达到依赖方的声望要求；已经达到目标不算就绪。这是源码仓库核对，不代表二进制等价验证。
+
+### 结算冷却
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `complete_cooldown[].type` | `string` | 必填 | ALL 或 THIS，去除首尾空白并忽略大小写；每种类型最多出现一次。 |
+| `complete_cooldown[].data` | `object` | 必填 | 冷却参数。 |
+| `complete_cooldown[].data.value` | `integer` | 必填 | 非负游戏时间刻数；0 禁用该规则。例如每秒 20 刻时，1200 刻为 60 秒。 |
+
+虽然字段名含 complete，**完成与失败都会启动结算计时**。`THIS` 使用本任务最近一次结算；`ALL` 使用当前已加载、拥有正数 ALL 规则的任务中，本档案最近一次结算时间，并非无差别统计所有任务。
+
+每个候选任务将自己的冷却时长应用到对应计时点。两类限制都结束后才可领取；负的已流逝时间按 0 处理，没有结算记录则没有冷却。计时依据世界游戏时间，不包含服务器停止期间的现实时间。
+
+### 翻译键
+
+| 文本 | 翻译键格式 |
+| --- | --- |
+| 任务标题 | `quest.<namespace>.<quest-path>.title` |
+| 任务描述 | `quest.<namespace>.<quest-path>.desc` |
+| 目标标题 | `quest.<namespace>.<quest-path>.objective.<objective-id>.title` |
+| 目标描述 | `quest.<namespace>.<quest-path>.objective.<objective-id>.desc` |
+| 章节标题 | `quest_chapter.<namespace>.<chapter-path>.title` |
+| 章节描述 | `quest_chapter.<namespace>.<chapter-path>.desc` |
+
+路径中的斜杠转为点；目标 ID 中的斜杠和冒号都转为点。选择规范化后仍不同的 ID：原始 ID 唯一并不能保证翻译键唯一。
+
+## 校验
+
+| 输入 | 结果 |
+| --- | --- |
+| 缺少 tier、prerequisites、objectives 或 rewards | 拒绝定义并保留上一版任务目录 |
+| 空根对象或空 objectives | 拒绝 |
+| 空 prerequisites 或 rewards | 接受 |
+| 未知根字段 | 忽略，不添加行为 |
+| 未知目标、奖励或条件类型 | 拒绝 |
+| 标识语法错误或字段类型不兼容 | 解析时拒绝 |
+| 未注册的 chapter | 接受为分组标识；翻译另行提供 |
+| 前置目标缺失、自引用、重复前置或环路 | 拒绝 |
+| 不同有效资源声明重复任务 ID | 拒绝 |
+| 同一任务内目标 ID 重复 | 拒绝 |
+| 字段范围错误、层级专用字段误用、冷却类型重复或领取条件含 sequence | 拒绝 |
+| 其他游戏资源引用 | 由各目标或奖励解析器、或执行阶段检查；任务解析成功不代表所有资源均存在 |
+
+JSON 文本损坏时，底层资源读取阶段可能在任务校验前就丢弃该资源。整体替换保证针对交给任务解析器的定义，不保证每个不可读取的文件都会保留旧条目。
+
+## 重载
+
+服务端数据重载会重建任务目录，只有定义与前置关系图均通过校验才增加版本号。成功加载的空目录也会替换旧目录。保存的任务档案独立于定义；修改 ID 不等于迁移存档。
+
+完整客户端同步发送可见定义及对应的过滤后档案，翻译资源仍需在客户端提供。[任务运行时](/zh-cn/dev/quest-system/)说明同步时机、活动状态协调和诊断方式。
+
+## 相关页面
+
+- [任务目标](/zh-cn/wiki/quest-objectives/) — 目标类型、事件过滤、交付、内容动作及失败规则。
+- [任务奖励](/zh-cn/wiki/quest-rewards/) — 奖励字段、接收者及失败处理。
+- [任务运行时](/zh-cn/dev/quest-system/) — 状态归属、持久化与集成。

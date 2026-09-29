@@ -1,0 +1,72 @@
+---
+title: "Origin icon assets"
+description: "Race sprite discovery, class and profession item icons, and portrait rendering."
+category: assets
+order: 150
+updated: 2026-09-19
+---
+
+Race icons and class/profession icons use separate asset paths. Choose the path from the origin layer before adding art: a race sprite is discovered on resource reload, while an item icon needs a registered item and an item model for item-rendering surfaces.
+
+## What you are making
+
+| Layer | Asset route |
+| --- | --- |
+| `origins:origin` | Race sprite at `assets/<namespace>/textures/gui/icon/origins/hdicon_<origin-path>.png`. |
+| `origins-classes:class` | Display item whose flat icon is `assets/<item-namespace>/textures/item/icons/<item-path>.png`. |
+| `isekaiprofessions:profession` | Same display-item route as classes. |
+
+The client implementation lives in `client.origin.OriginIconAssetRegistry` and `OriginIcon`; these are not public API facades. The general layer-aware factory returns an empty descriptor for an absent or empty origin. A direct race lookup instead returns the shared fallback texture when the origin or sprite is absent.
+
+## Requirements
+
+Keep race sprites directly in the origins icon folder. The filename must start with `hdicon_`, end with lowercase `.png`, and contain a nonempty path without a slash after the prefix. Nested origin paths cannot resolve through this index. Discovery checks names, not image dimensions or successful decoding.
+
+The index uses the origin's path without its namespace. Thus `isekaiorigins:human` and `example:human` use the same key. When resource namespaces compete for that key, `isekaiexpansion` wins; ties between other namespaces retain the first encountered resource, with no additional ordering guarantee. A resource pack can override an existing resource identifier through normal resource selection.
+
+For item icons, retain the item namespace in the texture path. `IconItem` configures epic rarity, maximum stack count 1 and fireproof status; it does not discover or register a texture. The current registry includes these items:
+
+| Group | Paths in `isekaiexpansion` |
+| --- | --- |
+| Class | `classicon_warrior`, `classicon_ranger`, `classicon_magic_caster`, `classicon_cleric`, `classicon_priest`, `classicon_heavy_warrior`, `classicon_hunter` |
+| Profession | `professionicon_blacksmith`, `professionicon_cook`, `professionicon_alchemist` |
+
+## Steps
+
+1. Identify the layer and the complete origin/item ID. For a race, use only its origin path in the sprite filename; for an item, use the item's namespace and path.
+2. Add the PNG to the appropriate asset directory. Existing human art is `assets/isekaiexpansion/textures/gui/icon/origins/hdicon_human.png`; warrior item art is `assets/isekaiexpansion/textures/item/icons/classicon_warrior.png`.
+3. For a new class/profession icon item, register it in `IsekaiIconItems` and include it in `SimpleModelProvider`. Its generated model uses `Models.GENERATED` with layer 0 at `<namespace>:item/icons/<item-path>`. Race sprites do not need item models or icon-item registration.
+4. Reload client resources and reopen the relevant screens. The sprite registry replaces its immutable map on each reload; drawing reads that map rather than rescanning resources.
+5. Inspect the chooser, status/nameplate displays, skill portrait and race-evolution graph. Include the player HUD for race art, because its portrait crops differently from a square icon.
+
+## Declaring it
+
+A race sprite needs no icon field in its origin definition for the custom sprite route; the bundled human origin omits one. Class/profession definitions refer to display items: the bundled warrior declaration uses `"icon": "isekaiexpansion:classicon_warrior"`. This is an Origins-owned field, not a separate icon JSON format introduced by this mod.
+
+### Rendering and missing art
+
+| Surface or condition | Behaviour |
+| --- | --- |
+| Missing race sprite | `isekaiexpansion:textures/item/icons/default.png` from `AssetUtil.Icons.DEFAULT_ICON`. |
+| Flat item icon | Resolves the constructed item texture directly. This local path does not substitute the race fallback if the item texture is missing; image loading belongs to ModernUI. |
+| `OriginIconView` | Flat image, aspect-preserving fit. Uses linear sampling if either source dimension exceeds the view; otherwise nearest. Re-resolves an image when its cached image becomes closed. |
+| Origins chooser | Sprite descriptors use `OriginIconView`; item descriptors use a live `OriginItemStackView`, including arbitrary third-party display items and the random entry. |
+| `TriggerSkillPortraitView` | Fits an image with an inset and chooses sampling from source/view size. |
+| `ProgressionNodePortraitView` and player HUD portrait | Use `ModernUiRoundImage`: centred crop filling a circle, with linear sampling when the crop scale is below 1 and nearest otherwise. |
+
+The round-image helper retains an image shader until the image or draw rectangle changes. Call `release()` when its owning view detaches and when its image resources are invalidated. The HUD releases it on resource-generation changes and detach. The progression node releases it on detach; its image is constructor-captured, so recreate the node after resources change. A missing or closed progression image draws the node's local placeholder.
+
+## Checklist
+
+- Confirm a race's filename matches its path and has no nested directory.
+- Check namespace collisions deliberately; adding a differently namespaced race with the same path does not create a distinct sprite slot.
+- Verify item registration, generated model and flat PNG separately: the chooser's live item render can work while a flat status icon is missing.
+- Test a missing race sprite, an empty origin and a missing item PNG as separate cases.
+- Check small and large UI sizes, cropped portrait edges and resource reload with screens reopened.
+- When adding a round-image holder, release its native shader on detach and resource invalidation.
+
+## Related
+
+- [Identity](/en/wiki/identity/) — the player-facing layers.
+- [Humanoid parts](/en/dev/humanoid-parts/) — a separate model asset pipeline.
+

@@ -1,0 +1,62 @@
+---
+title: "数值配置"
+description: "武器、药剂、装备与状态效果共用的数值配置。"
+category: systems
+order: 65
+updated: 2026-09-26
+---
+
+内部数值配置位于`internal.balance`，用不可变记录集中保存同一功能的参数。实际效果与提示读取同一份配置，持续时间带有明确单位。
+
+## 它做什么
+
+| 所属配置 | 内容 |
+| --- | --- |
+| `WeaponBalance` | 近战构造伤害与攻击速度偏移、吸取能力、天授、弓与投射物。 |
+| `RavenBalance` | 渡鸦的治疗、姿态、处决与律动。 |
+| `PotionBalance` | 恢复比例、疲劳、限时增益与替代效果时长。 |
+| `EquipmentBalance` | 具名护甲部位、凤凰重生与三位一体处理器属性。 |
+| `EffectBalance` | 适应、庇护之盾与灵力缠身的效果数值。 |
+
+这些表供内部Java开发使用，编译后随模组分发，没有重载监听、同步包或公共API门面。两端需要使用相同构建。
+
+## 运行时模型
+
+配置只初始化一次，读取时无需查表，也不会每刻分配对象。`TickDuration`保存刻数；`TickDuration.seconds(int)`按每秒20刻转换整数秒。运行时计时使用`ticks()`，需要整数秒的调用处使用`seconds()`；不足整秒时，后者会抛出异常。
+
+`WeaponBalance.Melee.damage()`表示构造器接收的伤害加值。`attackSpeed()`是相对原版基础攻击速度的偏移，必须大于−4。护甲记录分别命名靴子、护腿、胸甲与头盔；`values()`为材质构造器返回一份新数组。
+
+## 调用约定
+
+记录构造器按字段检查比例、负时长与非有限数值，也拒绝空时长。静态配置写错时会在类初始化阶段报错，不会保留部分生效的数值表。
+
+渡鸦的处决使用`nextInt(100) < chancePercent()`，12就代表精确的12%。姿态保留生命比例为0.50，持续600刻（30秒），冷却1800刻（90秒）；律动持续600刻（30秒），最多4层。
+
+灵力缠身的数值不随效果放大器变化：
+
+| 属性 | 数值 |
+| --- | --- |
+| 以太能量 | +20%总量乘算 |
+| 攻击伤害 | +15%总量乘算 |
+| 攻击速度 | +10%总量乘算 |
+| 移动速度 | +10%总量乘算 |
+| 韧性 | +20 |
+| 星能回复速率 | −50%总量乘算 |
+
+## 扩展方式
+
+把相关参数放入所属配置，效果逻辑与提示都通过访问器读取。新字段应写明比例、属性点、数量或时间单位。配置中不存可变集合；外部API需要数组时，在调用边界复制。
+
+```java
+var stance = RavenBalance.STANCE;
+player.getItemCooldownManager().set(this, stance.cooldown().ticks());
+int tooltipSeconds = stance.cooldown().seconds();
+```
+
+## 验证
+
+运行`./gradlew.bat compileJava`。在游戏中核对提示单位与实际计时。
+
+## 相关页面
+
+参见[装备技能](/zh-cn/dev/equipment-skills/)、[战斗运行机制](/zh-cn/dev/combat-runtime/)与[状态效果](/zh-cn/wiki/status-effects/)。

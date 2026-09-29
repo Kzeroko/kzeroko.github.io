@@ -1,0 +1,148 @@
+---
+title: "Morph lifecycle and server runtime"
+description: "Authoritative phases, synthetic form ownership, persistence, ability input, travel and passenger contracts."
+category: systems
+order: 110
+updated: 2026-09-19
+---
+
+Morphing combines a server-owned form session with client presentation and optional species controllers. This reference follows the session from entry through persistence, input and teardown.
+
+## What it does
+
+Morphing keeps the player as the real world entity while borrowing a living entity's presentation, dimensions and selected behaviour. `MorphComponent` owns the authoritative phase and form identity. `MorphEntityFactory` creates an unspawned living entity with mob AI disabled; it is not a second world actor with its own inventory or normal world tick.
+
+Power and attribute authoring is covered in [morph data](/en/wiki/morph-data/). The currently exposed server entry point is `api.morph.MorphService`; internal controllers described below are implementation details.
+
+## Runtime model
+
+### Phase and duration
+
+| Phase | Component presentation/dimension predicate | Server progression |
+| --- | --- | --- |
+| `NONE` | Player body. | No active form processing. |
+| `ENTERING` | Form from transition progress 0.5 onward. | Becomes `ACTIVE` after `transitionTicks`. |
+| `ACTIVE` | Form body. | Runs posture, traits and registered form ticks; may expire. |
+| `EXITING` | Form while progress is below 0.5, then player. | Clears after `transitionTicks`. |
+
+Transition length is at least 4 ticks, normally 18. A phase change records world time, increments revision, invalidates the form cache, recalculates dimensions and synchronises before announcing `ON_MORPH_PHASE_CHANGE`. Equal previous/current phases do not emit that event. NBT reception also announces a changed phase, so a listener must check logical side before applying gameplay.
+
+The component's visual predicate uses interpolated progress; its dimension predicate uses tick delta 0. The server additionally recalculates at `transitionTicks / 2` using integer division. Odd transition lengths can therefore place that explicit refresh before the 0.5 threshold; include odd lengths when testing dimensions rather than assuming perfect midpoint agreement.
+
+Duration 0 is unlimited. A positive duration starts when the phase reaches `ACTIVE`; entry and exit are outside that budget. Expiry waits for standing-player clearance, retries while blocked and sends the blocked-expiry message once. Remaining time is derived from `phaseStartedTick`, not a saved countdown. Time that advances in that world while a player is disconnected still affects the deadline; this is not an offline-paused timer.
+
+Normal exit deactivates travel, ejects supported passengers, detaches form runtime state and begins the visual return. `endImmediately` performs travel/passenger teardown and clears without a separate exit transition. Calling the lower-level `clear` alone is not equivalent to that full teardown entry point.
+
+The actual rendered model follows pulse coverage through the [client presentation controller](/en/dev/morph-client/); it is not selected directly by the component predicate in this table.
+
+### Entry and identity changes
+
+`toggle` returns from an existing form only when its source execution ID matches the requested morphing power. A different power is rejected. Entry checks that the player is not riding, the type produces a living entity, and the target dimensions fit. Normal return checks standing-player clearance.
+
+The lower-level `MorphService.morph` does not reject an already active form itself; callers must choose their replacement policy. `MorphFormRequest.start` adds the existing-morph rejection. The developer command calls the lower-level method, so it can replace a form.
+
+`MorphIdentityReconciler` ends a form immediately if its source is a registered `MorphingTriggerableSkill` execution that the player no longer holds. It checks held powers including inactive ones. Nonpower sources, such as programmatic grants, are retained. Origin-selection and progression changes call reconciliation; this is not a per-tick ownership scan.
+
+### Form ownership and ticking
+
+The cached form is rebuilt when component revision or world changes. Binding records its host and exposes a synthetic passenger list containing that host; it does not mount the real player into the unspawned form. Rotation snapshots preserve current/previous yaw, pitch, body and head angles across local rebuilds.
+
+Normal state synchronisation copies host position, velocity, fluid state, pose, sprint/sneak, silence, proportional health, age, limb animation, swing state, hurt/death state and hand stacks. Hand stacks are copied, not transferred. A native-rotation handler can preserve its own rotation and feed body yaw back to the host. Previous rotation advances at host tick entry, before travel; full entity ticking must not be substituted for this bridge.
+
+`MorphRiderContext` provides a nestable thread-local driver only inside a scoped native call. It restores the previous context on close. Spawned ability entities can receive a `MorphAbilityOrigin` containing host UUID, form type and native ability ID from the registered identity resolver. That attribution is distinct from giving an entity a real rider or changing world ownership.
+
+## Contracts
+
+### Persistent and synchronised state
+
+Component IDs are `isekaiexpansion:morph` and `isekaiexpansion:morph_variant`. Morph state uses `NEVER_COPY` on respawn; selected variants use `ALWAYS_COPY`. Reconnect can reconstruct the saved form, while respawn starts without the prior morph.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `phase` | string | `NONE` | Exact enum name; invalid/missing becomes `NONE`. |
+| `entityType` | identifier string | absent | Form type; invalid syntax becomes null. |
+| `sourceSkill` | identifier string | absent | Source execution or programmatic grant ID; same syntax handling. |
+| `primaryAbility` | identifier string | absent | Authored primary slot ID before entity overrides. |
+| `secondaryAbility` | identifier string | absent | Authored secondary slot ID before entity overrides. |
+| `skin` | identifier string | absent | Optional dedicated texture selector. |
+| `entityNbt` | compound | `{}` | Copied presentation NBT; sanitised when constructing the form. |
+| `phaseStartedTick` | long | 0 | Absolute current-world time at the phase change. |
+| `transitionTicks` | int | 4 on read | Reader clamps to at least 4; a newly constructed component initially uses 18. |
+| `durationTicks` | int | 0 | Clamped nonnegative; 0 means unlimited. Counts only the active interval. |
+| `revision` | int | 0 | Cache identity counter; no range clamp. |
+| `specialTravelActive` | boolean | false | Special travel activation flag, distinct from whether a handler currently handles movement. |
+| `jumpInput` | boolean | false | Accepted jump input for travel. |
+| `sneakInput` | boolean | false | Accepted sneak input for travel/posture. |
+
+Movement axes, primary attack cadence/combo, cached entities, rotation snapshots, expiry-message suppression and client dimension bookkeeping are not serialized. Component read does not revalidate every combination of phase and IDs. A malformed saved active state can therefore have no constructible form; do not treat raw NBT edits as a supported entry path.
+
+Captured entity NBT strips `UUID Pos Motion Rotation Dimension PortalCooldown FallDistance Fire Air OnGround Invulnerable Health HurtTime HurtByTimestamp DeathTime AbsorptionAmount Passengers Leash Brain CanPickUpLoot PersistenceRequired Owner OwnerUUID Tamed Sitting`, then writes the requested `id`. This is a blacklist, not a visual-field whitelist; other entity-specific fields remain. The factory sanitises before `readNbt` and disables mob AI.
+
+Humanoid morph requests also carry `MorphHumanoidAppearance`, a compound containing the resolved `HumanoidProfile`, including the active outfit. Capturing an entity snapshots its presented profile; a type-only NPC request resolves the preset on the server before snapshotting. The factory restores this profile after ordinary entity NBT. Clients therefore render the captured appearance without loading server-only NPC presets. This snapshot belongs to the morph session and persists inside `entityNbt`; it does not change the NPC save format.
+
+### Ability requests
+
+`morph_ability_use` carries slot byte, action byte and target entity VarInt. Slots are `PRIMARY` and `SECONDARY`; actions are `PRESS`, `REPEAT`, `RELEASE`. Invalid enum ordinals throw. Server handling requires `ACTIVE`, a form ID, a constructible form and a non-player-control form.
+
+Entity overrides resolve before execution. Cooldowns use the display-resolved ability ID under `<namespace>:morph_ability/<path>`. During cooldown, repeats are rejected; a fresh press can proceed only if the ability opts into `acceptsPressDuringCooldown`. Release bypasses the activation cooldown gate. Accepted results broadcast preview; only positive returned cooldowns update the cooldown manager.
+
+The packet target is merely resolved to a living entity. Each ability must perform its own range, visibility and ally checks; the packet does not establish a valid target. Source metadata is taken from the player's currently active triggerable power matching the stored execution ID; missing source power uses handler defaults.
+
+Primary cadence is separate from ability cooldown and lasts at least 1 tick. Delayed attacks use `MorphAttackScheduler`, which drops removed players or players belonging to another server. The callback itself must check phase/revision and target validity before applying a delayed hit.
+
+### Controls, posture and equipment
+
+`MorphControlPolicy` treats `BaseNpcEntity` and `isekaiexpansion:morph_player_rigs` types as player rigs. Active player rigs retain player controls; modular forms use morph ability input. During morph phases, hand access for modular forms exposes only compatible Better Combat weapons on forms allowed by Better Mob Combat. Other hand stacks resolve empty without being removed from inventory. Player rigs keep ordinary hand access.
+
+Non-player rigs block vanilla crouching/crawling while morph dimensions own the body. A dry, nongliding `SWIMMING` pose is also treated as anatomical crouch; real swimming and gliding remain distinct. A tameable form sits when active, special travel is off, sneak input is held and horizontal speed squared is at most 0.0025.
+
+Active forms can inherit water breathing and fire immunity. `isekaiexpansion:morph_climbers` enables climbing on horizontal collision; `isekaiexpansion:morph_fall_damage_immune` suppresses fall damage. Those trait checks use the `ACTIVE` phase, not merely the transition's visual half.
+
+### Travel and passenger authority
+
+Only the server and the owning client drive travel; observer clients return a pass result. `morph_input_state` sends forward/strafe as signed bytes scaled by 127, plus jump/sneak booleans. Axes clamp to −1…1. Active tameable non-player rigs accept sneak posture input; registered travel forms also accept movement/jump. Unsupported input is cleared.
+
+Travel activation rejects spectators, riders, inactive forms and unsupported handlers. Client prediction additionally requires handler opt-in. Server travel reads stored input, while the owner client uses local input. A handler may own inactive travel without setting the activation flag. Failure is logged and the flag is cleared/deactivated; despite the log wording, the registry entry is not permanently disabled, so later travel can call it again.
+
+Passengers mount the real player host. Boarding uses an empty main hand on another player in an active form with a registered mount handler; the handler decides eligibility. Seat positions and dismount locations delegate to that handler. Host/passenger damage is suppressed in either direction for a supported active transport; this check does not make every pair of sibling passengers mutually immune.
+
+Carried rotation adds the form's body-yaw delta and handler pitch delta to the passenger; pitch clamps to −90…90. Supported passengers are ejected on exit. The host receives an explicit passenger-list packet so the vehicle player also sees the relationship.
+
+### Selected variants and talismans
+
+Variant selections are independent of the current morph. NBT `Selections` is a compound list of `Form` and `Variant` identifier strings; invalid IDs are skipped and later duplicate forms win. Revision is local, increments on reading or changing selections, and is not stored. No selection-count bound is applied to this NBT list.
+
+A selection request requires a supported provider, a held morphing power for that exact form and an offered variant ID. A timed talisman alone does not satisfy the power-ownership check. Publishing prunes no-longer-offered choices only for still-supported providers; loss of ownership or an absent provider does not itself erase a stored choice.
+
+The server variant catalogue is sent at join and successful data reload. Wire readers allow at most 256 forms, 64 variants per form and 256 characters per translation key; invalid counts throw. Native providers define variants in code; there is no generic variant JSON loader.
+
+Talismans have stack size 8 and a 40-tick hold. A successful server start consumes one outside creative mode; failure does not consume it. Built-in settled durations are piglin 120 seconds, piglin brute 45 seconds and armoured zombie 90 seconds, each with a 20-tick transition. The zombie request supplies iron armour NBT. Requests default both abilities to `none`, though entity overrides may still supply actions.
+
+## Extending it
+
+Use `MorphFormRequest.start` for grants that should reject replacement, or deliberately handle existing state before calling the lower-level service. Keep teardown, authority and clearance checks explicit. Use registered tick/travel/mount handlers for species behaviour rather than ticking or spawning the synthetic form as a normal mob.
+
+Phase listeners observe coherent state after sync, and can also run on client NBT reception. Keep gameplay side checks in the listener. Delay callbacks must capture revision and revalidate it; a host UUID alone does not identify the same form session.
+
+Do not use the NBT sanitizer as a general untrusted-entity schema validator. It removes the listed volatile keys but retains arbitrary remaining compounds. Add any new host/form state to the appropriate persistence, sync and cache-invalidation contract.
+
+## Verifying
+
+With permission level 2, `/ise dev morph <entityType>` creates an unlimited form with transition 18, source `isekaiexpansion:dev_morph` and authored abilities `none`; entity overrides still apply. `/ise dev morph` requests normal return. Unknown/nonliving entities, riding and insufficient clearance reject entry.
+
+`isekaiexpansion:test_item` is a developer fixture. Hold use for 40 ticks (2 seconds) to enter Evelina; sneak at completion to enter a full-iron zombie instead. Both requests are unlimited, use transition 18 and authored `none` abilities. On successful zombie entry, the real main hand receives an iron sword; a displaced main-hand stack and the test-item copy are offered to inventory or dropped. This operation changes inventory, so use a test character.
+
+Use a dedicated server and an observing client to check entry/exit midpoint, odd transition lengths, short/tall forms, obstructed return, reconnect, respawn and dimension changes. Revoke the originating power and compare it with a programmatic grant.
+
+Test primary cadence separately from secondary cooldown. Send press, repeat and release during cooldown; validate obstructed, distant and friendly targets and a delayed attack after a form change. Check that filtered items remain in inventory.
+
+For travel, compare the owner and observer, active/inactive handler paths, input release, mounting, dismounting and exit while carrying passengers. Verify host/passenger damage protection without assuming sibling-passenger immunity. Confirm a blocked timed expiry returns once standing room becomes available.
+
+## Related
+
+- [Morph power and attribute data](/en/wiki/morph-data/)
+- [Morph services](/en/dev/morph-api/)
+- [Morph client presentation](/en/dev/morph-client/)
+- [Saints Dragons bridge](/en/dev/morph-dragons/)
+- [Humanoid architecture](/en/dev/humanoid/)
+- [Particlize](/en/dev/particlize/)

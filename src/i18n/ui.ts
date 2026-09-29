@@ -56,6 +56,7 @@ const en = {
   'search.group.wiki': 'Wiki',
   'search.group.codex': 'Codex',
   'search.group.blog': 'Devlog',
+  'search.group.dev': 'Dev',
   'search.group.page': 'Pages',
 
   // --- Home -----------------------------------------------------------------
@@ -97,7 +98,7 @@ const en = {
   'ktm2.worldgen': 'World',
   'ktm2.worldgenValue': 'ReTerraForged + generated structures',
   'ktm2.mods': 'Mods',
-  'ktm2.modsValue': '268 mods',
+  'ktm2.modsValue': '255 mods',
   'ktm2.packVersion': 'Pack build',
   'ktm2.factsTitle': 'At a glance',
   'ktm2.gallery': 'Screenshots',
@@ -122,6 +123,18 @@ const en = {
   'wiki.category.combat': 'Combat',
   'wiki.category.crafting': 'Crafting & gear',
   'wiki.category.world': 'Living world',
+  'wiki.category.data': 'Data packs',
+
+  // --- Developer docs -------------------------------------------------------
+  'dev.title': 'Developer docs',
+  'dev.lead': 'Building against IsekaiExpansion: APIs, runtime contracts, and the asset pipelines.',
+  'dev.prev': 'Previous',
+  'dev.next': 'Next',
+  'dev.category.start': 'Getting started',
+  'dev.category.api': 'APIs',
+  'dev.category.systems': 'Systems',
+  'dev.category.client': 'Client and rendering',
+  'dev.category.assets': 'Assets',
 
   // --- Codex ----------------------------------------------------------------
   'codex.title': 'Codex',
@@ -236,6 +249,7 @@ const zhCN: Record<UIKey, string> = {
   'search.group.wiki': '维基',
   'search.group.codex': '设定集',
   'search.group.blog': '开发日志',
+  'search.group.dev': '开发',
   'search.group.page': '页面',
 
   'home.eyebrow': '个人开发的 Minecraft RPG',
@@ -272,7 +286,7 @@ const zhCN: Record<UIKey, string> = {
   'ktm2.worldgen': '世界生成',
   'ktm2.worldgenValue': 'ReTerraForged + 随机生成结构',
   'ktm2.mods': '模组数量',
-  'ktm2.modsValue': '268 个模组',
+  'ktm2.modsValue': '255 个模组',
   'ktm2.packVersion': '整合包版本',
   'ktm2.factsTitle': '基本信息',
   'ktm2.gallery': '游戏截图',
@@ -295,6 +309,18 @@ const zhCN: Record<UIKey, string> = {
   'wiki.category.combat': '战斗',
   'wiki.category.crafting': '制作与装备',
   'wiki.category.world': '生活与世界',
+  'wiki.category.data': '数据包',
+
+  // --- Developer docs -------------------------------------------------------
+  'dev.title': '开发者文档',
+  'dev.lead': '基于异界扩展做开发：API、运行时约定，以及素材流程。',
+  'dev.prev': '上一篇',
+  'dev.next': '下一篇',
+  'dev.category.start': '开始',
+  'dev.category.api': 'API',
+  'dev.category.systems': '系统',
+  'dev.category.client': '客户端与渲染',
+  'dev.category.assets': '素材',
 
   'codex.title': '设定集',
   'codex.lead': '厄达斯的世界设定——这里只收录开局前就能安心读的部分，不会剧透主线。',

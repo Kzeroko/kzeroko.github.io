@@ -1,0 +1,141 @@
+---
+title: "NPC 复活 API"
+description: "查询按身份保存的墓地、注册费用，并通过服务端支付事务复活 NPC。"
+category: api
+order: 20
+updated: 2026-09-26
+---
+
+`NPCReviveAPI` 提供 BaseNpcEntity 的墓地元数据与复活操作。墓地在全服按稳定 NPC 身份保存，同身份的另一实体不能覆盖已有墓地。
+
+## 入口
+
+使用 `net.kzeroko.isekaiexpansion.api.npc.NPCReviveAPI`。公开签名引用 `internal.npc.revive` 中的 `NpcGraveEntry`、`NpcReviveCost`、`NpcReviveResult` record，作为门面的参数及返回类型。`NpcGraveState` 负责持久化，内部实体快照不属于公开元数据视图。
+
+默认费用为 1 个星屑立方体（`isekaiexpansion:astral_cube`）、30 星界能量与 100 原始经验点，并非 100 经验等级。身份覆盖优先于实体类型覆盖，最后才用默认值。
+
+API 不提供界面、玩家归属权限检查或世界中同身份活体 NPC 搜索。集成方须先决定玩家可请求哪些墓地，再调用复活。
+
+## 常见用法
+
+### 查询墓地
+
+```java
+static Optional<NpcGraveEntry> findGrave(
+        MinecraftServer server, String identityKey) {
+    return NPCReviveAPI.getGrave(server, identityKey);
+}
+```
+
+元数据包含 `npcIdentityKey`、`entityTypeId`、复制的 `displayName`、`unique`、`deathDimensionId`、`deathPosition`、`deathGameTime` 及当前解析的 `reviveCost`，不暴露完整实体 compound。没有保存自定义名称时，使用实体翻译键。
+
+### 注册身份专属费用
+
+```java
+static boolean registerPrice(NpcIdentity identity, Item material) {
+    var cost = new NpcReviveCost(material, 1, 30, 100);
+    return NPCReviveAPI.registerIdentityCost(identity, cost);
+}
+```
+
+所有费用数量必须至少为 1，物品必须非空；record 不验证任意传入物品是否能实际取得。字段为 requiredItem、requiredItemCount、astralEnergy、experiencePoints；`requiredItemId()` 返回注册 ID，`requiredItemStack()` 创建新物品栈。
+
+覆盖使用 put-if-absent，没有替换或移除方法。应在引用物品已经存在后的通用初始化阶段注册。静态映射随进程存在，不存入墓地；查询旧墓地时使用当前覆盖表。
+
+### 复活并处理结果
+
+```java
+static NpcReviveResult restore(ServerPlayerEntity payer, String identityKey) {
+    var result = NPCReviveAPI.revive(payer, identityKey);
+    if (result.succeeded()) {
+        payer.sendMessage(result.npc().getName(), false);
+    }
+    return result;
+}
+```
+
+附近搜索随机排列原点的 4 个水平邻格，测试脚下或脚部位置的支撑碰撞形状，再检查 0.6 × 1.8 站立空间。之后仍检查载入 NPC 的实际空间。`reviveAt` 跳过支撑搜索，只检查空余空间与重叠活体，不检查地面支撑、危险流体或世界边界适用性；精确目的地需由调用方选择。
+
+## 方法一览
+
+下列世界及玩家操作均应在服务端线程执行，注册操作应在初始化阶段完成。
+
+| 方法 | 返回 | 约定 |
+| --- | --- | --- |
+| `registerIdentityCost(NpcIdentity, NpcReviveCost) / registerIdentityCost(String, NpcReviveCost)` | `boolean` | 按去除首尾空白后的非空身份注册一次；重复返回 false，保留旧费用。 |
+| `registerEntityTypeCost(EntityType<? extends BaseNpcEntity>, NpcReviveCost) / registerEntityTypeCost(Identifier, NpcReviveCost)` | `boolean` | 按类型 ID 注册一次，重复不替换。 |
+| `getGraves(MinecraftServer)` | `List<NpcGraveEntry>` | 不可变列表，死亡时间降序，再按身份键排序。 |
+| `getGrave(MinecraftServer, NpcIdentity) / getGrave(MinecraftServer, String)` | `Optional<NpcGraveEntry>` | 元数据与当前解析费用；字符串键无效或不存在时为空。 |
+| `hasGrave(MinecraftServer, NpcIdentity) / hasGrave(MinecraftServer, String)` | `boolean` | 检查相同查找结果。 |
+| `recordDeath(BaseNpcEntity)` | `boolean` | 仅服务端 NPC；首份墓地优先，由 BaseNpcEntity.onDeath 调用。 |
+| `revive(ServerPlayerEntity, NpcIdentity) / revive(ServerPlayerEntity, String)` | `NpcReviveResult` | 在付款者所在世界寻找其身旁有支撑的位置。 |
+| `reviveNear(ServerPlayerEntity, String, ServerWorld, BlockPos)` | `NpcReviveResult` | 在同一服务器世界内的指定位置旁搜索。 |
+| `reviveAt(ServerPlayerEntity, String, ServerWorld, Vec3d)` | `NpcReviveResult` | 使用准确的有限坐标，并检查实际 NPC 空间。 |
+| `checkCost(ServerPlayerEntity, NpcReviveCost)` | `NpcReviveResult.Status` | 仅检查支付能力，顺序为物品、能量、原始经验点。 |
+
+### 结果状态
+
+`NpcReviveResult` 包含 status 与可空 npc。构造器保证只有 SUCCESS 携带 NPC，`succeeded()` 检查该状态。
+
+| 状态 | 含义 |
+| --- | --- |
+| `SUCCESS` | 返回 npc 非空，墓地已移除。 |
+| `GRAVE_NOT_FOUND` | 身份无效或墓地不存在，或生成后移除墓地失败。 |
+| `INVALID_DESTINATION` | 不同服务器、非有限坐标、附近无候选位置或空间受阻。 |
+| `MISSING_REQUIRED_ITEM` | 所需物品数量不足。 |
+| `INSUFFICIENT_ASTRAL_ENERGY` | 能量检查失败，包括 ENERGY_INEFFICIENCY 阻止支付。 |
+| `INSUFFICIENT_EXPERIENCE` | totalExperience 小于原始经验点费用。 |
+| `INVALID_ENTITY_DATA` | 载入结果不是 BaseNpcEntity，或类型／身份不符。 |
+| `SPAWN_FAILED` | 加入世界失败，或加入后的 NPC 已死亡／移除。 |
+
+### 支付与结算
+
+物品数量合计副手与主物品栏，按物品类型匹配，不使用 NBT 谓词。费用检查顺序为物品 → 星界能量 → 原始经验点。此 API 不豁免创造模式。能量使用组件 energyCheck，因此 ENERGY_INEFFICIENCY 会在数值余额足够时仍阻止付款。
+
+事务先检查费用，以新 UUID 载入快照副本，准备 NPC、校验空间、连同乘客加入世界，再次检查费用，移除墓地，最后扣除资源。加入后遇到已处理的失败会丢弃尝试生成的 NPC，并保留费用与墓地，除非墓地本就已不存在。扣款先副手后主物品栏，标记背包 dirty，再扣除并同步能量，最后减去原始经验点。
+
+这是同步校验与结算。实体反序列化或集成回调可能抛异常，没有通用的异常转结果封装，也没有崩溃事务日志。不要承诺所有集成失败都会返回状态码。
+
+### 墓地存档格式
+
+文件位于主世界 `data/isekaiexpansion/npc/graves_v2.dat`。以下为 Minecraft 持久状态容器内的自定义载荷字段。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `entries` | `list<compound>` | `[]` | 墓地列表；根缺失或类型不符则为空状态。 |
+| `entries[].npc_identity` | `string` | 必需 | 去除首尾空白后的非空稳定身份键；重复时首个有效条目优先。 |
+| `entries[].entity_type` | `string` | 必需 | 格式有效的实体类型 ID，必须等于 entity_data.id。 |
+| `entries[].custom_name` | `string` | `absent` | 可选的 Text JSON 字符串；存在但无效则拒绝条目。 |
+| `entries[].unique` | `boolean` | 必需 | byte 标签布尔值，记录是否为唯一 NPC。 |
+| `entries[].death_dimension` | `string` | 必需 | 格式有效的世界 ID，不要求对应世界当前已加载。 |
+| `entries[].death_position` | `compound` | 必需 | 死亡时的有限坐标。 |
+| `entries[].death_position.x` | `double` | 必需 | 数字 X 坐标；非有限值拒绝条目。 |
+| `entries[].death_position.y` | `double` | 必需 | 数字 Y 坐标；非有限值拒绝条目。 |
+| `entries[].death_position.z` | `double` | 必需 | 数字 Z 坐标；非有限值拒绝条目。 |
+| `entries[].death_game_time` | `long` | 必需 | 死亡时的世界游戏时间，单位为刻。 |
+| `entries[].entity_data` | `compound` | 必需 | 完整实体快照的独立副本，不含原 UUID。 |
+| `entries[].entity_data.id` | `string` | 必需 | 须与 entity_type 字符串完全一致，加载前检查。 |
+
+必需类型缺失或错误、空身份、无效 ID、entity_data.id 不一致、自定义名称文本损坏或坐标非有限时，跳过该条目。未知字段忽略。无效条目不作为原始托管保留，此读取器也不记录对应日志。重复身份保留首个有效条目。保存按身份排序，公开列表则按死亡时间降序再按身份排序。格式有效但当前不可用的实体类型可能通过 NBT 读取，直到复活时才失败。
+
+快照与自定义名称在构造及访问时复制。记录或移除墓地会标记状态 dirty。此存储实现没有过期机制或自动旧版本迁移。
+
+## 线程与生命周期
+
+墓地查询要求已加载的 MinecraftServer；复活要求 ServerPlayerEntity 与同一服务器的目的地 ServerWorld。`recordDeath` 在客户端返回 false。`prepareForRevival` 拒绝非服务端世界；门面映射不支持并发，方法也不会替调用者调度线程。
+
+BaseNpcEntity 在普通死亡处理前记录墓地。成功记录会阻止自定义物品栏掉落；已有墓地导致拒绝时，按普通规则掉落。载入时再次移除保存的实体 UUID，重写位置，并要求重建类型与稳定身份匹配墓地。
+
+准备过程恢复满生命与空气、启用 AI，并清除死亡／受伤／再生计时、伤害吸收、冻结刻数、状态效果、着火、速度与坠落距离。随后醒来、下坐骑、释放跟随归属、清除移动指令、目标／攻击者／战斗状态、相关脑记忆、导航、疾跑及正在使用物品的状态。持久物品栏、角色／服装、锚点与关系数据经普通读取器从快照恢复，不重新执行全新生成的初始化流程。
+
+普通 NPC 的 `NpcIdentityId` 保留在快照中，复活后不变。稳定身份中的个体部分来自此标识，与名称翻译无关。字段约定见 [NPC 基础](/zh-cn/dev/npc/)。
+
+### 验证
+
+测试默认值与身份／类型覆盖优先级、重复注册、空键及每种结果状态。材料分别放在副手和主物品栏；单独测试物品、能量、原始经验不足，并覆盖 ENERGY_INEFFICIENCY 与创造模式。确认目的地受阻时保留墓地和费用，成功时只移除一次墓地，同稳定身份不会覆盖首份快照。
+
+复活前保存并重启，检查实体 UUID 已更新、物品栏与服装保留、效果清除、跟随归属释放。在一次性存档中损坏必需 NBT 类型或实体 ID；无效条目应跳过，不应描述成可恢复的原始备份。
+
+## 相关页面
+
+[NPC 基础](/zh-cn/dev/npc/)说明身份、物品栏与跟随归属；[法术集成](/zh-cn/dev/spell-integration/)介绍其他星界能量使用方。

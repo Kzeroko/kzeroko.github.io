@@ -1,0 +1,83 @@
+---
+title: "Trading API"
+description: "Open server-owned merchant panels and extend NPC offers while preserving dialogue ownership."
+category: api
+order: 145
+updated: 2026-09-26
+---
+
+`TradingAPI` opens an existing merchant's offers inside an active entity-bound Blabber dialogue. The server owns quotes, stock and payment; Blabber owns presentation, navigation and one-use reply tokens. Gameplay rules are in [Trading](/en/wiki/trading/).
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.trading.TradingAPI`. It delegates to the internal `DialogueTrading` service. The built-in `blabber:open_trade` and `isekaiexpansion:open_npc_trade` actions both reach this service; no separate NPC merchant screen or offer-index packet remains.
+
+## Common tasks
+
+### Open the current speaker's shop
+
+Call on the server thread from a dialogue action:
+
+```java
+Blabber.getActiveDialogueEntity(player)
+        .ifPresent(merchant -> TradingAPI.open(player, merchant));
+```
+
+Import `io.github.ladysnake.blabber.Blabber` and the facade above. The entity must be a `MobEntity` implementing `Merchant`, or a `BaseNpcEntity`. The active dialogue must target that exact entity. The facade returns false for rejected admission; it does not create a dialogue or move the merchant.
+
+### Supply NPC offers
+
+Override `BaseNpcEntity.getNpcTradeOffers(ServerPlayerEntity)` and use the existing `npcTradeOffers()` / `npcTradeOffer()` builders. The service copies the returned offer list through NBT, preserving contributed metadata. It applies saved uses by offer position and output stack; keep ordering stable. Relation-tier pricing remains the provider's responsibility.
+
+For villagers, [Trade overrides](/en/wiki/trade-overrides/) remain authoritative. A refresh rebuilds through the override manager, or through the vanilla/modded factory hooks for every attained level when no override owns the profession.
+
+Override `BaseNpcEntity.canTradeWith(player)` for a public merchant. The default uses `NpcAccessPolicy.trusted`; allegiance ownership grants access independently of favour.
+
+
+## Reference
+
+| Entry point | Side and contract |
+| --- | --- |
+| `TradingAPI.open(player, merchant)` | Server thread, active dialogue only. Returns whether admission succeeded; opens a blocking catalogue and retains the screen handler and scene. |
+| `BaseNpcEntity.getNpcTradeOffers(player)` | Server-thread provider; current relationship may affect prices. The service owns the working copy and daily usage ledger. |
+| `DialogueAPI.registerTradePanel(opener)` | Blabber dependency registration during common setup; host returns true for a handled merchant, including refusal, preventing vanilla fallback. |
+
+`TradeTransaction` obtains `getAdjustedFirstBuyItem()` before applying the negotiated discount. It checks both ingredient stacks, currency funds and output capacity before payment. It strips currency presentation metadata and uses Isekai Core's `NumismaticCompat.tryPay` for inventory and wallet payment. Currency change can consume space during withdrawal; remaining output uses `offerOrDrop` rather than disappearing.
+
+Vanilla `Merchant.trade` owns offer usage and trade effects. Its customer is assigned only inside the synchronous callback and cleared in `finally`, before any AI tick; experience is advanced through the merchant interface. Villager offer preparation runs again afterwards. NPC copies increment their usage ledger. No extra autofill hook is injected into Numismatic's merchant handler.
+
+The client receives a structured `DialogueScreenObject.Exchange` from the same `TradeTransaction.Quote` used for payment. Currency display uses Isekai Core's `NumismaticClientCompat`; non-currency inputs remain item models with stack counts. The prior price is the reputation-adjusted price before bargaining, not the raw factory cost. The client does not recalculate discounts. Blacksmith catalogue costs use the same renderer.
+
+### Persistent entity fields
+
+The lazy `IsekaiCommerce` compound is written only for entities that acquire commerce state. It is internal save data, not a data-pack schema.
+
+| Field | Type | Default | Behaviour |
+| --- | --- | --- | --- |
+| `Rotation` | `long` | `0` | Increments when spending a refresh opportunity; saved value clamps below at 0. |
+| `Refresh` | `boolean` | `false` | One stored villager refresh opportunity; restock sets true, refresh clears it. |
+| `Previous` | `list<string>` | `[]` | Previous offer IDs used by weighted selection to prefer unseen entries. |
+| `NpcDay` | `long` | Minimum long | Last NPC day bucket; a changed world-time day clears NPC uses and negotiations. |
+| `Negotiations` | `compound` | Empty | Player UUID keys map to failed value 0 or successful discount 5, 10 or 15. Missing key means unattempted. |
+| `Stock` | `compound` | Empty | NPC offer position/output-stack keys map to used counts. |
+| `IsekaiOfferId` | `string` | Empty | Separate per-offer NBT field retaining the authoritative offer ID across offer copies. |
+
+## Threading and lifecycle
+
+Every gameplay operation runs on the server thread; opening off-thread throws. A merchant admits one trading player at a time, so reputation preparation cannot overwrite another player's quote. An existing vanilla merchant customer also blocks other players. A session captures entity, dialogue UUID, offer list, stock rotation and NPC day. Death, removal, dimension or range changes, combat, panic, changed rotation or NPC day invalidate it. The range is 4 blocks (squared distance 16). A reload closes active trading sessions; disconnect and server stop clear runtime maps.
+
+Selection rechecks the offered object identity. Confirmation rechecks current costs, result, negotiated price, stock, funds and inventory before one exchange. Blabber invalidates the token before invoking the callback. A catalogue cancellation closes the conversation; cancelling a detail returns to the catalogue. Lifecycle dismissal does not reopen a panel, and a session with no active object is closed on the server tick.
+
+Villager restock clears per-player negotiation results and grants a refresh chance. Refresh changes rotation but keeps negotiation results. Weighted selection keeps guaranteed entries and draws unseen non-guaranteed IDs first; insufficient unseen candidates permit repeats. Saved rotation and the previous-ID set keep the regenerated selection stable across entity reloads. Matching offer shapes preserve uses, demand, special price and Numismatic reputation.
+
+## Verifying
+
+Run `./gradlew.bat compileJava assembleLanguageFiles`. For the dependency's UI checks, follow [Dialogue UI](/en/dev/dialogue-ui/).
+
+In game, verify currency-only and mixed payments, sell offers, insufficient funds, full inventory, disabled stock, two consecutive trades, movement/combat interruption, restock then refresh, saved-world reload and a failed bargaining attempt followed by reopening. Repeat with a weighted override and an NPC provider. Check reputation pricing before and after trading and verify that the merchant never starts following the player.
+
+## Related
+
+- [Trading](/en/wiki/trading/) — player rules and discounts.
+- [Dialogue objects and UI](/en/dev/dialogue-ui/) — panel contracts and staged subtitles.
+- [NPC dialogue](/en/dev/npc-dialogue/) — admission and routing.

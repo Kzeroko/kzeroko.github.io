@@ -1,59 +1,88 @@
 ---
-title: "Elements"
-description: "How defence elements and damage types interact, including the multi-element stacking rule and the full affinity chart."
+title: "Elements and damage relations"
+description: "Read a mob's weaknesses and resistances, including how multiple elements combine."
 category: combat
 order: 20
-updated: 2026-09-01
-tagline: "A ±25% swing decided before armour is even considered."
-tags: ['combat', 'damage', 'elements']
+updated: 2026-09-19
 ---
 
-Every creature in KTM2 carries one or more **defence elements**. Incoming damage is compared against each of them, and the result multiplies your damage before armour is applied.
+A mob's element determines which incoming damage categories deal more or less damage. The relation belongs to the defender, so a Fire weakness does not imply an inverse weakness on the attacker.
 
-## The multiplier
+## Reading the relation
 
-| Match | Multiplier |
+A matching weakness multiplies damage by 1.25; a matching resistance multiplies it by 0.75. A mob with no assigned elements receives no change from this rule. These relations apply to mobs with element data, not automatically to every player who casts an elemental spell.
+
+The table uses exact damage keys to distinguish ordinary fire from Fire spell damage, ordinary lightning from Lightning spell damage, and ordinary melee from the physical-melee spell school. Spell damage is classified by its registered school first. A healing-school entry here concerns **damage** attributed to that school; it does not turn normal healing into an attack.
+
+## Complete relation table
+
+| Target element | Weakness: receives more damage | Resistance: receives less damage |
+| --- | --- | --- |
+| Common | `spell_astral` | — |
+| Dragon | `dragon` | Every key except this row's weaknesses |
+| Shard | `spell_soul`, `explosion` | `trident`, `cactus`, `melee`, `spell_earth` |
+| Arcane | `spell_arcane`, `spell_astral` | `magic`, `spell_physical_melee` |
+| Fire | `spell_water`, `spell_frost` | `spell_fire`, `fire`, `spell_wind`, `explosion` |
+| Water | `spell_frost`, `lightning`, `spell_lightning` | `fire`, `spell_fire`, `spell_water`, `melee` |
+| Frost | `melee`, `execution`, `fire`, `spell_fire`, `lightning`, `spell_lightning` | `spell_frost`, `spell_wind`, `spell_water` |
+| Wind | `fire`, `spell_fire` | `cactus`, `spell_lightning`, `lightning` |
+| Earth | `explosion`, `spell_earth` | `trident`, `cactus`, `melee`, `generic`, `spell_wind`, `lightning`, `spell_lightning` |
+| Lightning | `spell_earth`, `spell_wind` | `wither`, `dragon`, `spell_soul` |
+| Soul | `spell_light`, `spell_dark`, `spell_healing` | `spell_soul`, `execution`, `melee`, `cactus`, `generic`, `spell_astral` |
+| Astral | `spell_soul` | `spell_light`, `spell_dark`, `spell_arcane` |
+| Light | `spell_dark`, `wither` | Every key except this row's weaknesses |
+| Dark | `spell_light`, `spell_healing` | Every key except this row's weaknesses |
+
+Dragon, Light and Dark resist every classified key outside their listed weaknesses, including keys not otherwise named in the table. The lists describe Expansion's registrations; another mod can extend the shared registry.
+
+### Damage-key legend
+
+| Damage key | Display name |
 | --- | --- |
-| Damage type the element is weak to | **+25%** |
-| Damage type the element resists | **−25%** |
-| Anything else | ±0% |
+| `cactus` | Cactus |
+| `dragon` | Dragon |
+| `execution` | Execution |
+| `explosion` | Explosion |
+| `fire` | Fire |
+| `generic` | Generic |
+| `lightning` | Lightning |
+| `magic` | Magic |
+| `melee` | Melee |
+| `spell_arcane` | Arcane |
+| `spell_astral` | Astral |
+| `spell_dark` | Dark |
+| `spell_earth` | Earth |
+| `spell_fire` | Fire |
+| `spell_frost` | Frost |
+| `spell_healing` | Healing |
+| `spell_light` | Light |
+| `spell_lightning` | Lightning |
+| `spell_physical_melee` | Melee |
+| `spell_soul` | Soul |
+| `spell_water` | Water |
+| `spell_wind` | Wind |
+| `trident` | Trident |
+| `wither` | Wither |
 
-### Stacking across multiple elements
+`dragon` is dragon-breath damage; `cactus` also includes sweet berry bushes. `fire` uses the fire damage tag, `explosion` the explosion tag, and `lightning` lightning-bolt damage or the lightning tag. Unmatched non-spell sources fall back to `generic`. Unlisted spell schools receive their own school-derived key, which can still be resisted by an “every key except” row.
 
-When a creature has several elements and your damage type is effective against more than two of them, each layer beyond the second adds another **10%**.
+## Multiple elements
 
-<Callout type="note" title="Worked example">
-A creature carrying Fire, Lightning and Earth, hit by a damage type that is effective against all three:
+Count matching weaknesses as `E` and matching resistances as `R` across the target's distinct elements. The weakness multiplier is `1.25 + (E - 1) × 0.10` when `E > 0`, otherwise 1. The resistance multiplier is `max(0, 0.75 - (R - 1) × 0.10)` when `R > 0`, otherwise 1. Multiply both results.
 
-`125% + (2 × 10%) = 145%`
+| Matches | Element multiplier |
+| --- | --- |
+| 1 weakness, 0 resistances | 1.25 |
+| 2 weaknesses, 0 resistances | 1.35 |
+| 0 weaknesses, 2 resistances | 0.65 |
+| 1 weakness, 1 resistance | 0.9375 |
 
-The same rule mirrors on the penalty side:
+For example, Fire spell damage against a mob carrying Fire and Frost finds Fire resistance and Frost weakness. The combined multiplier is `0.75 × 1.25 = 0.9375`. This is only the elemental stage; armour, attributes, talents and other damage rules can still alter the final result.
 
-`75% − (2 × 10%) = 55%`
-</Callout>
+The element names and set-backed registry were checked in local IsekaiCore source for the configured `0.4.0-build60`. The relations and multiplier formulas are implemented in Expansion.
 
-This is the reason a single "best" weapon does not exist. Against a triple-element enemy the difference between the right and wrong damage type is roughly **2.6×**.
+## Related
 
-## Damage types vs defence elements
-
-Not every damage type is something a creature can *be*. Thirteen elements can be worn as defences; several more exist only as damage:
-
-**Defence elements** — Normal, Dragon, Shard, Arcane, Fire, Water, Frost, Wind, Earth, Soul, Astral, Light, Dark
-
-**Damage-only types** — Lightning, Blast, Flame, Melee, Execute, Healing, Wither, Thorns, Trident
-
-Healing appearing as a damage type is not a bug: against Soul and Dark, a heal is a weapon.
-
-## Affinity chart
-
-<ElementMatrix />
-
-<Callout type="caution" title="Not final">
-Anything not listed above deals normal damage. This table is still being balanced and will change.
-</Callout>
-
-## Building around it
-
-- **Elemental vulnerabilities** ([Attributes & effects](/en/wiki/attributes-and-effects/)) let you *create* a weakness rather than wait for one. Apply `ignite`, then hit with Wind.
-- The nested spell power attributes (`aether_power` → `dys_aether` → `elemental_power`) exist so a hybrid build can carry several schools without a separate stat line for each.
-- Element gems ([Gems & sockets](/en/wiki/gems-and-sockets/)) add a proc from a configured magic school, which is the cheapest way to cover a school your weapon does not have.
+- [Attributes and effects](/en/wiki/attributes-and-effects/)
+- [Spell data](/en/wiki/spell-data/)
+- [Damage numbers](/en/dev/damage-numbers/)

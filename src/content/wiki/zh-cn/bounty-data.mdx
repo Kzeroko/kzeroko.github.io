@@ -1,0 +1,126 @@
+---
+title: "悬赏数据"
+description: "使用原生任务目标、奖励与告示板规则，编写按权重张贴的公会委托。"
+category: data
+order: 93
+updated: 2026-09-26
+---
+
+悬赏任务使用 `tier: bounty`，并带有 `bounty` 元数据对象。目标、条件、冷却与奖励均采用[普通任务格式](/zh-cn/wiki/quest-data/)，告示板提供待签告示，签约与汇报由公会接待员办理。
+
+## 文件放在哪里
+
+委托写在 `data/<namespace>/quests/**/*.json`，告示板规则写在 `data/<namespace>/bounty_pools/**/*.json`。规则文件的资源 ID 就是任务池 ID，同一路径遵循普通数据包优先级。任务通过 `bounty.pool` 引用规则文件，规则文件不需要列出任务。
+
+告示板方块及物品为 `isekaiexpansion:bounty_board`，签约凭据为 `isekaiexpansion:bounty`。告示板可配置的方块实体 NBT 键 `Pool` 是字符串标识符，缺失或语法错误时使用 `isekaiexpansion:guild`，可通过普通方块数据命令设置。它决定张贴告示的任务池，其余告示板 NBT 属于服务端存档状态。接待员须服务于该池，才能办理对应委托的签约与结算。
+
+## 最小示例
+
+保存为 `data/example/quests/bread.json`，再按[任务翻译键规则](/zh-cn/wiki/quest-data/)添加标题、描述与目标标题。该任务加入内置公会池，在提交时消耗面包。
+
+```json
+{
+  "tier": "bounty",
+  "prerequisites": [],
+  "bounty": {"pool": "isekaiexpansion:guild", "kind": "supply", "grade": 1},
+  "objectives": [{
+    "id": "bread", "progress_type": "numeric", "required": 16,
+    "type": "isekaiexpansion:bounty_delivery", "data": {"item": {"item": "minecraft:bread"}}
+  }],
+  "rewards": []
+}
+```
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `tier` | `string` | 必填 | 使用 `bounty`；可重复，任务簿「公会委托」类别仅供查看，签约须由接待员办理。 |
+| `prerequisites` | `array<object>` | 必填 | 原生前置任务要求；`[]` 不附加要求。 |
+| `bounty` | `object` | 必填 | 仅 `bounty` 层级必须填写；其他层级填写会被拒绝。 |
+| `bounty.pool` | `identifier` | 必填 | 告示板规则的精确 ID；规则缺失时不张贴任务。 |
+| `bounty.kind` | `string` | 必填 | 下述图标类别，忽略大小写。 |
+| `bounty.grade` | `integer` | 必填 | `1–5`；最低冒险者阶级依次为 `1`、`2`、`4`、`6`、`7`。 |
+| `bounty.weight` | `integer` | `1` | 张贴的相对权重，`1–1000000`；不会绕过签约要求。 |
+| `bounty.duration_ticks` | `integer` | `48000` | 从签约到结算的期限，`1200–1680000` 刻（`60–84000` 秒）；默认为 `2400` 秒。 |
+| `bounty.reputation` | `integer` | `1` | 基础冒险者声望，`0–100`。每低于签约人可接取等级一级，减半并向下取整。 |
+| `objectives` | `array<object>` | 必填 | 非空原生目标列表。 |
+| `objectives[].id` | `string` | 必填 | 唯一且非空白的目标 ID。 |
+| `objectives[].progress_type` | `string` | 必填 | `bounty_delivery` 必须使用 `numeric`。 |
+| `objectives[].required` | `integer` | `1` | 交付所需物品总数，必须为正数。 |
+| `objectives[].type` | `identifier` | 必填 | 原生目标类型；`isekaiexpansion:bounty_delivery` 表示向接待员确认汇报并交付物资。 |
+| `objectives[].data` | `object` | 必填 | 目标参数。 |
+| `objectives[].data.item` | `object` | 必填 | 交付物品谓词；物品、标签备选及可选的类型化 NBT 遵循[任务谓词规则](/zh-cn/wiki/quest-objectives/)。 |
+| `objectives[].data.item.item` | `item id` | 本例必填 | 按注册 ID 匹配面包；显式物品 ID 未注册时拒绝重载。 |
+| `rewards` | `array<object>` | 必填 | 原生奖励列表；`[]` 仅发放配置的冒险者声望。 |
+
+图标类别为 `hunt`、`cull`、`supply`、`expedition`、`gather`、`defense`、`track`、`scout`、`research`。类别只决定外观，实际玩法由目标决定。
+
+此层级的 `client_visible` 默认为 `true`，不能设为 `false`。默认章节为 `isekaiexpansion:side_stories`，拒绝 `misc_picker_weight`、`misc_pools`、`mainstory_progress`。原生前置任务、领取条件和完成冷却仍可使用。交付仅在接待员确认汇报的过程中授权，不要求手持或携带文书。每个目标按剩余需求扣除匹配物资，分批进度会保留；实体条件以接待员为目标。
+
+### 告示板规则
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `offers` | `integer` | `6` | 最多张贴多少份不同任务，`1–6`；候选不足时留空。 |
+| `restock_min_ticks` | `integer` | `1200` | 随机补榜最短间隔，`200–24000` 刻（`10–1200` 秒）；默认 `60` 秒。 |
+| `restock_max_ticks` | `integer` | `2400` | 随机补榜最长间隔，下限为 `restock_min_ticks`，上限 `24000` 刻（`1200` 秒）；默认 `120` 秒。 |
+| `daily_limit` | `integer` | `3` | 每个世界累计 `24000` 刻（`1200` 秒）的接取名额，`1–20`。 |
+| `active_limit` | `integer` | `2` | 签约人或队伍同时持有的有效契约上限，`1–6`，跨任务池统计。 |
+| `signing_cooldown_ticks` | `integer` | `1200` | 两次签约间隔，`0–24000` 刻（`0–1200` 秒）；默认 `60` 秒。 |
+| `notice_limit` | `integer` | `2` | 玩家或队伍待签预留上限，`1–6`。 |
+| `notice_duration_ticks` | `integer` | `12000` | 预留有效期，`1200–24000` 刻（`60–1200` 秒）；默认 `600` 秒。 |
+| `notice_daily_limit` | `integer` | `6` | 每公会日取阅次数，下限为 `notice_limit`，上限 `40`；归还不退次数。 |
+| `notice_pick_cooldown_ticks` | `integer` | `200` | 两次取阅的间隔，`0–1200` 刻（`0–60` 秒）；默认 `10` 秒。 |
+
+取阅与签约分别使用世界共用计数，均记录玩家与原队伍。取阅采用告示板规则，签约采用接待处规则。重新放置告示板、跨维度、归还、撤回及换队都不重置次数。随机补榜会填补至多 2 个空位，满榜时更换 1 份；每个 24000 刻（1200 秒）的公会日完整换榜。按权重抽取时单板不重复，并优先选取相连告示板尚未张贴的任务；识别范围为最多 64 块已加载、同平面、同朝向且同池的告示板。
+
+## 完整示例
+
+内置规则位于 `data/isekaiexpansion/bounty_pools/guild.json`，显式写出默认值：
+
+```json
+{
+  "offers": 6,
+  "restock_min_ticks": 1200,
+  "restock_max_ticks": 2400,
+  "daily_limit": 3,
+  "active_limit": 2,
+  "signing_cooldown_ticks": 1200,
+  "notice_limit": 2,
+  "notice_duration_ticks": 12000,
+  "notice_daily_limit": 6,
+  "notice_pick_cooldown_ticks": 200
+}
+```
+
+十一份内置委托位于 `data/isekaiexpansion/quests/bounty/`。奖励列表通过普通奖励流程发放绿宝石、经验与阵营声望。内置任务采用公会名额限制，不另设同任务重复冷却；数据包仍可配置原生完成冷却。不读取或迁移 Bountiful 数据。
+
+## 校验
+
+必填元数据缺失、标识符语法错误、未知类别、数值越界、非悬赏任务使用交付目标，或交付进度不是数值型，都会拒绝整个任务目录的重载。规则数值无效时拒绝规则目录重载，两者分别保留上次有效目录。未知 JSON 字段被忽略，空规则对象使用默认值。同一路径遵循资源包优先级，显式任务 ID 重复会拒绝任务目录。
+
+语法有效但不存在的任务池不会使任务加载失败，只是不生成委托。悬赏定义必须对客户端可见，以便阅读告示。管理员也不能通过普通调试领取器激活悬赏，必须先取下告示，再经接待员确认以创建有效契约。
+
+## 重载
+
+两个目录均随服务端数据重载。告示板在 20 刻（1 秒）内检查张贴项，保留仍有效的纸张及身份。重载不强制重抽，但可将下次补榜的等待缩短至新上限；改变告示板任务池会重新布榜。有效契约的期限、签约人、队伍和声望奖励固定，目标与普通奖励使用当前目录。移除任务、悬赏元数据或规则，以及改变任务所属池，都会关闭受影响的契约而不支付奖励，并清除受影响的待签预留。
+
+## 公会岗位设置
+
+用 `/ise dev npc receptionist marker` 取得 `isekaiexpansion:guild_receptionist_anchor`，放在公会内接待员站立的脚下位置。创造模式、权限等级至少为 2 的开发者右键后，可在共用的开发者检查器中编辑下列字段：
+
+| 字段 | 默认值 | 规则 |
+| --- | --- | --- |
+| 委托池 | `isekaiexpansion:guild` | 必须是存在的任务池标识符；格式错误或池不存在时拒绝保存。 |
+| 朝向 | `0` 度 | 有限角度，归一化至通常的水平朝向范围；`0` 朝南，`90` 朝西。 |
+| 启用接待岗位 | 关闭 | 启用后保存会安排接待员，关闭后保存会撤去对应人员。 |
+
+标记不可见且没有碰撞，手持其物品或打开编辑器时显示开发者图形。保存设置须在 8 格以内。启用的标记每 40 刻（2 秒）检查一次，保留一个持久接待员，不会把未加载的实体当成缺失人员而重复生成。移除标记后，绑定的接待员会在该位置加载时离开。将标记复制到另一位置或维度会建立独立岗位。运行时实体 ID 不属于可编辑字段。
+
+直接测试可用 `/ise dev npc receptionist spawn <pos> [pool]` 生成独立、持久的接待员，省略任务池时使用 `isekaiexpansion:guild`。位置须已加载且在世界边界内。`/ise dev npc receptionist edit <pos>` 可打开附近已有的岗位标记。三个命令均要求权限等级 2，编辑还要求创造模式。测试实体 ID 为 `isekaiexpansion:guild_receptionist`，使用默认人形外观。
+
+
+## 相关页面
+
+参阅[公会悬赏](/zh-cn/wiki/bounty-quests/)、[任务目标](/zh-cn/wiki/quest-objectives/)、[任务奖励](/zh-cn/wiki/quest-rewards/)与[任务运行机制](/zh-cn/dev/quest-system/)。

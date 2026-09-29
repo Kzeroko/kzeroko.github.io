@@ -1,0 +1,162 @@
+---
+title: "Wayfinding API"
+description: "Server-thread destination searches, work limits, result handling, dialogue integration and compass state."
+category: api
+order: 130
+updated: 2026-09-26
+---
+
+`WayfindingAPI` searches the current dimension for a biome, terrain family or structure without owning the caller's interaction. Callbacks return a bounded search result; callers must still validate their player, world and active interaction before using it.
+
+## Entry point
+
+The facade is `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`. Its public records are `LocateTarget`, `LocateRequest` and `LocateResult` in the same package; implementations live under `internal.wayfinding` and `world.terrain.runtime`.
+
+Use the logical server thread with a live `ServerWorld`. `locate` and `cancel` enforce this and throw `IllegalStateException` off-thread; the lazily populated catalogue has no thread guard but is backed by unsynchronised maps, so the same requirement applies. No entry point works before a world exists.
+
+## Common tasks
+
+### Start a search and reject a stale player
+
+```java
+static void findDesert(ServerPlayerEntity player) {
+    var world = player.getServerWorld();
+    var target = new LocateTarget(LocateTarget.Kind.BIOME,
+            new Identifier("minecraft", "desert"));
+    var request = new LocateRequest(target, player.getBlockPos(), 512, 8192);
+    WayfindingAPI.locate(world, player.getUuid(), request, result -> {
+        if (world.getServer().getPlayerManager().getPlayer(player.getUuid()) != player
+                || player.getWorld() != world) return;
+        player.sendMessage(Text.literal(result.status().name()), false);
+    });
+}
+```
+
+The example uses the API package above plus Minecraft's `ServerPlayerEntity`, `Identifier` and `Text`. For a UI, also capture and compare its session/token, as the built-in villager adapter does. A callback may run synchronously during submission, so establish that context before calling `locate`.
+
+### Read the catalogue or cancel
+
+```java
+static List<LocateTarget> biomeChoices(ServerWorld world) {
+    return WayfindingAPI.destinations(world, LocateTarget.Kind.BIOME);
+}
+
+static void cancelSearch(ServerPlayerEntity player) {
+    WayfindingAPI.cancel(player.getServerWorld(), player.getUuid());
+}
+```
+
+These use `java.util.List` and Minecraft's `ServerWorld`/`ServerPlayerEntity`. Cancellation is keyed by owner UUID, not dimension; the supplied world provides the server-thread check. Cancelling an absent owner is a no-op.
+
+## Reference
+
+### Facade and records
+
+| Signature | Return / effect |
+| --- | --- |
+| `destinations(ServerWorld, LocateTarget.Kind)` | Immutable, distinct list sorted by target ID; lazily cached by world identity and kind. |
+| `locate(ServerWorld, UUID, LocateRequest, Consumer<LocateResult>)` | Returns void; admits a job or delivers an immediate terminal result. |
+| `cancel(ServerWorld, UUID)` | Removes that owner's job, cancels terrain future if present, delivers `CANCELLED`. |
+| `new LocateTarget(Kind, Identifier)` | Both fields nonnull; kinds are `TERRAIN`, `BIOME`, `STRUCTURE`. |
+| `LocateTarget.name()` | Translatable label with fallback, detailed below. |
+| `new LocateRequest(target, origin, minimumDistance, radius)` | Nonnull target and immutable origin copy; horizontal block distances require 128 ≤ minimumDistance < radius ≤ 64000. |
+| `new LocateResult(status, target, dimension, position)` | Position copied immutable; `FOUND` must have a position and every other status must not. Constructor checks that invariant, not world safety or target registration. |
+
+The request's origin Y is one input to biome sampling; it is not the only sampled height. Radius is horizontal and inclusive at candidate checks. Search order and coarse sampling do not guarantee the closest possible destination.
+
+| Status | Meaning |
+| --- | --- |
+| `FOUND` | A confirmed position is present. |
+| `NOT_FOUND` | The implemented search completed without a match; sparse samples are not exhaustive world coverage. |
+| `UNAVAILABLE` | Target is absent from the dimension/kind catalogue. |
+| `BUSY` | Owner already has a job, global job cap, same specialised worker busy, or executor rejected admission. |
+| `CANCELLED` | Explicit cancellation or lifecycle reset. |
+| `LIMIT_REACHED` | Wall-clock/probe budget, truncated structure candidates, unsupported placement, or incomplete chunk result. |
+| `FAILED` | Preparation or search raised an exception; see server log. |
+
+Disabled terrain families can remain in the catalogue. The operator command detects disabled families before submission; a direct API search can instead complete `NOT_FOUND`. A compatible biome source without a usable terrain engine fails preparation with `FAILED`.
+
+### Catalogue and names
+
+| Kind | Catalogue source | Search implementation |
+| --- | --- | --- |
+| `BIOME` | The dimension's biome source entries, not the global biome registry. | Generator biome sampling; no chunk request. |
+| `TERRAIN` | All `TerrainFamily` IDs when the source is `TerrainBiomeSource`. | Prepared terrain-engine task on a dedicated worker; no chunk request. |
+| `STRUCTURE` | Live structure registry entries with nonempty placement lists for this world. | Candidate placements and actual structure starts. |
+
+Biome and terrain labels use the ID's `biome` translation key with ID fallback. Structures use `structure.<namespace>.<path>`, replacing path slashes with dots. Their fallback splits slash, underscore, dot and hyphen separators and capitalises the first character of each word. Catalogue ordering is by ID; translated UI ordering is a separate presentation responsibility.
+
+### Work budgets
+
+| Limit | Value and scope |
+| --- | --- |
+| Active jobs | At most 8 globally; at most 1 per owner UUID. A new request never replaces its owner's existing job. |
+| Structure searches | At most 1 active structure job globally. |
+| Terrain searches | At most 1 active terrain future globally; one daemon worker with queue capacity 1. |
+| Shared tick budget | 2,000,000 nanoseconds (2 ms), with rotating job order. |
+| Biome work | Up to 1024 steps per job per tick within the shared deadline; 300000 unique probes per job. |
+| Structure work | At most 1 admission/poll step per tick; 512 candidate probes, allowing an already pending candidate to finish. |
+| Job deadline | 30 real seconds for biome/structure; 120 real seconds for terrain. |
+| Structure candidates | Random-spread candidate-map threshold 16384; enumeration checks at most 32768 offsets before truncation. |
+
+These are scheduling bounds, not a hard cap on total server-tick duration: candidate preparation happens during submission, callbacks execute inline, and Minecraft performs its own chunk work. Waiting structure polls can run after the shared deadline to refresh the request ticket. A completed terrain future is read before the deadline test.
+
+### Search semantics
+
+Biome sampling uses a 64-block X/Z grid relative to the request origin. Heights include the clamped origin Y and world-bottom +16, then every 32 blocks to below world top, deduplicated and sorted. It first seeds matching cells within minimumDistance +64, floods 8 directions at 64 and 128 blocks and adjacent sampled heights, then searches outward rings for a non-excluded matching cell. The 128-block links can bridge a one-cell seam. World-border checks apply to samples. This is a conservative sampled-component exclusion, not exact biome topology.
+
+Structure search supports concentric rings and random-spread placements. It deduplicates start chunks, filters locate points by horizontal range/world border and sorts candidates by distance. A candidate must pass `shouldGenerate`; the scheduler requests `STRUCTURE_STARTS` and polls with `getNow`, without joining on the server tick thread. A real start must have children, and the nearest horizontal point of its bounding box must be at least minimumDistance away. It returns the placement's locate point and does not mark the start explored. Unknown placement types or failed chunk results make the search incomplete; exhausted incomplete candidates yield `LIMIT_REACHED`. Concentric-ring candidates do not use the random-spread map threshold; the service's probe/deadline limits still apply.
+
+Terrain preparation captures the engine, sampler and border on the server thread, then submits the sampling task. Tree-related families inspect their shared region; plains inspect planned regions. Other families first inspect districts where the requested family has first priority in the deterministic weighted ordering, avoiding unrelated geometry construction. If that pass finds nothing, the search falls back to the full district enumeration with normal competition. This changes search order, not generation ownership, and does not guarantee the nearest result. Sampling uses 64-block rings, coordinates aligned to 4 blocks, family/biome confirmation and the requested horizontal bounds. Region samples also require weight greater than 0.6. Returned terrain positions use Y = 0. They are references for direction/compass use, not verified landing positions. Interruption is checked during enumeration/confirmation.
+
+## Threading and lifecycle
+
+`LocateService` advances jobs at `END_SERVER_TICK`. Completion runs on the server thread, including immediate `BUSY`/`UNAVAILABLE` and preparation failures. Normal job completion catches and logs callback exceptions; the initial already-busy/global-cap branch invokes the callback directly, so its exception propagates to the caller.
+
+Successful data reload and server stopping cancel current jobs with `CANCELLED`, interrupt terrain tasks, shut down the worker and clear the catalogue cache. Failed reload does not reset this service. There is no persistent job queue. Callers other than the built-in dialogue adapter must arrange their own disconnect or interaction cancellation. Keep completion handlers safe during shutdown and avoid starting replacement work from a reset callback.
+
+### Villager adapter and compass writes
+
+`WayfindingDialogue` is an internal Blabber adapter. Its menu is `isekaiexpansion:wayfinding/villager`; ask/trade/goodbye are separate routes. The trade handler selects it only for eligible, welcomed trade conversations, after the blacksmith route. Negative major/minor gossip magnitude at least 50 suppresses the wayfinding route.
+
+Eligibility requires an adult, awake villager at level 2 or higher. Cartographers know all 3 kinds; farmers, fishermen and shepherds qualify only when `floorMod(uuid.hashCode(), 3) == 0` and know biome/terrain. Their radii are 16384 and 6144 blocks respectively. Continuation requires both participants alive, the same world, squared distance at most 64 (8 blocks), and no villager attacker.
+
+The adapter sets a 30-second `nanoTime` cooldown when starting a search, with minimum distance 512. It captures world, screen handler, dialogue session UUID and blocking-object token. Completion rechecks all of them plus villager availability before replacing the panel. A cancelled searching object cancels the API job. Non-position results share the same “unknown” dialogue response.
+
+Directions round `atan2(dx, -dz) / (π / 4)` into 8 sectors. Distance bands are below 1500, below 4000, below 9000 and the remainder, measured from the captured origin. Dialogue choices carry destination IDs and labels, while found coordinates remain in the server callback.
+
+Compass offers inspect hotbar slots 0–8 and capture copies of `Items.COMPASS` stacks. Before writing, the adapter checks the active villager and `ItemStack.areEqual` against the offered copy; the writer also checks slot, destination position and current dimension. Stacks larger than 1 split one item into the first empty hotbar slot; no empty slot means failure.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `LodestonePos` | `object` | Absent before marking | Destination block position with integer `X`, `Y`, `Z`; replaces the old position. |
+| `LodestonePos.X` | `integer` | Written from result | Destination X. |
+| `LodestonePos.Y` | `integer` | Written from result | Destination Y; terrain results use 0. |
+| `LodestonePos.Z` | `integer` | Written from result | Destination Z. |
+| `LodestoneDimension` | `identifier` | Written from result | Dimension ID. |
+| `LodestoneTracked` | `boolean` | `false` on write | Disables physical-lodestone validation for this mark. |
+| `IsekaiDestination` | `identifier` | Written from result | Target ID; destination kind is not separately stored. |
+
+These are item save fields, not an authored schema. After mutation the inventory is marked dirty and screen-handler contents are synchronised. No compass is created if the player did not offer one.
+
+## Operator tools and verification
+
+The canonical root is `/isekaiexpansion`; `/ise` is its alias. These branches require permission level 2.
+
+| Command | Behaviour |
+| --- | --- |
+| `/ise find <biome/terrain/structure> <destination> [radius] [exclude]` | Defaults: radius 8192, exclusion 512 blocks. Explicit radius 1024–64000; exclusion 128–63999 and less than radius. Suggestions use the current dimension catalogue. |
+| `/ise find cancel` | Cancels the command owner's job. |
+| `/ise dev dumpStructure` | Overwrites `config/isekaiseries/ktm2structuredump.json` with sorted IDs from the full live structure registry. |
+| `/ise dev dumpStructureTranslations` | Overwrites `config/isekaiseries/structure_translations/en_us.json` and `zh_cn.json`; generated English labels and empty Chinese translation templates. |
+
+Entity command sources use their entity UUID; all entity-less sources share UUID zero. A player command and that player's dialogue search therefore share the same job slot. Commands print coordinates and suggest `/execute in <dimension> run tp @s <x> ~ <z>`; they do not execute a teleport or choose safe Y. Translation dumps include every live registered structure, unlike the dimension's filtered destination list.
+
+Verify same-owner rejection, the 8-job cap, specialised-worker limits, cancellation/reload, callback context changes, disabled terrain, border exclusions, tall/cave biomes and structure bounds. Check that a marked stack splits only into the hotbar, changed offers fail, a full hotbar preserves the original stack, and a replaced compass mark affects only the chosen item. Exercise both a standard generator and the compatible terrain generator; a failed bounded search is not proof of absence.
+
+## Related
+
+- [Wayfinding](/en/wiki/wayfinding/) — player eligibility, directions and compass flow.
+- [Dialogue objects and UI](/en/dev/dialogue-ui/) — blocking tokens, cancellation and presentation contracts.
+- [NPC dialogue](/en/dev/npc-dialogue/) — surrounding conversation admission and routing.
+- [Dialogue data](/en/wiki/dialogue-data/) — authored dialogue definitions.

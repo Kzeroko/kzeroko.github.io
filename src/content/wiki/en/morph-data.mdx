@@ -1,0 +1,181 @@
+---
+title: "Morph power and attribute data"
+description: "Morph power fields, skill metadata, form eligibility, attribute profiles and resource reload behaviour."
+category: data
+order: 115
+updated: 2026-09-19
+---
+
+Morph powers select a form and its actions; attribute profiles modify the wearer during chosen phases. This page defines the authored fields and reload behaviour, with runtime extension contracts linked separately.
+
+## Where the files live
+
+Morph powers use `data/<namespace>/powers/<path>.json`; attribute profiles use `data/<namespace>/morph_attributes/<path>.json`. The relative path defines each resource ID. Powers must also be granted through the pack's origin or other power-grant mechanism. The power's `id` chooses an already registered skill execution; writing a new identifier does not create that execution.
+
+Player-control forms include this mod's base NPC family and entity types in `isekaiexpansion:morph_player_rigs`. Those forms retain player controls and replace both authored mouse abilities with `isekaiexpansion:none`. Only opt a third-party humanoid into that tag when its renderer supports the player-rig contract.
+
+## Minimal example
+
+To override the existing fox power, place this at `data/isekaiorigins/powers/kitsune_active_fox_form.json`. It uses the already registered execution and ability IDs; this file alone does not grant the power.
+
+```json
+{
+  "type": "isekaiorigins:morphing_skill",
+  "id": "isekaiexpansion:kitsune_active_fox_form",
+  "meta": {
+    "max_level": 1,
+    "cooldown": "240",
+    "energy": "0"
+  },
+  "entity_type": "minecraft:fox",
+  "primary_ability": "isekaiexpansion:entity_primary",
+  "secondary_ability": "isekaiexpansion:kitsune_fox_pounce",
+  "transition_ticks": 18
+}
+```
+
+An independent profile at `data/example/morph_attributes/fox_speed.json` adds a speed modifier to players in the active fox form:
+
+```json
+{
+  "forms": [
+    "minecraft:fox"
+  ],
+  "phases": [
+    "ACTIVE"
+  ],
+  "modifiers": [
+    {
+      "attribute": "minecraft:generic.movement_speed",
+      "operation": "multiply_total",
+      "value": 0.2,
+      "scale": {
+        "attribute": "isekaiexpansion:dexterity",
+        "factor": 0.002,
+        "max": 0.1
+      }
+    }
+  ]
+}
+```
+
+For this example the modifier amount is `0.2 + min(0.1, dexterity × 0.002)`. The upper clamp applies only to the scaled term. This profile stacks with the shipped fox profile; use the shipped profile's resource ID if replacement is intended.
+
+## Fields
+
+### Morph power
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | identifier | required | Use `isekaiorigins:morphing_skill`. |
+| `category` | string | `ORIGIN` | Exact uppercase `NONE`, `LEARNED`, `ORIGIN`, `CLASS`, `PROFESSION` or `ULTIMATE`; unknown or differently cased values fail. |
+| `id` | identifier | required | Registered execution ID, distinct from the power file ID. A new JSON ID does not register behaviour. |
+| `meta` | object | required | Level series described below; `cooldown` and `energy` are required. |
+| `entity_type` | identifier | required | Target must resolve to a living entity at activation. Missing/nonliving types reject the morph. |
+| `primary_ability` | identifier | required | Primary slot execution. Entity-specific overrides can replace it; unknown ability IDs have no resolved action. |
+| `secondary_ability` | identifier | required | Secondary slot execution, with the same override rules. `isekaiexpansion:none` explicitly rejects use. |
+| `skin_id` | identifier | absent | Optional dedicated texture selector. An explicit missing skin does not fall through to the default entity override texture. |
+| `transition_ticks` | int | 18 | Clamped to at least 4; used separately for entering and exiting. No upper clamp. |
+| `morph_able` | object | absent | Parsed as the shared policy below, but ignored by this morphing subtype. Use on regular triggerable/ultimate powers. |
+| `sound_id` | identifier | absent | Optional accepted-trigger sound; unresolved sound events are skipped. |
+| `animation_id` | identifier | absent | Optional player-animation resource requested after an accepted trigger; parsing does not validate the animation asset. |
+| `effek` | object | absent | Optional effect on accepted trigger; see nested fields below. |
+| `disabler` | object | absent | Optional temporary action restrictions on accepted trigger. |
+
+The morph power fixes its side to active; it has no authorable `side` field. Data-authored forms have unlimited settled duration; there is no `duration_ticks` field here. Timed forms are supplied by programmatic requests, including talismans.
+
+### Level metadata
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `max_level` | int | required | 1–256, finite and integral. Numeric strings are rejected. |
+| `cooldown` | string series | required | Nonnegative integer ticks through 2147483647. The morph handler uses 0 on entry and the configured value on a successful return; ability haste adjusts the resulting cooldown. |
+| `energy` | string series | required | Nonnegative integer astral-energy cost through 2147483647. Charged only on accepted triggers, including an accepted return; creative bypasses payment. |
+| `<custom_key>` | string series | absent | Handler-defined values. At most 256 series, keys match `[a-z][a-z0-9_]*`, length at most 64; `max_level` is reserved. |
+
+Each series is a slash-delimited string containing either one finite number for every level or exactly `max_level` numbers. `"10/20/30"` has 3 entries; blank entries, nonfinite values and the wrong count fail. Values are trimmed before numeric parsing. Lookups clamp the requested level into the supported range. Additional valid keys are retained, but only a consuming handler gives them behaviour.
+
+Core ability metadata uses these optional series:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `pounce_velocity` | number series | 1.15 | Fox pounce horizontal speed; no handler range clamp. |
+| `pounce_damage` | number series | 4.0 | Fox pounce base fire damage. |
+| `pounce_coefficient` | number series | 0.55 | Fox pounce fire-power coefficient. |
+| `foxfire_multiplier` | number series | 1.45 | Pounce multiplier when an attached foxfire is consumed. |
+| `secondary_cooldown` | integer series | handler-dependent | Fox pounce 100, warden sonic boom 200, witch healing potion 120 ticks. |
+| `primary_cadence` | integer series | 18 | Warden primary cadence; runtime cadence is at least 1 tick. |
+| `melee_damage` | number series | form attack damage, at least 1 | Warden melee override; explicitly supplied values have no handler range clamp. |
+| `sonic_damage` | number series | 10 | Warden sonic damage override. |
+| `primary_potion_cooldown` | integer series | 30 | Witch offensive potion cooldown. |
+| `native_hold_ticks` | integer series | 30 | Saints Dragons power-bar native action hold; clamped to at least 1. |
+
+Integer lookups use the handler fallback for fractional or out-of-int-range values. Accepted ability cooldowns clamp negative values to 0. Other custom series only require finite values at parse time; choose physically meaningful values for velocity and damage.
+
+### Eligibility and trigger effects
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `morph_able.normal_form` | boolean | true | Allow the skill outside a morph. |
+| `morph_able.entity_types` | identifier array | `[]` | Exact form whitelist; empty allows every active morph. Duplicates collapse; tags are not accepted as substitutes. |
+| `effek.id` | identifier | absent | Effect resource ID. Supply one when enabling `effek`; the optional default is not a usable effect declaration. |
+| `effek.bind` | boolean | false | Bind the effect to the triggering entity. |
+| `effek.to_head` | boolean | false | Use head binding for a bound effect. |
+| `effek.offset` | vector | (0, 0, 0) | Offset passed to the effect builder; no local range clamp. |
+| `effek.scale` | float | 0 | Scale forwarded to the effect builder; this serializer does not clamp it. See the effect builder's validation contract. |
+| `disabler.duration_ticks` | int | 0 | Restrictions apply only when positive; no upper clamp here. |
+| `disabler.use_item` | boolean | false | Temporarily block item use. |
+| `disabler.attack` | boolean | false | Temporarily block attacks. |
+| `disabler.move` | boolean | false | Temporarily block movement. |
+| `disabler.jump` | boolean | false | Temporarily block jumping. |
+
+For regular `isekaiorigins:triggerable_skill` and `isekaiorigins:ultimate_skill`, omitting `morph_able` permits only normal form. An empty object permits normal form and every active morph; an explicit `entity_types` list restricts active forms. Ordinary skills remain blocked during entry/exit regardless of that policy. The morphing subtype stays eligible so its owning skill can request a return, but other checks can still reject the request.
+
+Sound, animation, effect and action restrictions run after the execution accepts. For effect asset and builder details, see [Effekseer integration](/en/dev/effekseer-particles/).
+
+### Attribute profile
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `forms` | identifier / identifier array | `[]` | Exact target entity types; at least one form or form tag is required. Invalid identifiers fail the file. |
+| `form_tags` | identifier / identifier array | `[]` | Entity-type tags without `#`; combined with `forms` using OR. No match contributes nothing. |
+| `phases` | string / string array | `["ACTIVE"]` | Case-insensitive `NONE`, `ENTERING`, `ACTIVE`, `EXITING`; no whitespace trimming. Missing or empty uses `ACTIVE`; invalid name fails. `NONE` parses but runtime applies no modifiers in that phase. |
+| `priority` | int | 0 | Ascending sort, then profile ID; all matches apply, not only the highest priority. |
+| `modifiers` | object array | `[]` | Must contain at least one modifier. A malformed entry fails the whole file. |
+| `modifiers[].attribute` | identifier | required | Target player attribute. A valid but unregistered ID, or an attribute absent on the player, is skipped during application. |
+| `modifiers[].operation` | string | `addition` | Case-insensitive, no trimming. Add: `addition` / `add` / `add_value`; base multiplier: `multiply_base` / `multiply_base_value`; total multiplier: `multiply_total` / `multiply` / `multiply_total_value`. Unknown values fail. |
+| `modifiers[].value` | double | 0 | Constant contribution; no range or finite-value check in this parser. |
+| `modifiers[].scale` | object | absent | Optional attribute-derived contribution added to `value`. Explicit null is invalid. |
+| `scale.attribute` | identifier | required | Source player attribute. Missing registry entry or player instance makes the entire scaled contribution 0, including offset. |
+| `scale.factor` | double | 1 | Multiplier of the current source attribute value. |
+| `scale.offset` | double | 0 | Added after multiplication and before clamping. |
+| `scale.min` | double | −1.7976931348623157e308 | Lower bound on the scaled contribution only. Reversed min/max are swapped. |
+| `scale.max` | double | 1.7976931348623157e308 | Upper bound on the scaled contribution only; does not clamp constant `value`. No explicit finite check. |
+
+The amount is `value + clamp(source_attribute × factor + offset, min, max)`. Scaling reads the player's current effective attribute, including currently installed modifiers. It is evaluated before old morph modifiers are removed, so a source affected by another morph modifier can feed back into the next refresh. This is not a dependency graph or a continuously recalculated formula.
+
+All matching profiles contribute temporary player modifiers. Stable modifier identity derives from profile ID and array index, so identical attribute entries at different indices remain separate contributions. Priority orders resolution; it does not suppress other profiles. Attributes missing from the player are skipped.
+
+## Validation
+
+Attribute roots must be objects. Selectors accept a primitive converted to text or an array of text-convertible entries; object/null shapes fail. Use strings deliberately: numeric primitives can become valid-looking identifiers. Invalid phases, operations, required IDs or modifier objects reject the entire profile. Unknown fields are ignored. A failed profile is logged and skipped while the registry is replaced by the successfully parsed set; its previous value is not retained.
+
+An attribute profile requires both a nonempty selector set and a nonempty modifier list. Valid but unmatched forms/tags simply produce no modifiers. Attribute numeric fields have no explicit finite-value or gameplay-range validation.
+
+Power construction rejects invalid category or metadata values and requires the fields marked above. Entity and ability availability is resolved later. A morph needs a living target, free space for its dimensions and a player who is not riding. Returning requires standing-player clearance. A rejected morph execution does not spend its trigger cost or apply its trigger effects. A successful return can use the same energy cost as entry; zero-cost return is not implied.
+
+Entity-specific ability overrides take precedence over authored IDs. The built-in warden and witch overrides choose their respective primary and secondary actions; `isekaiexpansion:none` in a power does not suppress an installed entity override. Dedicated variants can own a form's texture and bypass generic morph texture overrides.
+
+## Reloading
+
+Attribute profiles reload with server data packs. On a successful reload, online players' temporary modifiers are refreshed; phase changes, join and respawn also refresh them. Source-attribute changes alone do not trigger a refresh, and the component does not recalculate scaling every tick. Leaving the form removes its applied modifiers.
+
+Power definitions follow the installed power loader. The active morph stores its resolved form and ability IDs; do not assume editing a power rewrites an already running form. Re-enter after reloading when checking changes.
+
+Textures are client resources. Without `skin_id`, the candidate is `assets/isekaiexpansion/textures/morphs/entities/<entity-namespace>/<entity-path>.png`; with it, the candidate is `assets/isekaiexpansion/textures/morphs/skins/<skin-namespace>/<skin-path>.png`. A missing candidate leaves normal renderer texturing in place. Reload client resources after changing PNGs; JSON does not define native form variants.
+
+## Related
+
+- [Humanoid preset data](/en/wiki/humanoid-presets/)
+- [Attributes and effects](/en/wiki/attributes-and-effects/)
+- [Effekseer integration](/en/dev/effekseer-particles/)

@@ -1,0 +1,123 @@
+---
+title: "宝石运行时"
+description: "数据快照、物品状态、插槽操作、触发路由与公开装备限制查询。"
+category: systems
+order: 40
+updated: 2026-09-18
+---
+
+宝石定义是共享快照，随机词条、插槽和诅咒则属于物品状态。多数实现位于 `internal.gem`；公开查询入口为 `api.gem.GemRequirementAPI`。名称相近的 `internal.gem.api` 仅包含内部枚举，不是公开门面。
+
+## 它做什么
+
+系统负责定义加载与同步、随机／固定属性应用、镶嵌与取出、元素／技能触发及诅咒效果。[宝石数据](/zh-cn/wiki/gem-data/)提供完整数据包格式，[宝石与插槽](/zh-cn/wiki/gems-and-sockets/)提供玩家操作说明。
+
+`GemDefinitions` 先按物品查找固定、元素和技能定义，再将 `FusibleGemItem` 识别为随机宝石。加载校验禁止固定／元素／技能类别之间共用同一物品。
+
+## 运行时模型
+
+### 定义与物品状态
+
+`GemDataLoader` 先构建并校验全部类别，再由 `GemDataManager.applyReload` 替换 volatile 快照并清空配置缓存。配置按优先级降序、ID 升序排列，第一个匹配项生效；否则使用无插槽的默认配置。玩家加入及数据包成功重载时，通过 `SyncGemDataPacket` 发送完整快照。
+
+随机属性候选先按属性 ID 排序，再按权重不放回抽取。每个条目选择一种操作，均匀抽取数值并舍入。仅在随机属性列表缺失时初始化。数值在重载后保留；读取时重新检查当前定义及插槽限制。
+
+下表是**存档数据**，不是数据包编写格式。装备保存插槽、元数据与诅咒；宝石保存属性、限制及难度信息。
+
+| NBT key | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `ise_sockets` | `array<object>` | `absent` | 按顺序保存插槽；修改时按当前配置的插槽数规范化。 |
+| `ise_sockets[].kind` | `string` | `profile kind` | ATTRIBUTE、FIXED、ELEMENT 或 SKILL；缺失／无效时读取配置类别，有效存档类别在规范化时保留。 |
+| `ise_sockets[].gem` | `object` | `absent` | 序列化的数量为 1 的 ItemStack，包含宝石 NBT；缺失表示空槽，内部字段由原版物品序列化负责。 |
+| `ise_sockets[].state` | `object` | `{}` | 可变的单槽标记及冷却。 |
+| `ise_sockets[].state.locked` | `boolean` | `false` | 持久封印，与当前配置的装备等级锁以 OR 合并。 |
+| `ise_sockets[].state.cracked` | `boolean` | `false` | 禁用镶嵌、属性及触发；修复时移除此键。 |
+| `ise_sockets[].state.proc_cd_until` | `integer` | `0` | NBT long：绝对世界刻数，最低为零；此槽的随机触发／主动技能共用。 |
+| `ise_socket_meta` | `object` | `{}` | 整件装备的元数据。 |
+| `ise_socket_meta.insert_fatigue` | `integer` | `0` | 镶嵌调谐负荷，限制在当前设置上限内。 |
+| `ise_gem_attributes` | `array<object>` | `absent` | 随机词条或已缩放的固定值；随机列表一旦存在，即使为空也阻止初始化。 |
+| `ise_gem_attributes[].attribute_id` | `identifier` | 必填（有效数据） | 属性 ID；应用时跳过缺失、无效或已移除定义的词条。 |
+| `ise_gem_attributes[].operation` | `string` | `ADDITION` | 未知或空操作回退为 ADDITION，再按当前定义校验。 |
+| `ise_gem_attributes[].value` | `number` | `0` | 应用值；当前定义仍须允许该属性／操作。 |
+| `ise_gem_attributes[].base_value` | `number` | `value` | 保留未缩放值，避免重复应用难度时累乘。 |
+| `ise_gem_attributes[].entry_index` | `integer` | `absent` | 缩放固定词条时写入；当前应用逻辑使用列表位置。 |
+| `ise_gem_target_requirement` | `identifier` | `absent` | 随机宝石限制 ID；缺失不限制，格式错误或未解析则拒绝匹配。 |
+| `ise_gem_difficulty_scaling` | `object` | `absent` | 战利品／难度上下文；难度无效或区域等级非正时不可用。 |
+| `ise_gem_difficulty_scaling.scaled` | `boolean` | `true when written` | 缩放时写入的标记；上下文读取不以它作为条件。 |
+| `ise_gem_difficulty_scaling.difficulty` | `string` | 必填（有效数据） | 标准地牢难度；空字符串解析为 common。 |
+| `ise_gem_difficulty_scaling.area_level` | `integer` | `0` | 缩放要求正的区域等级。 |
+| `ise_gem_difficulty_scaling.loot_table` | `identifier` | `empty string` | 随上下文保留的来源战利品表 ID。 |
+| `ise_curse` | `object` | `absent` | 每件装备储存一个已绑定诅咒。 |
+| `ise_curse.id` | `identifier` | 必填（有效数据） | 格式错误或定义缺失时不产生效果。 |
+| `ise_curse.mult` | `number` | `1` | 储存的 float 强度；读取时最低为 1。 |
+
+`getOrCreateSockets` 会修改物品：补齐缺失类别／状态，保留有效的存档类别覆盖，并只保留当前配置需要的插槽数。配置变为无插槽时移除列表，不会返还被丢弃的宝石。只读适用性检查使用虚拟视图，不执行此规范化。
+
+难度重复应用使用 `base_value`，重洗后也保留上下文。重洗随机词条还会重洗装备限制；仅重洗数值则保留限制。固定宝石的存档值只有在当前定义仍允许对应属性／操作时才有效；没有任何有效存档词条时，回退到定义中的固定修饰。
+
+### 服务端交互
+
+`GemFusion` 与 `GemConsumableExecutor` 处理服务端左键操作。`GemInteractOpener` 收集可用索引，只要至少有一个就打开选择界面。它保留整个光标来源物品堆、清空光标，并发送展示副本。打开失败时返还来源物品。
+
+`GemInteractServerSession` 保留目标 Slot 与来源物品。执行时读取当前目标并重新校验。有效但失败的镶嵌会结束会话，不扣除宝石；成功则存入数量为 1 的副本，并扣除来源中的 1 个，创造模式也如此。关闭时只返还一次剩余来源物品。小刀耐久与耗材消耗分别豁免创造模式。
+
+### 属性、触发与诅咒
+
+属性修饰 UUID 由属性、操作、插槽索引、词条索引及装备槽共同确定。ItemStack 与 Trinkets 桥接同时加入宝石和诅咒修饰。锁定／裂纹插槽不提供宝石属性；随机装备限制会再次对宿主检查。
+
+命中与击杀触发扫描攻击者双手；`ON_HURT` 扫描受击者防具和双手，不扫描饰品。没有攻击者时，受击路由禁用元素伤害，但仍检查技能触发。技能触发要求服务端玩家，元素触发可使用其他生物作为拥有者。诅咒状态／承伤效果另行扫描防具、双手及饰品。
+
+元素触发检查冷却／概率，抽取伤害，写入正冷却，再调用 `SpellDamageUtil`。技能触发应用技能等级的概率／冷却缩放，检查并支付能量，调用 `SkillPowerUtil.triggerSkill`，最后储存冷却；不等待技能返回成功确认。
+
+主动选择顺序为 `MAINHAND → OFFHAND → HEAD → CHEST → LEGS → FEET`，每件装备内按插槽索引升序。先选第一个兼容的 `TRIGGERABLE` 宝石，再检查冷却与能量；不可用时不会继续尝试后面的宝石。主动触发应用冷却缩放，但不判定概率。
+
+## 约定
+
+- **执行侧与归属：** 通过交互路径在物品所属的游戏／服务端线程修改真实 ItemStack。帮助方法不锁定可变物品，也不保证任意异步调用安全。客户端可用同步目录查询及展示，但服务端仍是权威。
+- **限制按类别生效：** 随机／固定检查属性域及伤害类别交集，元素检查学派及类别交集，技能检查允许的技能 ID。随机镶嵌还检查全部存档词条及目标限制。
+- **锁定与裂纹不同：** 两者都禁用镶嵌和激活；锁定还阻止取出，裂纹不会。修复要求达到装备等级，但允许修复已封印插槽。
+- **冷却属于插槽：** `proc_cd_until` 是绝对世界刻数。取出宝石会保留状态及冷却，不要把它当作剩余时长，也不要在复制新宝石入槽时清除。
+- **重载范围：** 此加载器内的宝石校验是原子的。改变定义可在不改 NBT 的情况下改变装备行为；缩减插槽配置可能在规范化时丢失数据。
+- **动作扩展：** `GemConsumableActions.register` 覆盖相同 ID 的执行函数，但内置适用性分支仍拒绝未知动作路径。需同步添加校验、适用性及选择处理。顺序执行的动作分支不是可回滚事务。
+- **网络边界：** 包含公式及动作 NBT 的完整定义快照会被编码。修改时保持读写对应；公式名／表达式有 64/512 字符传输限制。
+
+`GemProcCooldownNbt` 从比较副本中移除触发冷却，避免冷却更新被当作装备变化。Fabric 物品动画与 Punchy 手部状态钩子使用它。Punchy 比较还忽略耐久及弩装填字段；不会修改真实物品。
+
+## 扩展方式
+
+其他系统检查随机宝石装备限制时，导入 `net.kzeroko.isekaiexpansion.api.gem.GemRequirementAPI`：
+
+```java
+boolean canUseGem(ItemStack gem, ItemStack equipment) {
+    return GemRequirementAPI.matchesTarget(gem, equipment);
+}
+```
+
+这里只检查装备限制，不检查插槽类别、锁定、占用或等级。本模组内部需要完整镶嵌判断时，使用 `GemAttribute.canInsertAt`。
+
+| 方法 | 结果 |
+| --- | --- |
+| `hasRequirement(gem)` | 是否有语法有效的存档限制 ID；不保证定义已加载。 |
+| `getRequirementId(gem)` | 解析后的 ID；缺失、无效或空输入时为 null。 |
+| `matchesTarget(gem, target)` | 空宝石为 false；没有限制时为 true；存档 ID 格式错误或未解析时为 false；否则检查全部条件。 |
+| `getRequirementDescription(gem)` | 根据 ID 创建可翻译 Text；没有有效 ID 时为 null。 |
+
+这些方法读取当前目录，不修改物品。应等待初始资源加载，再判断引用的定义是否可用；客户端需收到服务端快照。此门面直接读取内部管理器及状态帮助方法。
+
+新增数据行为时，同步更新加载器、类型定义、同步读写及双语字段表。宝石数据引用技能之前，须先在 `IsekaiPowerRegistry` 注册可触发技能；数据不能注册 Java 技能实现。
+
+## 验证
+
+1. 有客户端在线时重载有效覆盖，比较服务端镶嵌适用性与客户端提示。引入无效注册 ID，确认原宝石快照仍生效。
+2. 测试调谐负荷 0、1、2：自带概率分别为 85%、91%、95%。在对应帮助方法中用可控随机数强制成功／失败，并区分有效失败与无效目标。
+3. 不执行就关闭界面、执行失败镶嵌、重复调用已完成会话。确认来源物品只返还一次，成功恰好消耗 1 个宝石。
+4. 对锁定、等级锁、裂纹、占用插槽分别测试镶嵌、取出、修复、封印与类别变化；覆盖直接与界面路径。
+5. 改变装备的 NBT／标签，使其不再符合限制；随机属性应停止生效。移除限制定义，确认宝石不会变为无约束。
+6. 检查命中／击杀／受击路由、首个主动宝石冷却时的优先级、能量不足、取出后冷却保留及仅冷却变化的手部动画。
+7. 带存档难度上下文重洗词条与数值，确认基础值避免重复累乘。测试缩减配置前备份已有镶嵌物品。
+8. 在双手、防具、饰品装备诅咒，验证属性、状态合并及承伤加成相加。这些是需要执行的游戏内检查，不是文档构建已经完成的测试结果。
+
+## 相关页面
+
+[宝石数据](/zh-cn/wiki/gem-data/)、[宝石与插槽](/zh-cn/wiki/gems-and-sockets/)与[装备技能](/zh-cn/wiki/equipment-skills/)。
+

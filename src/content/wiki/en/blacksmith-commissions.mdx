@@ -1,0 +1,56 @@
+---
+title: "Blacksmith commissions"
+description: "Pay a village smith to make a revealed blueprint, then collect, transfer or cancel the order."
+category: crafting
+order: 25
+updated: 2026-09-19
+---
+
+An adult weaponsmith, toolsmith or armorer can accept a revealed blueprint through dialogue. The accepted order holds your blueprint and charges its full quoted price immediately; you collect the blueprint and finished output together when work is complete.
+
+The smith explains the price, work time and terms in separate dialogue stages. Advance each line before the final agreement appears. The drawing list uses its own confirmation button.
+
+## What an order costs
+
+| Rule | Value |
+| --- | --- |
+| Active orders | 1 per player across the server; 1 per smith. |
+| Blueprint | Revealed, in the main inventory, with a valid forgery recipe and output. |
+| Work days | 2–30 daily quotas, set by the blueprint. |
+| Daily work | 2–6 game hours; each is 1000 ticks (50 seconds at normal tick rate). |
+| Working window | Daytime ticks 2000–8999 within each 24000-tick day. |
+| Dialogue distance | At most 8 blocks. |
+| Workstation search | Within 48 blocks of the smith, with a reachable path. |
+| Currency display | 100 copper = 1 silver; 100 silver = 1 gold. |
+
+The bundled diamond-sword plan costs 24000 copper (2 gold and 40 silver), with 3 work days at 4 hours per day. These are required work quotas, not a promise of completion after that many elapsed days. The commission uses the quoted output and fee; it does not take forging ingredients from your inventory.
+
+## Place a commission
+
+Talk to an eligible smith and choose a blueprint from the commission menu. Read the output, cost and work schedule before confirming. The smith must be alive, awake, able to use AI, unthreatened and in the same world as you; you must be alive and outside spectator mode.
+
+The smith needs its own matching job-site workstation. A nearby unclaimed workstation is insufficient. Payment uses the Numismatic Overhaul integration provided by IsekaiCore; without that integration or successful payment, the order is not accepted and the blueprint stays in your inventory.
+
+Villager gossip can also block access to this dialogue. The absolute negative major/minor gossip total reaches the unwelcomed threshold at 50 and the refusal threshold at 100. This is separate from [faction reputation](/en/wiki/reputation/).
+
+## When work advances
+
+The smith must actually reach the assigned workstation, have a clear interaction line to it and work during the daytime window. Conversation, danger, sleep, disabled AI, a missing workstation or an obstructed route can pause progress. After completing its daily quota, it waits for a later day.
+
+Skipping time or shutting down the server does not grant missed labour. Turning the calendar backwards can postpone work until its saved work day is reached again. The server maintains up to 8 remote workshop leases; already loaded smiths can still work independently of that lease budget.
+
+## Collect, transfer or cancel
+
+| Action | Result |
+| --- | --- |
+| Collect | At the assigned smith, take the finished output and your blueprint together. Main inventory must fit both. |
+| Transfer | Reassign to an available eligible smith with a reachable job site. Keeps work progress, daily quota usage, output and quoted terms; charges no additional fee. Completed orders can also transfer. |
+| Cancel | Before completion, reclaim the blueprint at an available eligible smith. The paid fee is not refunded and no output is given. |
+| Full inventory | Collection or cancellation waits; the order is retained. |
+| Existing order | View its status instead of submitting another blueprint. |
+
+Transfer can also refresh the assigned workstation for the current smith. If a smith disappears, another eligible smith can show your server-wide order and offer transfer or cancellation. A completed order must be collected; it cannot be cancelled.
+
+## Where the data lives
+
+Each blueprint's `blacksmith` object sets the price and labour requirements. [Blueprint data](/en/wiki/blueprint-data/) documents those fields; [Blueprint research](/en/wiki/blueprints/) explains how to obtain a usable plan.

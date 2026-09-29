@@ -1,0 +1,157 @@
+---
+title: "魔法阵"
+description: "分层魔法阵的绘制、施法序列与独立渲染。"
+category: client
+order: 55
+updated: 2026-09-25
+---
+
+魔法阵通过不可变序列组合可独立选择的法印图层、纯描边圆环、发光线和立体施法光幕。`MagicCircleAPI`是客户端门面；动画图和服务端魔法阵构建器仍属于项目内部实现。
+
+## 它做什么
+
+施法魔法阵在实体绘制后的世界特效阶段提交。它跟随实际玩家或NPC，不经过角色模型渲染器，变身模型也不会接管魔法阵几何体。仅在Punchy接管第一人称绘制时，朝向类序列才使用其手部位置。当Player Animator播放Spell Engine施法动作、Punchy要求原版显示，或Punchy被禁用时，朝向类魔法阵与第三人称共用施法者相对位置：先以施法者当前高度的60%为原点，再应用插值后的偏航角、俯仰角以及序列设定的前后和上下偏移。切换视角只改变摄像机，不改变魔法阵位置。地面序列仍在世界空间绘制。
+
+材质使用普通半透明自发光实体程序，采用`LEQUAL`深度测试，同时写入颜色和深度，按源Alpha混合，并关闭背面剔除。世界层与手部层都会写入深度，避免后续绘制的远处天空或水面覆盖较近的笔画。程序丢弃的透明像素不会封住阵纹空隙。前方不透明地形仍会遮挡魔法阵；位于魔法阵前方的水保留正常透明效果和光影包处理。世界层使用`ITEM_ENTITY_TARGET`参与Fabulous合成，手部层使用`MAIN_TARGET`。
+
+魔法阵没有实体轮廓层，因此状态光环捕获会跳过它，第一人称的灵力缠身捕获也一样。角色解体效果的顶点提供器同样直接放行魔法阵。阴影阶段不绘制魔法阵。
+
+法印在启用或关闭着色器时都使用同一图集。线与光幕收集到`CircleEffectPass`，两种模式共用同一组Satin核心着色器，在世界合成结束后叠加RGB光，保留场景Alpha与深度，不再进入光影包的自发光眼睛材质。光幕只有开放、渐缩的侧面，使用周期性光缕场；场中没有常量薄雾，两个高度端点均淡出至零，不含端盖或覆盖率硬裁切。
+
+渲染通道在半透明绘制后保存世界深度副本，通过采样该副本处理前景遮挡和柔和交界。手部特效保留各自的投影及深度副本。场景深度只读，光幕不会替换天空、水面或后方物体所依赖的深度。节点颜色与动画仍写入顶点，投影和深度uniform按批次设置。通道最多接收32个批次，在活动帧间复用缓冲，空闲或断开连接时释放捕获资源。新分配或调整尺寸的世界深度捕获从下一帧起使用。
+
+仅法印在Iris下使用预计算的256项sRGB发光表。线和光幕直接使用所定义的RGB与顶点Alpha，包括低不透明度渐变；线芯根据像素足迹柔化远处斜线。它们的发光叠加发生在光影包的世界泛光和曝光之后，最终外观与深度对齐仍需在目标光影包中实测。
+
+## 运行时模型
+
+`MagicCircleSystem`在客户端刻结束时解析施法请求，插值进度，并用局部经过时间旋转节点。序列定义、注册表和渲染数据序列化位于`internal.magiccircle`，两端均可加载；`CircleSequenceRenderer`和GPU资源只在客户端使用。
+
+地面附着序列停止后按配置在世界坐标中淡出，停止瞬间固定位置、朝向、身高和成形进度。光幕淡出时略微上升。手部渲染每次都检查实时来源。新的施法来源或回退的进度会重启会话。实体移除、死亡、距离过远、世界切换、加入和断开连接都会清理状态。
+
+| 限制 | 数值 | 作用 |
+| --- | --- | --- |
+| 附着施法者 | 128 | 超出的施法者等待空位。 |
+| 绘制距离 | 96格 | 同时适用于附着和独立魔法阵。 |
+| 附着退场 | 0–40刻（0–2秒） | 通过每个序列的`outroTicks`定义。 |
+| 世界帧预算 | 8192个四边形 | 世界附着与独立魔法阵共用。 |
+| 手部帧预算 | 1024个四边形 | 第一人称单独计算。 |
+| 可见图层 | 1个四边形 | 完整引导图缩放并淡入，显现过程中也保持完整。 |
+| 法印 | 每个可见图层1个四边形 | 外圈与内圈组合使用2个；支持任意非空、有顺序的图层列表。 |
+| 描边 | 1个四边形 | 使用专用描边图块。 |
+| 线 | 48个四边形 | 24段纵向分段，组成2片交叉带。 |
+| 光幕 | 576个四边形 | 收束圆柱壳体包含48个周向分段和12层高度分段。 |
+
+提交顶点前先为整个图层、线或光幕预留预算，剩余预算不足就跳过该对象。资源重载替换材质图集，不会每帧重建动画图。服务端`MagicCircleEntity`的动作逻辑、施法时长、激活时长和结束时长独立于客户端编排。
+
+## 调用约定
+
+### 引导图资源
+
+例如`isekaiexpansion:fire`需要提供`assets/isekaiexpansion/textures/magic_circles/v2/fire_outer.png`、`assets/isekaiexpansion/textures/magic_circles/v2/fire_inner.png`和`assets/isekaiexpansion/textures/magic_circles/v2/fire_stroke.png`。其他命名空间也使用相同目录。资源查找使用不带尾斜杠的`textures/magic_circles/v2`。每个图层选择`Glyph.OUTER`、`Glyph.INNER`或`Glyph.STROKE`。外圈包含周边铭文，不含中心纹样；内圈包含中心纹样；描边仅包含纯圆周。三者均可单独绘制，也可在同一法印中重复使用。
+
+| 属性 | 数值 | 约定 |
+| --- | --- | --- |
+| 源图尺寸 | 正方形，8–256像素 | 无效或空白图会记录错误并拒绝该设计。 |
+| 源图覆盖 | Alpha至少128 | 达到阈值的像素用于重建线条。 |
+| 材质单元 | 256 × 256像素 | 圆滑轮廓与拟合圆环保留镂空区域。 |
+| 单元边距 | 8像素 | 透明留白隔开图集中的相邻资源。 |
+| Mip层数 | 4 | 按Alpha加权颜色，减少暗边。 |
+| 图集设计数 | 最多32 | 按标识符顺序载入有效设计，超出时记录警告。 |
+
+编译器采用源图着色像素的平均颜色，生成浅色线芯和局部光晕。计算在资源准备阶段完成，共享图集在重载应用阶段上传。任意图层缺失或无效、设计不存在时没有可绘制材质。旧贴图、模型路径与发光着色器已移除，不提供旧资源查找。
+
+### 序列与图层
+
+`MagicCircleSequences`一次性构建并注册内置动画图。`SpellClientData.registerCircleSequence(Identifier, CircleSequence)`直接接收序列。未指定时，持续光束选择`PULSE_SINGLE`，阶位低于3选择`FACE_SINGLE`，其他阶位选择`FACE_TRIPLE`。
+
+当前内置动画图和ID以`MagicCircleSequences`为准。自定义序列须在两端的公共初始化阶段注册。重复ID或未知查询ID会抛出异常；渲染数据必须引用已注册的对象。
+
+`CircleReveal`包含`BLOOM`（完整图层从中心扩展并淡入）、`ASSEMBLE`（在相同扩展与淡入过程中加入显式设置的深度和旋转归位）及`FADE`（保持完整尺寸，仅淡入）。已移除的方向擦除模式不提供别名或NBT转换。
+
+每个图层将各自延迟后的进度代入五次曲线`t³(10 − 15t + 6t²)`。缩放和不透明度从零平滑过渡到设定值，两端的速度与加速度均为零。`FADE`仅将曲线用于不透明度。淡入期间保留完整引导图，没有角度或径向裁切边缘。父节点公转与图层持续自转独立于显现过程。
+
+| 节点 | 参数 | 约定 |
+| --- | --- | --- |
+| `Group` | `children` | 不可变、有顺序的子节点列表。 |
+| `Anchor` | `plane`、`distance`、`height`、`heightRatio`、`child` | 平面为`FACE`、`GROUND`或`LOCAL`；地面高度额外加上施法者高度乘以`heightRatio`。距离单位为格。 |
+| `Transform` | `x`, `y`, `z`, `yaw`, `pitch`, `roll`, `child` | 先按方块单位进行局部平移，再按角度绕Y/X/Z旋转，作用于所有子节点。 |
+| `Orbit` | `radius`、`speed`、`phase`、`facing`、`tilt`、`child` | 半径单位为格，速度为度/刻，相位与倾角为度。朝向为`PARALLEL`、`INWARD`或`OUTWARD`。每个子节点保留自己的动画。 |
+| `Seal` | `start`、`end`、`scale`、`spin`、`pulseDepth`、`pulseTicks`、`layers` | 不可变、有顺序的非空图层列表，各层独立选择图案。施法区间在0–1内，终点大于起点。缩放为正数。自转为度/刻；脉动幅度从0（含）到1（不含），周期为正刻数。 |
+| `Layer`（法印数据） | `glyph`、`delay`、`duration`、`spin`、`phase`、`scale`、`depth`、`opacity`、`arrivalDepth`、`arrivalSpin` | 图案为`OUTER`、`INNER`或`STROKE`。时间相对法印局部进度；延迟非负、持续时间为正，二者之和不超过1。自转为度/刻，相位为度，缩放为正数，深度单位为局部格。不透明度为0–1，零表示不绘制。带符号的入场深度和角度偏移仅用于`ASSEMBLE`，平滑归零；各自设为0即可关闭对应偏移。 |
+| `Line` | `start`, `end`, `length`, `width`, `color`, `opacity`, `startFade`, `endFade`, `pulseDepth`, `pulseTicks` | 沿局部+Z延伸，长度和半宽为正数，单位方块。颜色为24-bit RGB或`CircleColorRef.AUTO`；不透明度和两端空间淡出比例均为0–1，重叠部分相乘，0关闭对应端的淡出。时序和脉动范围与法印相同。 |
+| `Aura` | `start`, `end`, `radius`, `height`, `color`, `opacity`, `flow`, `pulseDepth`, `pulseTicks` | 半径和高度为正数，单位方块，沿局部+Z升起。颜色为24-bit RGB或`CircleColorRef.AUTO`，不透明度0–1；flow表示每80刻（4秒）的有符号纹理周期数。时序和脉动范围与法印相同。 |
+
+节点数值必须有限，轨道半径不能为负。图层顺序与深度分别定义，不强制外圈和内圈成对出现。重叠图案应设置不同深度，避免共面闪烁。地面位置将局部正深度朝上，朝向类魔法阵沿自己的法线增加深度。父节点公转和子节点自转叠加计算。
+
+深度在图层XY缩放之前应用，没有隐式入场位移。`arrivalDepth = 0`的图层从首个可见帧起就位于最终平面，地面图层由此可在整个成形过程中保持最终高度。非零偏移以法印局部格为单位，会乘以父法印缩放。
+
+`INWARD`让局部+Z指向公转中心，`OUTWARD`指向外侧。法印与线放在同一公转组中即可共享中心和法线；用`Transform`或`LOCAL`调整线的起点。线入场时延长长度，光幕入场时升高高度。脉动深度0关闭呼吸；线和光幕改变亮度，法印改变所选图层的尺寸。序列包围范围包含子节点的位置和尺寸，裁剪逻辑不按序列名称特判。
+
+### 颜色引用
+
+`CircleColorRef`提供从内置V2图像墨色采样的static final RGB字段。显式颜色保持固定。`AUTO = 0x01000000`使用24-bit RGB掩码以外的保留位，不会与任何RGB颜色冲突。仅该精确哨兵值被接受；其余超出`0x000000`–`0xFFFFFF`的值会在节点构造时抛出异常。
+
+`CircleColorRef.resolve(int reference, int automaticRgb)`返回显式颜色，或将`AUTO`替换为`automaticRgb`。解析结果必须为24-bit RGB，否则抛出异常。Alpha仍由节点的独立参数控制。
+
+渲染器使用当前材质外圈引导图的平均墨色。在资源重载的编译阶段，从alpha至少为128的源像素采集颜色，并缓存在材质中。施法与元素弓魔法阵共用学派ID到设计名的映射：`magic_water`、`magic_wind`、`magic_earth`、`magic_light`和`magic_dark`分别选择`water`、`wind`、`earth`、`light`和`dark`，`magic_astral`选择`astra`。其余学派以ID路径作为设计名；独立魔法阵使用显式的`Design`。因此`AUTO`跟随法术魔法阵颜色和资源包改色，也支持自定义设计。每条可见线或光幕在提交顶点前只解析一次颜色，不修改不可变序列，并发施法可安全共享同一序列。
+
+| 颜色常量 | RGB |
+| --- | --- |
+| `ARCANE` | `0xA560C9` |
+| `ASTRA` | `0x7AE9CC` |
+| `DARK` | `0x321798` |
+| `EARTH` | `0x906636` |
+| `FIRE` | `0xD81414` |
+| `FROST` | `0x64ACD6` |
+| `HEALING` | `0x24E849` |
+| `LIGHT` | `0xFFFB76` |
+| `LIGHTNING` | `0xF7C759` |
+| `SOUL` | `0x2DD4DA` |
+| `WATER` | `0x0047A2` |
+| `WIND` | `0xBCEF5E` |
+
+### 独立魔法阵渲染数据
+
+独立序列以实体包围盒中心为轴心，`YOffset`在缩放和旋转前添加，因此改变大小或朝向不会移动中心。首个朝向位置定义局部原点，后续朝向位置保留设定的相对距离。
+
+`MagicCircleRenderData`是由魔法阵实体同步和保存的通用侧数据，构造参数对应下表中的NBT键。空的追踪数据使用`isekaiexpansion:arcane`、`isekaiexpansion:face_single`、`BLOOM`、缩放×1、速度×1和偏移0。非空复合标签必须包含全部字段且类型正确；无效标识符、未知序列ID或显现枚举、非有限数值或越界数值都会抛出异常。额外的未知键被忽略，不会转换枚举名形式的序列值或旧贴图字段。
+
+| NBT键 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Design` | `identifier` | 必填 | 三层引导图设计，不含贴图目录和后缀。 |
+| `Sequence` | `identifier` | 必填 | 已注册序列ID，例如`isekaiexpansion:super_tier`。 |
+| `Reveal` | `enum` | 必填 | 上述`CircleReveal`枚举值。 |
+| `Scale` | `number` | 必填 | 正缩放倍率，最大×16。 |
+| `Speed` | `number` | 必填 | 有符号旋转倍率，−16–16；零停止旋转。 |
+| `YOffset` | `number` | 必填 | 世界空间竖直偏移，−64–64格。 |
+
+## 扩展方式
+
+编辑内部序列目录时，组合可复用的`Group`、`Anchor`、`Transform`、`Orbit`、`Seal`、`Line`和`Aura`节点，并只构建一次动画图。同一个轨道内的子魔法阵可以分别设置施法区间、图层运动和脉动。`List.of(MagicCircleSequences.OUTER)`绘制仅外圈法印，`List.of(MagicCircleSequences.INNER)`绘制仅内圈法印；也可重复构造`Layer`并自由选择图案。不再提供独立描边节点或固定双层构造器。
+
+服务端调用方可通过现有内部构建器配置独立法术魔法阵：
+
+```java
+MagicCircleBuilder.create(caster)
+        .render(new MagicCircleRenderData(
+                new Identifier("isekaiexpansion", "fire"),
+                MagicCircleSequences.FACE_TRIAD, CircleReveal.ASSEMBLE,
+                1.5F, 1.0F, 0.0F))
+        .castDuration(20)
+        .activeDuration(60)
+        .endDuration(8)
+        .spawn();
+```
+
+此例施法20刻（1秒），激活60刻（3秒），结束8刻（0.40秒）。玩法动作仍由`MagicCircleBuilder`与`MagicCircleSequenceLogic`执行，客户端视觉不会触发法术效果。
+
+`MagicCircleAPI.initClient`在首次资源重载前注册客户端生命周期事件。`renderEntity`、`renderHand`和`applyFacePose`应在客户端渲染线程中使用当前矩阵栈与顶点提供器。`renderHand`调用传入的位置回调，并要求已有追踪中的施法会话。`circleInFirstPerson`控制本地第一人称绘制；Punchy不接管手部时，朝向类魔法阵沿用第三人称的世界位置。
+
+## 验证
+
+修改代码后运行`./gradlew.bat compileJava`。分别关闭着色器和启用目标Iris光影包，在游戏内检查修改后的特效，包括施法、中断和资源重载。
+
+## 相关
+
+- [着色器与材质](/zh-cn/dev/shaders-and-materials/)
+- [法术集成](/zh-cn/dev/spell-integration/)

@@ -1,54 +1,65 @@
 ---
 title: "Start here"
-description: "What KTM2 expects from you in the first few hours, and which systems you can safely ignore until later."
+description: "Find the controls and progression systems you need without confusing player levels, equipment growth and identity choices."
 category: core
 order: 1
-updated: 2026-09-01
-tagline: "The short version of how this pack wants to be played."
-tags: ['basics', 'progression']
+updated: 2026-09-19
 ---
 
-KTM2 is a Minecraft RPG, not a survival world with an RPG bolted on. The difference shows up on day one.
+IsekaiExpansion supplies custom RPG systems for the KenToMahou2 (KTM2) modpack. Start with your controls, character choices and current resources, then use the linked guides when you encounter their equipment or content.
 
-The world is still generated. Continent layout comes from ReTerraForged, and towns, dungeons and ruins are placed on top of it by their own generation rules. There is no fixed map, so everything below holds for every save.
+## Set up your controls
 
-## The three habits that matter
+These are this mod's default bindings. Your control settings or the pack's saved options may assign different keys.
 
-<Steps>
+| Default | Action |
+| --- | --- |
+| K | Open the triggerable-skill screen. |
+| Left Alt, tap | Invoke the skill currently readied on the skill rail. |
+| Left Alt, hold and scroll | Browse the skill rail; releasing keeps the choice without casting it. |
+| Left Alt, double tap | Open the follower command wheel when it can open. |
+| J | Open the quest screen. |
+| U | Open the emoji screen. |
+| Unbound | Equipment-skill activation; assign a key before using its manual activation path. |
 
-1. **Get a bed and a roof before nightfall.** [Comfort](/en/wiki/comfort/) is a real stat. Sleeping badly, eating the same bread every day and standing in the rain all cost you movement speed, mining speed and hunger efficiency. A shelter near your spawn point stops the natural decay entirely.
+The skill key waits briefly to distinguish a tap from a double tap. Selecting a skill does not bypass its unlock, cooldown or resource requirements. Some screens and action restrictions prevent activation; see [the skill tree](/en/wiki/skill-tree/) and [equipment skills](/en/wiki/equipment-skills/).
 
-2. **Register with the Adventurer's Guild.** Your adventurer rank gates commissions, districts, vendors and several skill tree branches. It starts at 0 and becomes rank 1 only once the guild has actually written you down.
+## Understand your character choices
 
-3. **Do not hoard your gear.** Equipment carries its own level, its own sockets and its own skills. A weapon you use is worth more than three you are saving — see [Equipment skills](/en/wiki/equipment-skills/) and [Gems & sockets](/en/wiki/gems-and-sockets/).
+[Fate Balance](/en/wiki/fate-balance/) combines blessings and burdens. The default starting budget is 10 points, controlled by the server; review a choice's effects and conflicts before confirming.
 
-</Steps>
+[Race, class and profession](/en/wiki/identity/) are separate identity layers. Their available choices and promotion requirements come from the loaded content. Read the requirement shown for the choice you want; player level alone does not satisfy every promotion.
 
-## What you can ignore for now
+The [Wheel of Fate](/en/wiki/skill-tree/) is another progression surface. Player-level increases grant its main-tree points, while individual nodes can have their own requirements.
 
-<Callout type="tip" title="Later, not never">
-[Forgery](/en/wiki/forgery/), [blueprint research](/en/wiki/blueprints/) and gem curses are all mid-game systems. Reading them on day one will not help you; coming back at around player level 20 will.
-</Callout>
+## Keep the progression tracks separate
 
-## Choosing what you are
+| Track | What to look up |
+| --- | --- |
+| Player level | Experience and skill-tree points in [levels and experience](/en/wiki/leveling/). |
+| Equipment level | Smithing-stone growth; ordinary weapon use is not the documented upgrade route. |
+| Adventurer rank | Reputation requirements and explicit promotion, separate from player experience. |
+| NPC favour | Relationship gates tied to that player and NPC identity. |
 
-Two decisions shape the early game, and both are made before you have any information:
+Equipment also has separate systems for [skill unlocks and awakening](/en/wiki/equipment-skills/), [gem sockets](/en/wiki/gems-and-sockets/) and [blueprint crafting](/en/wiki/forgery/). A socket, item level and awakened skill are not interchangeable upgrades. Read the relevant guide when you have the material or item it uses.
 
-**Fate Balance** — a points budget of blessings and burdens, chosen at the start. Every blessing is paid for by a burden, and a few of them (appetite, temperament, countenance) feed directly into other systems. See [Fate Balance](/en/wiki/fate-balance/).
+## Watch the resources behind combat
 
-**Race, class and profession** — three separate layers rather than one class pick. Each has its own progression graph with its own unlock requirements. See [Identity & progression](/en/wiki/identity/).
+Astral Energy is a current reserve with a maximum and recovery rate. Shields use a separate gauge: blocking consumes it, pauses recovery and can break guard. [Attributes and effects](/en/wiki/attributes-and-effects/) explains the numbers and the [status-effect catalogue](/en/wiki/status-effects/) explains restrictions, recovery buffs and removal rules.
 
-Neither is permanent in the sense that you can never change, but neither is casual either. Pick the one that sounds like how you want to play, not the one with the biggest number.
+Some mobs carry elemental data. Match your incoming damage type against the **target's** [elements](/en/wiki/elements/); a mob without assigned elements gets no elemental multiplier. Multiple weaknesses and resistances combine, so the rule is more than a universal ±25% adjustment.
 
-## How combat differs
+## Make a place to recover
 
-- Everything has one or more **elements**, and damage type versus element decides a ±25% swing before armour is applied. See [Elements](/en/wiki/elements/).
-- Spells and equipment skills spend **Astral Energy**, not mana bars borrowed from other mods.
-- **Guarding** consumes a shield gauge rather than being free, and several attributes exist purely to break or reinforce that gauge.
-- Crowd control is resisted by **Tenacity** and pushed through by **Debuff Accuracy**. Both matter against bosses.
+[Comfort](/en/wiki/comfort/) tracks food variety, damage, sleep and environmental conditions. Shelter near home can offset natural decay under the conditions listed in the guide; a roof anywhere does not guarantee that result. The Comfort guide lists the conditions and the consequences of each band.
 
-The full numbers live in [Attributes & effects](/en/wiki/attributes-and-effects/).
+[My Home](/en/wiki/my-home/) covers claiming a recognised space, membership, furniture and qualifying sleep benefits. [Wayfinding](/en/wiki/wayfinding/) covers landmarks and navigation, while [terrain](/en/wiki/terrain/) describes the generated world and its settings.
 
-## Where the numbers on this wiki come from
+## Where to go next
 
-Every value here is read out of the shipped IsekaiExpansion data files, not from memory and not from an older build. Pages carry the date the data was last verified. If a page and the game disagree, the game is right — please report it.
+- For an unfamiliar blueprint or anvil interaction, read [blueprints](/en/wiki/blueprints/) and [forgery](/en/wiki/forgery/).
+- For standing with a faction, read [reputation](/en/wiki/reputation/).
+- For an NPC's expression, read [NPC emotions](/en/wiki/npc-emotions/).
+- For creating content, start with [quest data](/en/wiki/quest-data/), [dialogue data](/en/wiki/dialogue-data/) or [spell data](/en/wiki/spell-data/).
+
+These pages document the checked repository state. Server configuration, data packs and dependency versions can change the available content or its values; version-specific dependency claims are identified on the owning page.

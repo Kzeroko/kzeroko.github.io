@@ -1,0 +1,82 @@
+---
+title: "地形与地标"
+description: "KTM2 地形系列、唯一世界树、局部气氛与操作员定位命令。"
+category: world
+order: 176
+updated: 2026-09-26
+---
+
+KTM2 在随包提供的 ReTerraForged 地貌上加入 `20` 个自定义地形系列。群山、聚落平原、持久保存的世界树与奇境区域共同分布于主世界，选址受原始地理条件约束。
+
+## 可以找到什么
+
+| 系列与 ID | 可见特征 |
+| --- | --- |
+| 天环群峰 — `isekaiexpansion:halo_crown` | 层叠山体托起完整石环。 |
+| 守望石群岛 — `isekaiexpansion:sentinel_isles` | 海上岛屿与高耸石柱。 |
+| 苍翠剑脊 — `isekaiexpansion:verdant_knives` | 山地中相互分离的剑状岩脊。 |
+| 琥珀阶谷 — `isekaiexpansion:amber_basin` | 从高地向下开挖的阶状谷地，散布细长岩柱。 |
+| 风息原野 — `isekaiexpansion:great_plains` | 宽阔的预整平聚落地面，核心只有轻微起伏。 |
+| 世界树 — `isekaiexpansion:world_tree` | 唯一预留的巨树及其中央林地。 |
+| 流光林地 — `isekaiexpansion:luminous_grove` | 世界树周围较密的林地。 |
+| 星辉林间地 — `isekaiexpansion:starlit_glade` | 同一地标周围较开阔的林间地。 |
+| 晶棱荒原 — `isekaiexpansion:crystal_land` | 晶簇、水道与局部气氛闪光。 |
+| 苍穹浮岛 — `isekaiexpansion:giant_sky_land` | 位于原有地面上方的悬浮岛屿、连接通路、湖泊与林岛。 |
+| 水都瀑境 — `isekaiexpansion:aquapolis` | 抬升的石灰岩台地、水池、溢流道、桥梁与穹顶建筑。 |
+| 永夜极光冻原 — `isekaiexpansion:evernight_tundra` | 冰冻地形、分叉裂谷、化石与局部极光天空。 |
+| 深渊火山 — `isekaiexpansion:abyssal_volcano` | 不对称收尖山体、带缺口的山顶火山口、倾斜玄武岩鳍，以及流向不规则低处熔岩池的通道。 |
+| 苍穹庭园 — `isekaiexpansion:garden_of_the_firmament` | 分枝石柱托起绿色台地，以石桥和多层瀑布相连。 |
+| 巨石幽谷 — `isekaiexpansion:giant_stone_valley` | 蜿蜒干燥的谷地两侧分布宽阔斜板石拱、断裂岩体和阶梯状陡壁。 |
+| 裂隙巨岩 — `isekaiexpansion:riftborne_monolith` | 巨大的悬浮独石立于破碎基座之上，四周分布较小碎岩与围合山脊。 |
+| 炼狱深窟 — `isekaiexpansion:infernal_deep_cavern` | 玄武岩巨窟内悬垂钟乳石，熔岩水道与干燥阶地逐级下降。 |
+| 沉碧水窟 — `isekaiexpansion:sunken_azure_grotto` | 青碧水池、苔藓阶地与瀑布之间散落少量砌石遗迹。 |
+| 翠毒深渊 — `isekaiexpansion:viridian_toxic_depths` | 不规则绿池之间保留干燥岩脊与石质通路。 |
+| 世界根之窟 — `isekaiexpansion:worldroot_hollow` | 交织巨根、高架根道与有机瘤结贯穿石质洞窟。 |
+
+奇境系列 ID 是定位命令使用的分类身份，实际生成的奇境群系带有配色名：`isekaiexpansion:crystal_land_amethyst`（紫晶荒原）、`isekaiexpansion:aquapolis_calcite`（白垩水都）和 `isekaiexpansion:evernight_tundra_boreal`（极夜遗骨原）。默认浮岛配色生成苍穹高地、苍穹林岛与苍穹湖苑，路径分别为 `giant_sky_land_verdant`、`giant_sky_land_verdant_grove` 和 `giant_sky_land_verdant_wetland`，均位于 `isekaiexpansion` 命名空间。
+
+新增系列的默认配色群系 ID 为 `isekaiexpansion:abyssal_volcano_basalt`, `isekaiexpansion:garden_of_the_firmament_verdant`, `isekaiexpansion:giant_stone_valley_weathered`, `isekaiexpansion:riftborne_monolith_riftstone`, `isekaiexpansion:infernal_deep_cavern_basalt`, `isekaiexpansion:sunken_azure_grotto_azure`, `isekaiexpansion:viridian_toxic_depths_viridian`, `isekaiexpansion:worldroot_hollow_ancient`。
+
+## 创建世界与选址
+
+默认世界预设自动使用 KTM2；自定义界面只是只读展示，不是启用步骤。专用服务端创建维度时也选择该默认预设。关闭自定义地形不会恢复为其他世界预设。
+
+同一种子和配置的区域选取具有确定性，但通过概率判定不代表每个网格都一定出现地标。完整形状必须适合允许的地理与可用高度，还要避开预留平原和世界树。守望石群岛寻找海洋，苍翠剑脊寻找山地，琥珀阶谷寻找高地；多数地表奇境要求较平缓的内陆场地；深渊火山也接受内陆高地，但仍需完整容纳火山口并通过建筑高度检查。地下系列则寻找高地，保留原有地表高度，在连续覆岩下开挖封闭洞室。
+
+空境群岛、穹庭与裂隙巨岩保留下方的地面高度系统。群系过渡时，裂隙巨岩的分离岩体仍保持自身高度，下方谷地与基座保留各自形状。穹庭台地铺有草土表层，完整瀑布落入下方承接池。奇境湖泊的朝向、岸线与深度各有变化。自有奇境范围内，深暗之域等原版洞穴群系会让位于对应奇境；地下归属仅限洞室及周围缓冲带。自有地形之外，群系选择回退到原始来源。
+
+## 世界树与风息原野
+
+世界树只预留一个地点，并保存坐标、分枝设计与范围。若已有世界尚未保存预留记录，系统会先将搜索范围移至现有主世界区域文件之外。重启恢复原记录，修改搜索参数不会移动它。记录损坏或不再适合当前建造高度时，绑定会中止，不会静默换一个地点。
+
+风息原野使用独立选址器；理想尺寸无法容纳时，可建造核心允许缩小。中心只有轻微起伏，并不是数学意义上的绝对平面。这两类预留景观都优先于普通区域。
+
+## 局部天空与其他系统
+
+| 交互 | 行为 |
+| --- | --- |
+| 晶棱气氛 | 客户端闪光与延迟雷声按局部群系权重混合，不修改全局天气。 |
+| 永夜气氛 | 暗夜天空与极光属于展示效果，服务端世界时间保持原样。 |
+| 未启用光影包 | 可见条件允许时绘制后备天幕、极光与晶棱闪光；浓雾或浸没视角会抑制覆盖层。 |
+| 启用 Iris 光影包 | 后备渲染被抑制。自动覆盖识别兼容的 Eclipse/Bliss 源码结构；不支持的结构保留原源码。 |
+| 新增地表气氛 | 兼容光影包在群系边缘平滑混合火山余烬薄雾、高地柔光与云层、谷地尘光以及裂隙冷雾。 |
+| 洞窟气氛 | 炼狱暖光、青碧水光、低处绿雾与柔和根系辉光通过同一光影覆盖实现。 |
+| 毒池 | 默认设置下，生存或冒险模式玩家在翠毒深渊接触水时获得中毒效果。创造与旁观模式不受影响；`viridianToxicDepths.toxicWater` 可关闭此行为。 |
+| 光影偏好 | `autoPatchExoticShaders` 为本地设置；兼容覆盖在光影包加载时应用于内存，不重写光影包文件。 |
+| 配置 | 服务端拥有生成设置，并由 IsekaiCore `0.4.0-build60` 在登录时同步地形展示配置；编辑配置不会重建已生成区块。 |
+
+## 寻找地标
+
+操作员命令要求权限等级 `2`。短根命令 `/ise` 等价于 `/isekaiexpansion`。
+
+| 命令 | 结果 |
+| --- | --- |
+| `/ise terrain locate <family> [radius]` | 搜索上表中的系列。半径默认 `64000`，允许 `1024–64000`；排除距起点不足 `512` 格的位置。 |
+| `/ise terrain landmark world_tree` | 在活动的 KTM2 主世界中报告已保存或规划的世界树锚点。 |
+
+定位搜索使用地形描述并验证群系，不生成目标区块。限制范围内可能找不到匹配结果。坐标建议使用 `~` 保留当前 Y，并不保证传送后的到达位置安全。搜索生命周期与结果处理见[寻路与定位](/zh-cn/wiki/wayfinding/)。
+
+## 数据来源
+
+服务端选项与全部配色默认值见[地形配置](/zh-cn/wiki/terrain-configuration/)。随包预设位于 `data/isekaiexpansion/terrain/ktm2.json`；[地形生成](/zh-cn/dev/terrain-generation/)说明实现、持久状态与光影集成。
+

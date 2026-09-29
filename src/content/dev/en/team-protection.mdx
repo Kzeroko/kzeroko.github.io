@@ -1,0 +1,99 @@
+---
+title: "Team protection"
+description: "Player anchors, follower ownership, damage attribution and non-beneficial effect filtering."
+category: systems
+order: 140
+updated: 2026-09-19
+---
+
+Team protection compares the player behind each combatant. A live follower shares its owner's side, while damage attribution can resolve a projectile or owned entity to its immediate owner; this keeps the same rule available to damage, effects and targeting.
+
+## What it does
+
+The internal `TeamAllegiance`, `TeamDamageGuard` and `TeamStatusEffectGuard` classes live under `internal.team`. They are not public API facades. Same-team membership delegates to IsekaiCore's `TeamLogic.server().areOnSameSide`; this checkout consumes `isekaicore_version=0.4.0-build61`.
+
+The integration does not define a second party roster or persist alliance state. NPC follower ownership remains governed by the live follower session, and formal team semantics belong to IsekaiCore.
+
+## Runtime model
+
+### Anchors and side comparison
+
+| Entity | Player anchor |
+| --- | --- |
+| Player | Its UUID. |
+| NPC on the server | Following UUID only while `hasActiveFollowerOwnership()` succeeds. |
+| NPC on the client | Tracked following UUID only in FOLLOW mode; no server-session validation. |
+| Other entity or null | None. |
+
+`areAllied` returns false for null inputs, the same entity reference, or either missing anchor. Equal anchor UUIDs return true immediately. Distinct anchors require an available server and the delegated team comparison. The default overload passes `includeAllies=false`; callers must explicitly opt into formal allied-team handling.
+
+Client presentation can therefore recognise the same owner from tracked state, but should not infer authoritative cross-team membership without a server. `arePlayersOnSameSide` also rejects null or identical player references and always delegates with `includeAllies=false`.
+
+### Damage and effects
+
+`responsibleFor` resolves exactly one ownership step: a projectile's owner first, otherwise an `Ownable` owner, otherwise the original entity. A missing owner also returns the original entity. It does not recursively traverse nested ownership, and `areAllied` itself does not perform this resolution.
+
+Damage checks the responsible entity from `DamageSource.getAttacker()`, then the responsible direct source when it differs. An allied result from either side marks friendly fire. The event listener returns the original value for damage at or below `0`, otherwise returns `0` for friendly fire.
+
+| Pair after source resolution | Team guard result |
+| --- | --- |
+| Player → teammate | Blocked when the delegated team check agrees. |
+| Player → own follower | Blocked. |
+| Player → teammate's follower | Blocked when owner anchors share a team. |
+| Follower → owner, owner's teammate or allied-owner follower | Same anchor/team rule. |
+| Player/follower → unowned or expired-session NPC | No team protection from this resolver. |
+| Responsible entity → itself | No allied match for that comparison. |
+| Source without an identifiable player/follower anchor | No team protection from this resolver. |
+
+An ordinary self-inflicted source therefore passes this guard. There is no blanket early return for self-damage: if the damage source's other independently resolved end identifies a different ally, that end can still block it. Other combat rules can reject damage that this guard permits.
+
+The status-effect wrapper runs on the server and defines “harmful” as `!effect.getEffectType().isBeneficial()`. This includes neutral effects as well as harmful ones. It calls the team guard before debuff-accuracy rolls, tenacity adjustment and the original application. Beneficial effects bypass team filtering. A null source has no anchor and is not blocked; callers must supply attribution if they want protection.
+
+`TeamStatusEffectGuard.isBlocked` itself only checks allegiance after one ownership step. It takes no effect parameter, so the wrapper is responsible for the non-beneficial classification. Do not call that method as though it distinguishes buffs from debuffs.
+
+### Integration points
+
+| Entry point | Contract |
+| --- | --- |
+| `LivingEntityEvents.SHOULD_DAMAGE` | Registered damage listener changes the damage amount. |
+| `BaseNpcEntity.damage` | Server friendly-fire rejection occurs before NPC attempt hooks, dodge checks and `super.damage`. |
+| `BaseNpcEntity.tryAvoidProjectilePassThrough` | Friendly fire returns false before avoidance handling; this does not itself request projectile pass-through. |
+| `LivingEntity.addStatusEffect(effect, source)` wrapper | Server non-beneficial effects can return false before application. |
+| `EntityUtil.areBroadAllies` | Delegates to `TeamAllegiance.areAllied`, forwarding the caller's allied-team flag. |
+| `NpcTargetDamageGuard` | Separate outgoing-player target discipline; resolves NPC sources and asks whether that NPC may damage the player. |
+
+Early NPC rejection avoids entering its ordinary damage path. The global amount listener is a different integration point and must not be described as cancelling every possible hurt-side effect. The bystander guard also differs from team protection: a player can be spared because the NPC is not fighting them, even without a shared team.
+
+## Contracts
+
+Mutate follower/team ownership through its owning system on the server. These helpers query current state and provide no caching, registration lifecycle or thread marshalling. Calling them from a packet worker does not move work onto the server thread.
+
+Preserve attacker and direct-source attribution when creating damage. For nested summons or projectiles, the current one-step resolver may still end at an entity with no anchor. Extending ownership traversal requires an explicit cycle/depth policy; there is no such policy in the present resolver.
+
+## Extending it
+
+Project-internal targeting can share the default protection rule:
+
+```java
+static boolean canConsiderTarget(LivingEntity attacker, LivingEntity candidate) {
+    return candidate != attacker
+            && candidate.isAlive()
+            && !TeamAllegiance.areAllied(attacker, candidate);
+}
+```
+
+This is a candidate filter, not full damage permission. Use the damage source guard when deciding a concrete hit, and preserve the NPC target-intent checks for bystanders.
+
+## Verifying
+
+- Test players, their own followers and teammates' followers with melee, arrows and attributed effects.
+- Expire follower ownership by disconnecting, dismissing and loading stale saved state; ensure a tracked UUID alone does not protect the server NPC.
+- Compare direct self-costs, beneficial effects, neutral effects, non-beneficial effects with null source, and nested owned sources.
+- Use a source whose attacker and direct source differ; confirm both resolution paths are considered.
+- Distinguish the NPC's early rejection, the global amount listener and outgoing bystander protection while observing damage, knockback, aggro and projectile behaviour.
+
+## Related
+
+- [NPC followers](/en/dev/npc-followers/) — live ownership and session rules.
+- [NPC combat](/en/dev/npc-combat/) — targeting and bystander discipline.
+- [Reputation runtime](/en/dev/reputation-runtime/) — faction relations, a separate relationship system.

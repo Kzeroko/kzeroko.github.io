@@ -1,0 +1,199 @@
+---
+title: "地下城运行时"
+description: "原生会话生命周期、结构放置、重启恢复、聚合 NBT 与内部扩展约定。"
+category: systems
+order: 174
+updated: 2026-09-19
+---
+
+原生地下城运行时在服务端管理会话成员、实例放置、遭遇进度与临时强化。持久数据集中在一个聚合状态中，玩家组件和客户端界面只是它的运行时投影。
+
+## 它做什么
+
+`internal.dungeon` 属于内部子系统，并不是公开的 `DungeonAPI` 门面。`DungeonSessionManager.init()` 安装刻、连接、死亡及实体加载钩子，注册内置强化并启用虚空脱离恢复。定义由 `DungeonDefinitionLoader` 加载；完整编写规则见[地下城数据](/zh-cn/wiki/dungeon-data/)。
+
+`DungeonWorldPolicy` 将内置的 `isekaiexpansion:dungeon_instance` 与所有已加载定义引用的维度视为地下城世界。这项策略作用于整个维度，不限于已放置实例的包围盒。
+
+## 运行时模型
+
+### 进入、放置与成员关系
+
+`tryEnter` 拒绝旁观者、已处于活动会话的参与者和未知定义。它按定义 ID 与实体入口的 `GlobalPos` 复用活动会话；若不存在，则为该入口分配固定槽位并创建会话。`SOLO` 记录玩家 UUID 作为队伍键，其他策略使用任务队伍解析器；复用入口时不会比较队伍键。
+
+槽位映射到网格：列为 `floorMod(slot, 2048)`，行为 `floorDiv(slot, 2048)`；行列乘以配置的间距，Y 使用配置的基础高度。删除会话仍保留入口分配。槽位不会回收，也不取决于玩家所在维度或队伍。
+
+`DungeonStructureService` 规划拼图结构，检查部件及锚点覆盖，验证 `256` 区块的布局预算和 `1024` 区块的带边界预加载预算，然后同步放置。保护边界为 `1` 区块。放置随机数使用世界种子、锚点和定义 ID；规划使用 Minecraft 的结构上下文。该服务不保留区块加载票据。
+
+首个参与者绑定前，服务会寻找安全到达点，将脚部精确坐标保存为方块底面中心上移 `0.02` 格。搜索范围为水平 `8` 格、垂直 `8` 格。已有参与者时，`setSpawnPosition` 会抛出异常。若保存的到达点不再安全，可触发确定性的布局恢复，但恢复后必须让原有坐标重新安全。
+
+放置成功后，新会话重置引用的门控制器，绑定玩家并传送。放置失败会移除刚创建的会话；进入失败会解除该玩家绑定，并在会话为空时移除会话。成功进入时，新会话先派发 `SESSION_STARTED`，随后派发 `PLAYER_ENTERED`，并运行各自对应的脚本。
+
+传送会清空速度与下落距离。玩家先移动，随后 `NpcFollowerSync.transferFollowersToPlayer` 按自身放置规则转移已加载的随从。返回坐标为入口方块底面中心上移 `0.02` 格，并重置传送门冷却。返回维度缺失或传送失败时，参与者仍保持绑定，以便后续恢复。
+
+### 刻更新、危险遭遇与完成
+
+服务端使用主世界游戏时间。每刻先移除空会话，跳过已结束会话，并让定义已消失或限时已到期的活动会话失败。即使所有参与者都离线，截止时间检查仍会执行。
+
+普通脚本和危险遭遇需要会话维度内有在线参与者。`TICK` 脚本每 `20` 刻运行。撤离使用正数的完成截止时间表示，此时状态仍为 `ACTIVE`；撤离期间暂停危险遭遇与刻脚本，仅在到期且有参与者在场时完成。原有限时截止时间先于撤离完成检查。
+
+危险遭遇保存波次快照。每个批次只尝试一次生成，随后推进批次索引。生成以半径 `1.25` 格圆环上的点为锚点，最多尝试 `48` 次，搜索半径最多 `3` 格，垂直深度与高差限制为 `2`。生物使用 `SpawnReason.EVENT` 初始化并设为持久存在，然后应用编写的 NBT，同时保留变换与 UUID。具有非空编写 NBT 的实体获得装备保留标签；所有生成实体均获得 `ise_dungeon_hazard:<sessionUUID>:<hazardUUID>` 归属标签。
+
+内存中的实体索引用于加速死亡回调。每 `10` 刻的存活检查会移除已加载且死亡或被移除的实体；已卸载实体的 UUID 仍保留。实体加载时，若标签对应的会话或危险遭遇已不存在，或维度不匹配，则丢弃实体；有效实体重新加入危险遭遇。最后一个危险遭遇移除后，运行时派发 `HAZARD_CLEARED`，执行脚本并提供符合条件的强化选择。
+
+完成时先设为 `COMPLETED`，派发 `SESSION_FINISHED`，再清理危险遭遇。每个在线参与者触发进度与任务完成记录，清空强化并尝试返回、离开会话。失败时设为 `FAILED`；定义和发起者可用时派发结束事件，然后让在线参与者返回，但不授予完成记录。两条路径都会清空其余持久强化与待选进度；只要离线或返回失败的参与者仍绑定，会话就继续保留。
+
+离线参与者重连时不会补发完成记录。重连至已结束会话会清空临时组件并尝试返回、离开；重连至活动会话则恢复经过规范化的等级、HUD 与待选强化。断开连接会保存组件等级并清空镜像，但不会解除成员关系，也不会暂停截止时间。
+
+### 死亡与虚空恢复
+
+`PlayerManagerDungeonRespawnMixin` 包装原版玩家重建过程。`DungeonRespawnController.prepare` 在死亡实体移除前保存原出生设置。对于 `MUST_COMPLETE`，它验证或恢复布局，并通过临时原版出生点提供会话内保存的坐标。包装器在 `finally` 中恢复旧玩家的原出生点；完成阶段也会恢复新玩家的设置。
+
+原版注册新玩家后，控制器强制校正到精确目标。同世界偏差的平方距离大于 `1.0E-6` 时，通过网络传送校正；维度错误时使用 Fabric 传送。随后清空速度与下落距离，并恢复会话组件、HUD 与待选强化。准备或执行目标失败时，会话失败，刚重生的玩家保留在原版重生结果处。
+
+没有 `MUST_COMPLETE` 时，普通死亡沿用原版重生，并解除该参与者绑定，不额外传回入口；其他参与者可以继续。有效必通关会话中的虚空伤害另行处理：取消伤害，并安排在刻结束时强制离开。这条路径绕过自愿使用返回传送门的限制。
+
+### 世界保护与客户端展示
+
+地下城世界钩子取消自然刷怪，使爆炸保留方块，限制非创造玩家破坏、放置方块和放置流体，并拒绝通用实体方块修改。这些是具体钩子的保护范围，不保证拦截其他模组直接修改世界的所有路径。
+
+HUD 数据包发送标题、难度、会话身份及会话与撤离时间段，不发送完整持久会话。客户端使用不可变的 volatile 快照。打开界面、关闭 HUD 或没有未来倒计时时，ModernUI 覆盖层隐藏；撤离倒计时优先于会话计时。
+
+`DungeonCountdownClock` 使用单调时间，以每秒 `20` 刻对捕获的游戏时间段插值。它只影响展示：权威时间仍是服务端游戏时间，卡顿或暂停时两者可能偏离。强化界面不暂停游戏，也拒绝普通关闭操作；选取后发送意图并开始自身退出动画，不等待服务端确认。
+
+### 聚合 NBT
+
+主世界文件为 `data/isekaiexpansion/dungeon/runtime_v2.dat`，通过 `IsekaiPersistData` 打开。不会读取或迁移以前的拆分存储文件。下表描述该状态内部的载荷；方块实体与物品 NBT 另见编写页面。
+
+### 聚合状态与分配
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Version` | `int` | 2 | 必须等于 2；缺失或其他值会记录警告并丢弃整个聚合状态。 |
+| `Allocations` | `list<compound>` | [] | 实体入口到固定槽位的映射；无效条目记录错误后跳过。 |
+| `Allocations[].Dimension` | `string` | 必填 | 入口世界标识符；无效时跳过该分配。 |
+| `Allocations[].Pos` | `long` | 0 | 压缩的入口方块坐标。 |
+| `Allocations[].Slot` | `int` | 0 | 非负且唯一；入口或槽位重复时拒绝该分配。 |
+| `Sessions` | `list<compound>` | [] | 会话记录；无效记录整体跳过并记录错误。 |
+
+### 会话记录
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Id` | `UUID int array` | 必填 | 会话 UUID；重复时拒绝后一个记录。 |
+| `Definition` | `string` | 必填 | 地下城标识符；语法无效时拒绝会话。 |
+| `Party` | `string` | "" | 保存的队伍键；读取器不拒绝空白值。 |
+| `Status` | `string` | 必填 | 精确使用 ACTIVE、COMPLETED 或 FAILED；无效则拒绝。 |
+| `Entrance` | `compound` | 必填 | 实体返回入口；必须存在对应分配。 |
+| `Entrance.Dimension` | `string` | 必填 | 有效世界标识符。 |
+| `Entrance.Pos` | `long` | 0 | 压缩的方块坐标。 |
+| `Instance` | `compound` | 必填 | 放置身份与已有参与者时不可改动的出生点。 |
+| `Instance.Dimension` | `string` | 必填 | 实例世界标识符。 |
+| `Instance.Origin` | `long` | 0 | 压缩的布局原点。 |
+| `Instance.Spawn` | `compound` | 必填 | 精确玩家脚部坐标；容器类型错误或缺失则拒绝。 |
+| `Instance.Spawn.X, Instance.Spawn.Y, Instance.Spawn.Z` | `double` | 数值字段必填 | 3 项均必须为有限数值；整数可按双精度读取。 |
+| `Instance.Slot` | `int` | 0 | 必须匹配入口分配的槽位。 |
+| `Instance.StructurePlaced` | `boolean` | false | 布局放置标记；进入时重新检查到达点安全性。 |
+| `Timing` | `compound` | 必填 | 服务端主世界游戏刻，并非实际时间戳。 |
+| `Timing.StartedAt, Timing.Deadline` | `long` | 0 | 读取时不钳制。Deadline > 0 时，当前时间达到该值即到期。 |
+| `Timing.CompletionStartedAt, Timing.CompletionDeadline` | `long` | 0 | 负数钳制为 0；完成截止时间为正表示正在撤离。 |
+| `Participants` | `list<compound>` | [] | 使用下述记录；参与者损坏或重复会拒绝整个会话。 |
+| `Hazards` | `list<compound>` | [] | 使用下述记录；危险遭遇损坏或重复会拒绝整个会话。 |
+| `Scripts` | `compound` | 必填 | 按脚本 ID 共享的重放状态。 |
+| `Scripts.Cooldowns` | `list<compound>` | [] | 重复脚本 ID 覆盖前面的值。 |
+| `Scripts.Cooldowns[].Script` | `string` | 必填 | 有效脚本标识符；语法无效时拒绝会话。 |
+| `Scripts.Cooldowns[].Until` | `long` | 0 | 下一次允许执行的刻；保存值读取时不钳制。 |
+| `Scripts.Executed` | `list<string>` | [] | 已执行脚本 ID 集合；无效 ID 会拒绝会话。 |
+
+### 参与者与危险遭遇记录
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Participants[].Player` | `UUID int array` | 必填 | 参与者 UUID。 |
+| `Participants[].Powerups` | `list<compound>` | [] | 只保留正等级；重复 ID 覆盖。此处不按注册表规范化保存等级。 |
+| `Participants[].Powerups[].Id` | `string` | 正等级时必填 | 有效强化标识符；未注册的身份仍保留，恢复组件时再过滤。 |
+| `Participants[].Powerups[].Level` | `int` | 0 | 忽略非正数；组件恢复时钳制到注册的最高等级。 |
+| `Participants[].Offer` | `list<string>` | [] | 有效标识符；按顺序去重，最多 3 项。无效标识符会拒绝会话。 |
+| `Hazards[].Id` | `UUID int array` | 必填 | 危险遭遇 UUID。 |
+| `Hazards[].Dimension` | `string` | 必填 | 危险遭遇世界标识符。 |
+| `Hazards[].X, Hazards[].Y, Hazards[].Z` | `double` | 0 | 传送门锚点；此读取器没有显式有限数值检查。 |
+| `Hazards[].Portal` | `UUID int array` | 无 | 可选传送门实体 UUID；无法识别的表示会被忽略。 |
+| `Hazards[].Wave, Hazards[].Spawn` | `int` | 0 | 波次与批次索引，下限钳制为 0；超出上界由运行时推进处理。 |
+| `Hazards[].NextProcess` | `long` | 0 | 下一次处理的绝对刻；直接读取，包括负值。 |
+| `Hazards[].Living` | `list<compound>` | [] | 受追踪实体 UUID 集合；已卸载实体仍保留。 |
+| `Hazards[].Living[].Id` | `UUID int array` | 缺失项跳过 | 跳过无法识别的 UUID 表示。 |
+| `Hazards[].Waves` | `list<compound>` | [] | 保存的波次快照，不随后续定义修改而变化。 |
+| `Hazards[].Waves[].Entries` | `list<compound>` | [] | 保存的有序生成批次。 |
+| `Hazards[].Waves[].Entries[].Entity` | `string` | 必填 | 有效实体类型标识符。 |
+| `Hazards[].Waves[].Entries[].Count` | `int` | 1 | 缺失先读为 0，再钳制为 1；范围 1–64。 |
+| `Hazards[].Waves[].Entries[].Delay` | `int` | 0 | 钳制到 0–12000 刻。 |
+| `Hazards[].Waves[].Entries[].X, Hazards[].Waves[].Entries[].Y, Hazards[].Waves[].Entries[].Z` | `double` | 0 | 相对危险遭遇锚点的生成偏移。 |
+| `Hazards[].Waves[].Entries[].EntityNbt` | `compound` | {} | 容器类型错误或缺失时为空；非空复合标签会被复制。 |
+
+参与者到会话的索引与下一个槽位计数在加载时重建，不参与序列化。加载器验证分配与会话的对应关系，拒绝重复会话 ID；同一参与者出现在多个会话时，优先保留 `StartedAt` 最新的成员关系，删除旧关系并标记修复后的状态为脏。开始时间相同时遵循底层稳定迭代顺序。
+
+参与者、危险遭遇或脚本的嵌套数据损坏，可能导致整个所属会话被丢弃。分配与会话错误按记录隔离；根版本不受支持则丢弃全部状态。加载器不会导入旧文件名、猜测缺失的出生坐标，也不会从会话反向补建缺失分配。
+
+传送门实体另外保存可选 UUID `DungeonSession`，以及值为 `ENTRANCE`、`INNER_RETURN` 或 `HAZARD` 的 `DungeonTheme`；主题缺失或无效时使用 `HAZARD`。这些是实体记录，不是成员关系的另一套权威状态。
+
+## 约定
+
+在服务端线程执行修改。`DungeonRuntimeState` 负责成员关系、索引一致性与脏标记；`get`、`all` 及会话访问器可能暴露可变的活动会话对象。`all` 复制集合，但不复制其中的会话。使用 `addParticipant`、`removeParticipant` 与进度设置方法；直接修改会话后调用 `markChanged`。受管会话检查要求对象与聚合状态中持有的实例完全相同。
+
+`DungeonEvents` 提供内部通知 `SESSION_STARTED`、`PLAYER_ENTERED`、`HAZARD_CLEARED` 和 `SESSION_FINISHED`。上下文包含活动的会话、定义引用及触发玩家。事件不能作为可取消的准入检查；数组式监听循环不捕获监听器异常。脚本同样先执行动作，再记录重放状态，没有通用异常屏障或回滚。
+
+下列网络通道均使用 `isekaiexpansion:` 前缀：
+
+| 通道 | 约定 |
+| --- | --- |
+| `sync_dungeon_hud` | S2C 活动标记；活动载荷另含会话 UUID、标题字符串（上限 `256`）、难度字符串（上限 `32`）及四个游戏时间 long。非活动时仅含标记。 |
+| `open_dungeon_powerup_offer` | S2C 会话 UUID 与最多 `3` 项选择：强化和图标 ID、稀有度字符串（上限 `32`）、当前等级、最高等级及是否可叠加。 |
+| `select_dungeon_powerup` | C2S 会话 UUID 与强化 ID；授予前由服务端验证活动成员身份、待选项与当前等级。 |
+| `open_dungeon_gateway_editor`、`configure_dungeon_gateway` | 编辑器快照与更新；地下城 ID 字符串上限 `256`，检查创造模式、操作员权限及方块类型。 |
+| `open_dungeon_script_editor`、`configure_dungeon_script_trigger` | 脚本 ID、半径、激活模式、间隔与视线标记的编辑快照和更新；ID 上限 `256`。快照半径为 double，更新半径为最多 `16` 字符的文本。更新还要求距离不超过 `8` 格。 |
+| `open_dungeon_unlock_controller_editor`、`configure_dungeon_unlock_controller` | 时间、声音及相对偏移的控制器快照与更新；解码拒绝超出 `0–256` 的目标数量；更新要求距离不超过 `8` 格。 |
+
+HUD 处理与强化界面打开调度到客户端线程；ModernUI 视图修改再交由 UI 线程。编辑权限由服务端检查。入口更新没有距离检查，另外两种编辑更新则有。
+
+## 扩展方式
+
+定义引用代码注册的 `DungeonRoguePowerup` 实现。在公共初始化阶段通过 `DungeonRoguePowerupRegistry.register` 注册；空值、展示 ID 不匹配和重复 ID 均被拒绝。`DungeonPowerupProgression.unique()` 只有一级，`stackable(maxLevel)` 至少要求 `2` 级。恢复时，已知 ID 的等级钳制到注册范围，未知 ID 不进入临时组件。
+
+实现 `onGranted`、`onEvent` 与 `onRemoved` 时，应遵守其生命周期。授予先持久保存提升后的等级，再调用 `onGranted`；只有成功返回后才清空待选项。因此，钩子抛出异常可能留下部分生效的状态。重连和重生恢复等级时不重放 `onGranted`；断开连接清空镜像时不调用 `onRemoved`。不要将这些钩子当作保证对称执行的资源获取与释放配对。
+
+事件包括实际承受或造成伤害、归功于玩家的敌人击败，以及 IsekaiCore 秒间隔事件。派发要求成员关系活动且玩家位于正确维度。内置效果与池字段见[地下城数据](/zh-cn/wiki/dungeon-data/)。
+
+脚本动作词汇由枚举和 switch 定义，不是可注册的解析器表。新增动作必须同时修改解析器、记录与运行时，并更新两种语言的参考文档。新增危险遭遇副作用还需处理保存与重启；单个活动实体 UUID 不能单独充当持久遭遇的权威状态。
+
+### 操作员命令
+
+命令位于 `/isekaiexpansion dev dungeon`，也可使用 `/ise dev dungeon`，要求权限等级 `2`。除 `list` 外均要求玩家命令源。
+
+| 后缀 | 操作 |
+| --- | --- |
+| 无后缀或 `status` | 报告绑定会话，包括已结束但仍等待离开的记录。 |
+| `list` | 按开始时间列出持久会话；支持控制台。 |
+| `enter <dungeon>` | 将调用者当前世界与方块位置作为实体入口，走正常进入流程。 |
+| `exit` | 强制返回并离开，绕过必通关限制。 |
+| `respawn` | 将存活的活动参与者传送到精确保存的出生点；不执行死亡重建。 |
+| `complete` | 立即完成活动会话，跳过撤离延迟。 |
+| `fail` | 使活动会话失败，并执行清理与返回流程。 |
+
+## 验证
+
+- 让不同队伍使用同一实体入口，再使用同一定义的第二个入口；核对复用与独立分配行为。
+- 检查缺失池或连接器、布局与预加载预算、受阻到达点恢复，以及返回维度不可用时成员关系仍被保留。
+- 在延迟批次、未加载存活实体、部分解锁的门、脚本冷却与待选强化期间重启。
+- 测试全员离线时的限时到期、无人位于地下城时的撤离，以及撤离结束前先达到原限时。
+- 在参与者有在线也有离线时完成；核对进度与任务完成记录的接收者，并确认结束记录保留到所有离开操作成功。
+- 测试普通死亡、必通关死亡、异常时恢复原出生点、错误维度校正及排队执行的虚空离开。
+- 对所有聚合记录做读写往返；拒绝根版本变化、缺失有限出生坐标、重复分配或会话、不匹配槽位及损坏的嵌套记录。核对重复成员保留最新会话的修复。
+- 测试重复或迟到的强化提交，以及抛出异常的授予钩子或监听器；检查持久状态与待选项，不假设有回滚。
+- 检查断线、暂停或卡顿及切换语言时的 HUD 与强化界面，以服务端截止时间为准。
+
+## 相关页面
+
+- [地下城数据与编写](/zh-cn/wiki/dungeon-data/)——全部定义与编写字段。
+- [持久状态存储](/zh-cn/dev/persistent-state/)——共享存储键与世界作用域。
+- [任务运行时](/zh-cn/dev/quest-system/)——完成记录派发。
+- [NPC 随从](/zh-cn/dev/npc-followers/)——队伍转移与到达点放置。
+

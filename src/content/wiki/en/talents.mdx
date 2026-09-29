@@ -1,0 +1,133 @@
+---
+title: "Talents"
+description: "Innate ranks, practice, combat bonuses, hidden aptitude and reading the talent screen."
+category: core
+order: 45
+updated: 2026-09-19
+---
+
+Talents give each character an innate rank from E to S. Practice can add up to 2 ranks, subject to that talent's hidden potential and the S ceiling; the effective rank controls its current bonuses even before the talent is revealed on screen.
+
+## What each rank changes
+
+### Weapons and dual wielding
+
+| Rank | Melee damage | Ranged damage | Melee speed per held weapon | Dual-wield damage | Dual-wield speed |
+| --- | --- | --- | --- | --- | --- |
+| E | ×0.80 | ×0.86 | −0.15 | ×0.84 | −0.20 |
+| D | ×0.90 | ×0.93 | −0.08 | ×0.92 | −0.10 |
+| C | ×1.00 | ×1.00 | 0 | ×1.00 | 0 |
+| B | ×1.06 | ×1.05 | 0 | ×1.07 | +0.07 |
+| A | ×1.12 | ×1.10 | +0.05 | ×1.14 | +0.14 |
+| S | ×1.20 | ×1.16 | +0.10 | ×1.22 | +0.22 |
+
+Damage entries are multipliers. Speed entries add directly to the attack-speed attribute; they are not percentage multipliers, even though the current talent screen formats them as percentages. Each hand's recognised melee weapon contributes its own speed entry. While both hands hold recognised, non-two-handed Better Combat weapons, dual-wield damage multiplies the weapon's melee bonus and dual-wield speed adds once.
+
+For example, S weapon talent with S dual-wield talent gives ×1.20 ×1.22 = ×1.464 talent damage before other combat modifiers. Two S melee weapon talents plus S dual wield add +0.10 +0.10 +0.22 = +0.42 attack speed.
+
+### Magic and energy
+
+| Rank | Spell damage | Cast time | Energy cost | Astral reserve base |
+| --- | --- | --- | --- | --- |
+| E | ×0.80 | ×1.50 | ×1.40 | ×0.60 |
+| D | ×0.90 | ×1.25 | ×1.10 | ×0.80 |
+| C | ×1.00 | ×1.00 | ×1.00 | ×1.00 |
+| B | ×1.06 | ×1.00 | ×0.85 | ×1.40 |
+| A | ×1.12 | ×1.00 | ×0.75 | ×1.80 |
+| S | ×1.20 | ×0.75 | ×0.50 | ×2.50 |
+
+Spell-school rank affects supported spell damage, positive cast duration for non-channelled spells, and energy cost. The reserve talent changes the base contribution to maximum Astral Energy; other capacity modifiers remain separate. Healing is not multiplied merely because the spell-damage column exists.
+
+Spell tiers require E for tier 1, D for 2, C for 3, B for 4, A for 5 and S for 6 or higher. These checks apply to the mapped schools when binding or casting; creative players bypass the talent requirement. A school without a talent mapping passes that particular check.
+
+## Practice and your ceiling
+
+| Milestone | Result |
+| --- | --- |
+| Proficiency 0–3 | No earned rank yet. |
+| Proficiency 4 | First earned rank, if potential permits. |
+| Proficiency 9 | Second earned rank, if potential permits. |
+| Innate S, or no growth potential | No trainable ladder. |
+| Room for only 1 rank | Training stops at proficiency 4. |
+| Room for 2 ranks | Training stops at proficiency 9. |
+
+A talent can have room for 0, 1 or 2 earned ranks. S is always the upper limit: an innate A talent can gain only 1 rank even with deep potential. Practice already earned changes the effective rank; it does not replace the innate rank.
+
+The cost of a proficiency step increases with proficiency and effective rank. Potential changes the extra cost above E; it does not reduce incoming practice awards. The first step at effective E costs 90 practice. The displayed next-step cost is the cost for that character, not a universal cost for everyone using the same weapon. At the talent's ceiling, further awards stop and leftover practice is cleared by normal levelling.
+
+| Practice source | Award | Condition |
+| --- | --- | --- |
+| Recognised melee damage processing | 8 | Trains the associated melee weapon talent. |
+| The same melee processing while dual wielding | 8 | Also trains Twin-Blade Coordination; it does not require a hit from each hand first. |
+| Recognised ranged damage processing | 11 | Trains the associated ranged weapon talent. |
+| Spell release with progress greater than 0.30 | 10 | Trains the mapped spell school. |
+| The same spell release | 4 | Also trains Astral Energy Capacity, regardless of whether that release pays a positive energy cost. |
+
+Awards require a server-side player outside creative/spectator mode, an existing talent entry and remaining room to grow. Visibility is not a requirement: unrevealed talents can still receive practice. Weapon awards happen during qualifying damage processing, not once per swing or only after a final positive health loss; they have no separate per-target cooldown here. Channel pulses alone do not give the spell-release awards.
+
+## Discovering and reading talents
+
+Open the talent tab from the inventory's extended tabs. Left-click a card to select its details; right-click to open its dossier. Escape closes the dossier first. The screen does not pause the game and captures its values when opened, so reopen it to inspect newly synchronised progress.
+
+Melee talents reveal after a qualifying attack action has at least one target. The dual-wield talent reveals through that same action when both weapons qualify. Ranged talents reveal on a qualifying shot at full draw progress of at least 1. Revealing a talent changes its visibility, not its rank.
+
+The Astral Energy and spell-school entries belong to the crystal-hidden group. This checkout provides the operator command `/ise talent reveal crystal <target>`; it does not currently wire an identification-crystal item interaction to that reveal. Ordinary spell practice does not reveal those entries.
+
+The card's practice band measures progress toward that talent's own reachable ceiling. The dossier separates proficiency level from practice toward the next step and describes whether potential is fixed, shallow, deep or spent. Raw potential is not displayed. An innate S talent has no ladder; a talent that reached its growth ceiling shows completion rather than promising more trainable levels. Hidden cards conceal their bonuses and mastery details.
+
+## Talent catalogue
+
+All IDs below belong to `isekaiexpansion`. Weapon mastery follows the recognised weapon type, not the item's display name.
+
+| Identifier | Display name |
+| --- | --- |
+| `isekaiexpansion:element_fire` | Fire Element Affinity |
+| `isekaiexpansion:element_frost` | Frost Element Affinity |
+| `isekaiexpansion:element_water` | Water Element Affinity |
+| `isekaiexpansion:element_wind` | Wind Element Affinity |
+| `isekaiexpansion:element_lightning` | Lightning Element Affinity |
+| `isekaiexpansion:element_earth` | Earth Element Affinity |
+| `isekaiexpansion:spell_arcane` | Arcane Origin |
+| `isekaiexpansion:spell_astral` | Astral Resonance |
+| `isekaiexpansion:spell_dark` | Abyssal Affinity |
+| `isekaiexpansion:spell_healing` | Life Weaver |
+| `isekaiexpansion:spell_light` | Divine Grace |
+| `isekaiexpansion:spell_soul` | Spirit Walker |
+| `isekaiexpansion:base_astral_energy` | Astral Energy Capacity |
+| `isekaiexpansion:melee_dual_wielding` | Twin-Blade Coordination |
+| `isekaiexpansion:melee_sword` | Sword Mastery |
+| `isekaiexpansion:melee_rapier` | Rapier Mastery |
+| `isekaiexpansion:melee_greatsword` | Greatsword Mastery |
+| `isekaiexpansion:melee_glaive` | Glaive Mastery |
+| `isekaiexpansion:melee_dagger` | Dagger Mastery |
+| `isekaiexpansion:melee_lance` | Lance Mastery |
+| `isekaiexpansion:melee_scythe` | Scythe Mastery |
+| `isekaiexpansion:melee_axe` | Axe Mastery |
+| `isekaiexpansion:melee_halberd` | Halberd Mastery |
+| `isekaiexpansion:melee_spear` | Spear Mastery |
+| `isekaiexpansion:melee_mace` | Mace Mastery |
+| `isekaiexpansion:melee_hammer` | Hammer Mastery |
+| `isekaiexpansion:melee_wand` | Wand Mastery |
+| `isekaiexpansion:melee_staff` | Staff Mastery |
+| `isekaiexpansion:melee_katana` | Katana Mastery |
+| `isekaiexpansion:melee_chakram` | Chakram Mastery |
+| `isekaiexpansion:melee_gauntlet` | Gauntlet Mastery |
+| `isekaiexpansion:melee_boomerang` | Boomerang Mastery |
+| `isekaiexpansion:range_bow` | Bow Mastery |
+| `isekaiexpansion:range_crossbow` | Crossbow Mastery |
+| `isekaiexpansion:range_gun` | Firearm Proficiency |
+| `isekaiexpansion:range_magigun` | Magigun Proficiency |
+
+Related weapon families have correlated growth potential, but they do not share accumulated practice. Blade, polearm, impact, thrown-melee, wand/staff, bow/crossbow and firearm families are separate; Divine Grace/Life Weaver and Abyssal Affinity/Arcane Origin form spell pairs. Twin-Blade Coordination has its own potential roll.
+
+## Interactions and data
+
+| System | Interaction |
+| --- | --- |
+| Identity | Talents are separate from race, class and profession selection. |
+| Combat | Weapon type and spell-school attribution determine which rank applies. |
+| Skill requirements | A talent-rank requirement reads the effective rank after practice. |
+| Respawn | Talent progress and reveal state copy to the new player. |
+| Operator reroll | Replaces ranks, potential and practice; reveal state is separate. |
+
+Definitions and training rules are registered by the mod rather than loaded from a talent JSON directory. See [talent runtime](/en/dev/talents/) for formulas, registration, saved fields and operator commands, [identity](/en/wiki/identity/) for progression layers, and [spell data](/en/wiki/spell-data/) for spell authoring.

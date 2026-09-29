@@ -1,0 +1,68 @@
+---
+title: "Wayfinding"
+description: "Ask knowledgeable villagers for directions and record a destination on a hotbar compass."
+category: world
+order: 80
+updated: 2026-09-26
+---
+
+Some villagers can direct you to a biome, remarkable landscape or structure in the current dimension. They describe a direction and journey length, and can mark one of your compasses after you choose the destination.
+
+## Who knows the way
+
+| Villager | Eligibility | Destinations | Search radius |
+| --- | --- | --- | --- |
+| Cartographer | Adult, awake, villager level 2 or higher. | Biomes, remarkable terrain, structures. | 16,384 blocks |
+| Farmer, fisherman or shepherd | Same conditions; a stable 1 in 3 UUID-based group is eligible. | Biomes and remarkable terrain. | 6,144 blocks |
+
+Reopening a conversation does not reroll a villager's knowledge. Hostile trade conversations do not offer wayfinding. During the interaction, both you and the villager must remain alive, in the same world and within 8 blocks, and the villager must have no current attacker.
+
+The consultation cooldown is 30 seconds per player, shared across villagers. It starts when the search is submitted, including a search that fails or is cancelled. It uses real elapsed time and is cleared on disconnect.
+
+## Asking for directions
+
+Choose the wayfinding request in an eligible villager's trade conversation. Trading remains a separate choice. Choose a category, then a destination from the dialogue's list:
+
+| Category | What appears |
+| --- | --- |
+| Lands and biomes | Biomes supplied by this dimension's generator. |
+| Remarkable landscapes | This mod's terrain families when the dimension uses its compatible terrain source. |
+| Settlements and landmarks | Structures with placements in this dimension; offered by cartographers. |
+
+Lists sort by translated label. Above 8 entries, click the search box or press `/` to search names or IDs. Up/Down, forward/back bindings and the wheel move selection; Page Up/Down moves 8 entries. A single row click or Enter confirms. The inventory binding also confirms while the search box is not focused; inside it, movement/inventory letters remain text input. Escape cancels a cancellable panel.
+
+Empty categories are omitted. A listed destination is a supported search target, not a guarantee that an instance exists within range. The search excludes nearby destinations using a default distance of 512 blocks.
+
+Biome searches also exclude sampled regions connected to the nearby biome, so moving a short distance within the same large biome does not necessarily produce a new destination. Structure searches reject structures whose bounds come too close. Terrain searches inspect generated landform plans and confirm their biome; none of these searches promises the mathematically nearest point.
+
+You can cancel the searching panel. If you close or replace the conversation, change dimensions, move away or otherwise lose a valid villager interaction, a late result will not be applied to that old panel. “I cannot point out another place” can mean no sampled destination, a busy search queue, an unsupported target or a work limit; it does not prove the destination is absent from the world.
+
+## Reading the answer
+
+Directions use 8 compass sectors: north, northeast, east, southeast, south, southwest, west and northwest. Journey descriptions use horizontal distance from where you started the search:
+
+| Horizontal distance | Description |
+| --- | --- |
+| Below 1,500 blocks | A short journey beyond the surrounding countryside. |
+| 1,500 to below 4,000 blocks | A fair journey. |
+| 4,000 to below 9,000 blocks | A long journey. |
+| 9,000 blocks or more | Beyond the lands most locals travel. |
+
+The dialogue gives these descriptions rather than numeric coordinates. Distances are from the original consultation position, not a position you reach while the search is running.
+
+## Marking a compass
+
+If a regular compass is in your 9-slot hotbar, the answer offers to record the destination. Choose the specific hotbar slot; a compass already carrying a lodestone position is labelled as replacing its existing mark.
+
+- **A single compass:** the selected stack receives the new mark.
+- **A stack of compasses:** one is split into the first empty hotbar slot and marked; the remainder stays in place.
+- **No empty hotbar slot:** a stacked compass cannot be marked. Use a single compass or free a hotbar slot.
+- **The offered stack changed:** the server refuses the write; leave the selected item, count and data unchanged until you confirm.
+
+Recording also rechecks the current dialogue, villager and destination dimension. The compass stores the destination's dimension and position with physical-lodestone tracking disabled, so recording does not require placing a lodestone. An existing mark is replaced only on the selected single compass. The saved point is a destination reference, not a checked safe landing location.
+
+## Where destinations come from
+
+Wayfinding has no separate destination JSON list. It reads the current dimension's biome source, structure placements and supported terrain families. Successful server data reloads clear cached lists and cancel pending searches; begin another consultation afterwards.
+
+[Vanilla changes](/en/dev/vanilla-changes/) explains villager conversation handling. [Wayfinding API](/en/dev/wayfinding-api/) covers search limits, operator commands and the compass save fields for developers and administrators.

@@ -1,0 +1,120 @@
+---
+title: "Spell integration"
+description: "Registration, delivery contracts, energy payment, item data and dependency bridges."
+category: systems
+order: 30
+updated: 2026-09-25
+---
+
+Spell integration uses Spell Engine's world registry and custom-delivery handlers. IsekaiExpansion's types under `spell` and `internal.spell` are internal integration points, not public API facades; [Spell data](/en/wiki/spell-data/) is the pack-author reference.
+
+## What it does
+
+The build pins Minecraft 1.20.1, Spell Engine 1.10.7+1.20.1, Spell Power 1.6.0+1.20.1, Ranged Weapon API 2.3.4+1.20.1 and Tiny Config 3.1.0+1.20.1. Fabric Loader is 0.19.5. These are this checkout's build inputs, not a claim that other versions are compatible.
+
+`IIsekaiSpell` owns ID, fresh definition, delivery callbacks and optional tooltip tokens. `IsekaiSpellRegistry.registerSpell` registers a custom handler, stores the instance and installs its definition supplier. `registerDefinition` registers only a definition. Duplicate local map IDs replace earlier entries; register during initialisation, before world registries are populated.
+
+## Runtime model
+
+`DynamicRegistrySetupCallback` creates fresh definitions in each spell registry. Resolve entries through `SpellRegistry.from(world)` for the current world; do not retain world registry entries in static state. Code-defined spells need no parallel JSON file.
+
+`IsekaiSpellDefinition` validates a sample immediately and every later factory result. Null spell, school, active/cast, target, delivery or cost fails registration. CUSTOM delivery also requires its custom object; the wrapper assigns the spell ID as its handler ID. The sampled school is cached, so factories must keep school identity consistent.
+
+| Callback | Trigger | Contract |
+| --- | --- | --- |
+| `onCast(IsekaiSpellContext)` | Non-channel custom delivery | Return true only for successful delivery; default false. |
+| `onChannelTick(IsekaiSpellContext)` | Channel custom delivery | Same success contract; default false. |
+| `onChannelRelease(IsekaiSpellContext)` | Successful RELEASE event for a channel | Cleanup/finalisation callback, default no-op. |
+| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, Map<String,String>)` | Tooltip token expansion | Add replacements for raw language tokens. |
+
+The adapter rejects client-world and non-player casters. Its context copies the target list and keeps the impact context supplied by Spell Engine. Channel release constructs a fresh impact context from current spell power; it is not the final delivery's context.
+
+### Casting and payment
+
+The pre-attempt gate bypasses creative players. Otherwise it rejects class-restricted magic unless the item is a scroll, rejects Stagger, checks talent eligibility and checks astral energy. A matching ongoing channel skips the extra admission energy check so it can finish without paying for another delivery.
+
+Energy cost is the nonnegative rounded product of the energy-map value, scroll multiplier, talent multiplier, every applicable origin cost power and airborne modifier. Missing map entries cost 0. Admission, consumption and tooltip code use the same cost function.
+
+| Event | Local cost behaviour |
+| --- | --- |
+| Successful channel delivery | Server delivery-return hook emits CHANNEL, which spends that delivery's energy. |
+| Channel cannot afford next delivery | The HEAD hook invokes normal RELEASE for the matching cast process and rejects delivery. |
+| RELEASE with progress above 0.30 | Non-channel spells pay energy; scroll count decreases by 1; spell and astral proficiency are awarded. Channels do not pay a release energy cost. |
+| Creative player | Admission and local consumption bypass costs. |
+
+The release threshold is strict: progress equal to 0.30 does not enter that payment/proficiency branch. Successful engine events are the inputs to this logic; do not manually emit a second local event after custom delivery.
+
+`SpellParametersMixin` multiplies positive non-channel cast duration by talent, origin haste powers and scroll cast multiplier. Instant and channel durations retain the upstream result. Builder `channel(duration, deliveryCount)` takes seconds and total deliveries, clamping delivery count to at least 1.
+
+### Casting movement
+
+`IIsekaiSpell.blocksMovementWhileCasting()` defaults to false. Returning true adds a live MOVE/JUMP constraint while that registered spell has an active Spell Engine cast process. `FallenDownSpell` enables it. The common action-disabler query merges this constraint with source-owned timed locks; the final client input stage applies the result after scripted locomotion. Item use, attacking and looking are unchanged, so the casting item can complete normally.
+
+Release, cancellation or replacement removes the cast constraint as soon as the process changes; other action locks remain. Dead and spectator players do not receive this constraint. This controls input and the existing immobility path, not teleportation, knockback or gravity. Check movement, sprinting, jumping and flight input during a cast, then interrupt and recast while another source owns a movement lock.
+
+### Cast HUD
+
+`SpellCastHudOverlay` reads the current Spell Engine cast on the game thread and publishes immutable snapshots to ModernUI. The centred strip combines the ability-slot frame, spell icon and name, remaining seconds and a school-coloured status-style meter. Charging fills the meter; channeling drains it. The strip follows the morph HUD's actual height, or occupies its top position when that HUD is hidden.
+
+`SpellHudMixin` suppresses the upstream slot and cast-bar drawing while retaining target and error feedback. The cast view fades and scales on entry and exit, interpolates placement changes and refreshes images after resource reload. Progress extrapolation is limited to one game tick; it does not continue across a paused client. Screens, hidden HUD state and disconnect clear the readout. The window takes no input and participates in `HudAPI` visibility suppression.
+
+### Items, cooldowns and resistance
+
+Scroll creation writes a CONTAINED `SpellContainer` using `SpellItemData.setSpellContainer`. Container values are immutable: replace them using copy/with methods. The full item lookup `SpellContainerHelper.containerFromItemStack` considers stack data, data-pack assignment, item default and fallback in that order; `SpellItemData.getSpellContainer` alone does not include assignments. These behaviours belong to Spell Engine's [pinned item implementation](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java).
+
+On Minecraft 1.20.1 the container is stored inside the stack's `spell_engine` compound. The reader does not fall back to an old root-level container. Prefer the item-data API over constructing this NBT directly.
+
+```text
+{spell_engine:{spell_container:{access:"CONTAINED",spell_ids:["isekaiexpansion:healing"]}}}
+```
+
+| NBT key | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spell_engine` | `compound` | absent | Dependency-owned per-stack spell data. |
+| `spell_engine.spell_container` | `compound` | absent | Codec-encoded container; absence permits assignment/default resolution. |
+| `spell_engine.spell_container.access` | `string` | `NONE` | Casting access enum; CONTAINED uses held spell IDs. |
+| `spell_engine.spell_container.spell_ids` | `list<string>` | empty | Spell IDs, using the same normalisation as assignments. Other container members follow the [data table](/en/wiki/spell-data/). |
+
+`ISpellCDManager` exports remaining cooldown ticks as max(0, endTick − currentTick) and restores nonnegative durations forcibly. `PersistentCompUtil` serialises those values into the player's cooldown component and clears the stored snapshot after restoring it.
+
+`SpellResistanceMixin` reduces generic resistance points by the attacker's clamped magic-penetration fraction before conversion; school-specific resistance is untouched. `SpellResistanceUtil` reads Spell Power's current curve, tuning, multiplier and cap for tooltip calculations. It does not own those config defaults.
+
+`IsekaiRangeProperties` preserves untouched `RangedConfig` members when changing damage, velocity or draw time. Absolute velocity is converted to a bonus by subtracting base velocity: 3 for bows, 3.15 for crossbows, 1 otherwise. Draw time takes ticks, clamps to at least 1, then converts to seconds minus 1. Items that do not implement `CustomRangedWeapon` are ignored.
+
+## Contracts
+
+Run registration in common initialisation and delivery world mutations on the server thread. Factory results must be fresh mutable definitions; after registry installation treat them as shared data. A custom delivery does not automatically execute placeholder impact coefficients—the handler's code owns its result.
+
+The definition builder defaults to CUSTOM delivery, AIM targeting and a damage placeholder. `unrestrictedCursorTarget` adds missing zero-coefficient DAMAGE and HEAL intent markers. Preserve custom delivery when using those markers; they are targeting metadata for custom handlers.
+
+The local energy loader reloads server data, but the current energy packet is sent on join only. Reconnect clients after energy-map changes to align admission predictions and tooltips. Spell definitions and item assignments follow the dependency's registry/startup lifecycle; a general data reload is not a guarantee that all spell state has been rebuilt.
+
+## Extending it
+
+A minimal internal custom spell can be registered with `IsekaiSpellRegistry.registerSpell(new ExampleSpell())` during initialisation. This illustrative handler heals a fixed amount; production healing that needs critical or school scaling should follow `HealingSpell` and `SpellHealingUtil`.
+
+```java
+final class ExampleSpell implements IIsekaiSpell {
+    public Identifier id() { return new Identifier("example", "mend"); }
+    public Spell createSpell() {
+        return IsekaiSpellDefinitionBuilder.custom(SpellSchools.HEALING)
+                .selfTarget().cast(1F).cooldown(3F).build();
+    }
+    public boolean onCast(IsekaiSpellContext context) {
+        context.caster().heal(1F);
+        return true;
+    }
+}
+```
+
+Builder `build()` returns the same mutable spell, not a defensive copy. Construct the builder inside `createSpell()`. Use the `Spell` received in a delivery or tooltip when reading the world's current definition.
+
+## Verifying
+
+After Java changes, run `./gradlew.bat compileJava`, then load an actual world: compilation does not apply mixins or decode registry data. Exercise standard success/failure, channel exhaustion and release, scroll consumption, creative bypass, school eligibility, critical healing/damage, cooldown restoration and disconnect/rejoin.
+
+Test spell registry JSON and network codec round trips, binding-table pool resolution and per-stack container persistence. Check client prediction, tooltip energy, hotbar and projectile visuals with matching dependency versions. These are verification procedures, not claims of an in-game test run.
+
+## Related
+
+[Spell data](/en/wiki/spell-data/) covers the pack format and loader limits. [Attributes and effects](/en/wiki/attributes-and-effects/) covers combat attributes.

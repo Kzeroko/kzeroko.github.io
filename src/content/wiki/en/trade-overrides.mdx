@@ -1,0 +1,157 @@
+---
+title: "Trade overrides"
+description: "Profession catalogues, offer selection, stacks and transactional reload validation."
+category: data
+order: 20
+updated: 2026-09-18
+---
+
+A trade override owns a villager profession's complete offer catalogue. You define offers by level and choose all eligible offers or a weighted subset; omitted levels contribute no offers.
+
+## Where the files live
+
+Use `data/<namespace>/trade_overrides/<path>.json`. One file targets one profession. For different resource IDs targeting the same profession, the `isekaiexpansion` namespace wins over every other namespace, then higher `priority` wins, then the lexicographically greater resource-ID string wins. Selection is for the whole definition, not a level-by-level merge. To replace bundled content, override its exact resource path or use an `isekaiexpansion` resource with suitable priority.
+
+## Minimal example
+
+This complete catalogue uses the same item-stack syntax as the bundled farmer file and needs no currency mod:
+
+```json
+{
+  "schema_version": 1,
+  "profession": "minecraft:farmer",
+  "levels": {
+    "1": [
+      {
+        "id": "bread",
+        "costs": [
+          {
+            "item": "minecraft:emerald"
+          }
+        ],
+        "result": {
+          "item": "minecraft:bread"
+        }
+      }
+    ]
+  }
+}
+```
+
+## Fields
+
+### Root fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `schema_version` | `integer` | required | Must be `1`; any other value rejects the catalogue update. |
+| `profession` | `identifier` | required | Villager profession. A syntactically valid but unregistered profession is filtered out. |
+| `priority` | `integer` | `0` | Within the same namespace authority, higher wins. Range −1000000…1000000. |
+| `requires_mods` | `array<string>` | `[]` | All listed mod IDs must be loaded; empty imposes no requirement. |
+| `excludes_mods` | `array<string>` | `[]` | Any loaded listed mod disables this definition; empty excludes none. |
+| `selection` | `object` | `{"mode":"all"}` | Missing or null selects all eligible offers. See selection fields. |
+| `selection.mode` | `enum(all, weighted)` | required in object | `all` selects every candidate; `weighted` samples without replacement after guaranteed offers. |
+| `selection.count` | `integer` | required for `weighted` | 1–64 offers per level. Forbidden in `all` mode. |
+| `levels` | `object` | required | At least one level key, 1–5. Each value is an offer array with at most 1024 entries; an empty array is accepted. |
+
+### Offer fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | `string` | required | Unique across every level in this file. Matches `[a-z0-9][a-z0-9_.-]*`. |
+| `costs` | `array<object>` | required | 1–2 stacks, at most one money stack. Currency is sorted into the first payment slot. |
+| `result` | `object` | required | Output stack, using the same stack schema as costs. |
+| `weight` | `integer` | `1` | Weighted selection weight, 1–100000. |
+| `guaranteed` | `boolean` | `false` | Eligible offer is selected before random candidates. Guaranteed entries per level must not exceed weighted count. |
+| `max_uses` | `integer` | `12` | Uses before restocking, 1–1000000. |
+| `villager_xp` | `integer` | level dependent | Defaults for levels 1–5: 2, 5, 10, 15, 30. Accepted range 0–1000000. |
+| `price_multiplier` | `number` | `0.0` | Finite value 0–100. A money cost forces the constructed offer's multiplier to zero. |
+| `demand` | `integer` | `0` | Initial demand, −1000000…1000000. A money cost forces initial demand to zero. |
+| `conditions` | `object` | `{}` | Missing or null imposes no conditions. Tested when offers are generated. |
+
+### Stack fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `money` | `integer` | required for currency | 1–9223372036854775807 bronze units. This must be the only key in a currency stack. |
+| `item` | `item id` | required for items | One ID or a nonempty array of unique IDs. A registered candidate is chosen uniformly; missing candidates are removed. |
+| `count` | `integer` | `1` | Fixed count or `[minimum, maximum]`, inclusive. Bounds 1–64, maximum at least minimum. Random count is independent of the item's native stack limit. |
+| `nbt` | `object` | `null` | Compound JSON or an SNBT string; parsed as a compound. Applied before other stack options; invalid syntax rejects the update. |
+| `custom_name` | `string` | `null` | Nonblank literal name, not a translation key; explicit null is invalid. |
+| `damage` | `integer` | `0` | 0–2147483647. Applied only to damageable items and capped at the item's maximum damage. |
+| `potion` | `identifier` | `null` | Potion ID; unregistered potions are ignored when constructing the stack. Explicit null is invalid. |
+| `enchantments` | `array<object>` | `[]` | Missing or null means none. Unknown registered-name lookups are skipped; does not validate item/enchantment compatibility. |
+| `enchantments[].id` | `identifier` | required | Syntactically valid enchantment ID. |
+| `enchantments[].level` | `integer` | required | 1–255; does not clamp to the enchantment's ordinary maximum. |
+
+### Condition fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `conditions.requires_mods` | `array<string>` | `[]` | All listed mods must be loaded. |
+| `conditions.excludes_mods` | `array<string>` | `[]` | None of these mods may be loaded. |
+| `conditions.villager_types` | `array<identifier>` | absent: unrestricted | One ID or a nonempty unique ID array. Matches the villager's type; an explicit empty array is rejected. |
+| `conditions.dimensions` | `array<identifier>` | absent: unrestricted | One ID or a nonempty unique ID array. Matches the world ID; an explicit empty array is rejected. |
+
+
+## Full example
+
+This selects 1 weighted offer and resolves its item candidate and count range when generating offers:
+
+```json
+{
+  "schema_version": 1,
+  "profession": "minecraft:farmer",
+  "levels": {
+    "1": [
+      {
+        "id": "bread",
+        "costs": [
+          {
+            "item": "minecraft:emerald",
+            "count": 2
+          }
+        ],
+        "result": {
+          "item": [
+            "minecraft:bread",
+            "minecraft:carrot"
+          ],
+          "count": [
+            1,
+            3
+          ]
+        },
+        "weight": 5
+      }
+    ]
+  },
+  "priority": 10,
+  "selection": {
+    "mode": "weighted",
+    "count": 1
+  }
+}
+```
+
+## Validation
+
+Unknown fields are rejected at every object level. Missing required fields, wrong types, duplicate offer IDs, invalid identifier syntax, out-of-range numbers and invalid NBT log errors and retain the previous catalogue; no parsed definitions from that update are installed. An empty text file is invalid JSON, and an empty object lacks required fields. The `levels` object cannot be empty, but its level arrays can.
+
+Integers must be exact integers; numeric strings and fractions are rejected. Mod lists reject blank or duplicate values. Unregistered professions are filtered out; an offer with no available item candidate is filtered out. Even if filtering leaves no offers, the selected definition still owns that profession and does not fall back to vanilla trades.
+
+Money stacks require `numismatic-overhaul` and its bronze, silver, gold and money-bag items. Silver is worth 100 and gold 10000 bronze units. Money costs occupy the first slot and force initial demand and price multiplier to zero. These values describe IsekaiExpansion's currency adapter.
+
+## Reloading
+
+Files load on the server at startup and on `/reload`. A successful update advances the catalogue revision. Existing villagers rebuild on their next offer lookup when revision or level changes. Seeds derive from villager UUID, profession, level, offer ID and saved stock rotation; reopening the merchant screen does not reroll offers.
+
+Generation includes every level up to the villager's current level. Rebuilding matches old offers by the items, counts and NBT of payment/output stacks. Matching offers retain uses capped at the new maximum, demand and special price, with existing currency-reputation data transferred. Changing only an offer ID does not determine state matching. Clients receive the actual merchant offers rather than selecting them locally.
+
+A villager restock grants one stored refresh chance, capped at one. The dialogue service spends it to rotate the current selection. Weighted catalogues keep guaranteed offers and prefer non-guaranteed IDs absent from the previous selection; when there are too few unseen candidates, repeats fill the remaining slots. The prior selection and rotation seed survive entity saves. `all` catalogues still include every eligible offer. See [Trading](/en/wiki/trading/) for bargaining and filters.
+
+REI previews read the bundled catalogue, not the server's reloaded overrides. They show available candidates after mod conditions, using minimum counts for ranged stacks; they do not represent a particular villager's weighted selection, type or dimension. Verify data-pack edits with a live merchant.
+
+## Related
+
+Trade prices can also interact with [Reputation](/en/wiki/reputation/).

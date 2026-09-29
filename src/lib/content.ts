@@ -40,11 +40,26 @@ async function localised<K extends CollectionKey>(
   return published(entries as unknown as Draftable[]) as unknown as CollectionEntry<K>[];
 }
 
+/* ------------------------------------------------------------ docs shell -- */
+
+/**
+ * The shape `DocsLayout` and `DocsSidebar` need, shared by `wiki` and `dev`.
+ * Structural on purpose: the two collections have different category unions
+ * and nothing in the shell cares which one it is rendering.
+ */
+export interface DocsGroup {
+  category: string;
+  entries: { id: string; data: { title: string } }[];
+}
+
+/** Which documentation section a page belongs to; picks its URL and UI strings. */
+export type DocsSection = 'wiki' | 'dev';
+
 /* ----------------------------------------------------------------- wiki -- */
 
 export type WikiEntry = CollectionEntry<'wiki'>;
 
-const WIKI_CATEGORY_ORDER = ['core', 'combat', 'crafting', 'world'] as const;
+const WIKI_CATEGORY_ORDER = ['core', 'combat', 'crafting', 'world', 'data'] as const;
 export type WikiCategory = (typeof WIKI_CATEGORY_ORDER)[number];
 
 export async function getWikiPages(lang: LocaleCode): Promise<WikiEntry[]> {
@@ -66,6 +81,37 @@ export interface WikiGroup {
 export async function getWikiGroups(lang: LocaleCode): Promise<WikiGroup[]> {
   const pages = await getWikiPages(lang);
   return WIKI_CATEGORY_ORDER.map((category) => ({
+    category,
+    entries: pages.filter((entry) => entry.data.category === category),
+  })).filter((group) => group.entries.length > 0);
+}
+
+/* ------------------------------------------------------------------ dev -- */
+
+export type DevEntry = CollectionEntry<'dev'>;
+
+const DEV_CATEGORY_ORDER = ['start', 'api', 'systems', 'client', 'assets'] as const;
+export type DevCategory = (typeof DEV_CATEGORY_ORDER)[number];
+
+export async function getDevPages(lang: LocaleCode): Promise<DevEntry[]> {
+  const entries = await localised('dev', lang);
+  return entries.sort(
+    (a, b) =>
+      DEV_CATEGORY_ORDER.indexOf(a.data.category) - DEV_CATEGORY_ORDER.indexOf(b.data.category) ||
+      a.data.order - b.data.order ||
+      a.data.title.localeCompare(b.data.title)
+  );
+}
+
+export interface DevGroup {
+  category: DevCategory;
+  entries: DevEntry[];
+}
+
+/** Dev pages grouped for the sidebar, preserving the canonical category order. */
+export async function getDevGroups(lang: LocaleCode): Promise<DevGroup[]> {
+  const pages = await getDevPages(lang);
+  return DEV_CATEGORY_ORDER.map((category) => ({
     category,
     entries: pages.filter((entry) => entry.data.category === category),
   })).filter((group) => group.entries.length > 0);
@@ -146,6 +192,7 @@ export async function getPageBySlug(lang: LocaleCode, slug: string): Promise<Pag
 
 const SECTION_BY_COLLECTION = {
   wiki: 'wiki',
+  dev: 'dev',
   codex: 'codex',
   blog: 'blog',
 } as const;
@@ -160,6 +207,15 @@ export function collectionPath(
 
 export function wikiPath(lang: LocaleCode, entry: { id: string }): string {
   return collectionPath('wiki', lang, entrySlug(entry));
+}
+
+export function devPath(lang: LocaleCode, entry: { id: string }): string {
+  return collectionPath('dev', lang, entrySlug(entry));
+}
+
+/** Path for a page in either documentation section, used by the shared shell. */
+export function docsPath(section: DocsSection, lang: LocaleCode, entry: { id: string }): string {
+  return collectionPath(section, lang, entrySlug(entry));
 }
 
 export function codexPath(lang: LocaleCode, entry: { id: string }): string {
@@ -181,7 +237,7 @@ export function blogTagPath(lang: LocaleCode, tag: string): string {
  * Slugs are shared across languages, which is what makes the language
  * switcher able to stay on the same page.
  */
-export async function localisedPaths<K extends 'wiki' | 'codex' | 'blog' | 'pages'>(
+export async function localisedPaths<K extends 'wiki' | 'dev' | 'codex' | 'blog' | 'pages'>(
   collection: K,
   langs: readonly LocaleCode[]
 ) {

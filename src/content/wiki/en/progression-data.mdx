@@ -1,0 +1,175 @@
+---
+title: "Progression graph data"
+description: "Identity graph fields, prerequisites, costs, validation and reload behaviour."
+category: data
+order: 135
+updated: 2026-09-19
+---
+
+A progression graph maps identities in one Origins layer to stable nodes and directed prerequisites. It controls which changes a player can unlock and return to; node position and rank are presentation fields.
+
+## Where the files live
+
+Use `data/<namespace>/progression_graphs/<path>.json`; the resource ID is `<namespace>:<path>`. One file defines one graph. Normal data-pack resource priority selects the file at an identical resource path; nodes from replacement files are not merged.
+
+Across different graph IDs, the same target may occur only once per layer. Graphs are processed by lexicographically sorted ID; the later conflicting graph is rejected in full. The same target in different layers does not collide.
+
+The bundled files are `isekaiexpansion:origin`, `isekaiexpansion:class` and `isekaiexpansion:profession`. To modify a bundled branch, replace its graph file. Adding another file containing the same layer/target creates an ownership conflict.
+
+## Minimal example
+
+This is the bundled race graph's base dragon node reduced to required fields. It loads as a graph but offers no transition until another node and an edge are added.
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "dragon_base",
+      "target": "isekaiorigins:dragon",
+      "position": [
+        0,
+        0
+      ]
+    }
+  ]
+}
+```
+
+## Fields
+
+### Graph
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `layer` | `identifier` | required | Origins layer; resolved when opening/activating, not during JSON parsing. |
+| `mode` | `enum(EVOLUTION, PROMOTION)` | required | Presentation mode. Parsing trims and ignores case; both modes use the same unlock rules. |
+| `nodes` | `array<object>` | required | At least 1 node; use at most 512 for network compatibility. See node fields. |
+| `edges` | `array<object>` | `[]` | Directed prerequisite links. Empty leaves every node disconnected; at most 1024 for network compatibility. |
+
+### Nodes
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `nodes[].id` | `string` | required | Graph-local persistence key matching `[a-z0-9_.-]{1,64}`. Must be unique. |
+| `nodes[].target` | `identifier` | required | Origin identity, unique within this graph and across graphs for the same layer. Eligibility is checked on activation. |
+| `nodes[].rank` | `string` | `"base"` | Presentation label; blank also becomes `base`. Keep within 64 characters. Uses `screen.isekaiexpansion.progression.rank.<lowercase rank>` when translated, otherwise readable text. |
+| `nodes[].position` | `array<number>` | required | Exactly 2 finite coordinates `[x, y]`, each −4–4. Positive x is right, positive y is down. Independent of prerequisites. |
+| `nodes[].hold_ticks` | `integer` | `30` | Client confirmation hold: 10–200 ticks (0.5–10 seconds); default 30 ticks (1.5 seconds). Rejected outside range, not clamped. |
+| `nodes[].icon` | `identifier` | `null` | Texture resource; absence draws the portrait fallback. Syntax checked at load, texture existence is not. Use the full `textures/...png` path. |
+| `nodes[].name` | `string` | `""` | Translation key overriding the Origin name; blank uses its name, or target ID if unresolved. Network limit 256 characters. |
+| `nodes[].description` | `string` | `""` | Translation key overriding the Origin description; blank uses that description or the missing-description text. Network limit 256 characters. |
+| `nodes[].requirements` | `array<object>` | `[]` | All conditions must pass on first unlock. Empty has no extra conditions; at most 16 for network compatibility. |
+
+### Edges
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `edges[].from` | `string` | required | Existing predecessor node ID. No self-edge or duplicate ordered pair. |
+| `edges[].to` | `string` | required | Existing destination node ID. Every incoming predecessor is required; directed cycles reject the graph. |
+
+### Requirements
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `nodes[].requirements[].type` | `enum(PLAYER_LEVEL, EXPERIENCE_LEVEL, ADVANCEMENT, ITEM)` | required | Condition type; parsing trims and ignores case. See behaviour table. |
+| `nodes[].requirements[].target` | `identifier` | `null` | Required for `ITEM` and `ADVANCEMENT`; respectively an item ID or advancement ID. Other types ignore it. Syntax is checked if supplied. |
+| `nodes[].requirements[].amount` | `integer` | `1` | Positive minimum level or item count. Must be at least 1 even for `ADVANCEMENT`, where it has no further effect. |
+| `nodes[].requirements[].consume` | `boolean` | `false` | Only `ITEM` and `EXPERIENCE_LEVEL` may set `true`. Paid once at first unlock; never charged for revisiting saved nodes. |
+
+| Type | Check | Consumption and exceptions |
+| --- | --- | --- |
+| `PLAYER_LEVEL` | Isekai Core player level ≥ `amount`. | Cannot consume; distinct from vanilla experience level. |
+| `EXPERIENCE_LEVEL` | Vanilla experience level ≥ `amount`. | Optional cost subtracts levels, not raw XP points. Creative still needs the level but pays nothing. |
+| `ADVANCEMENT` | Existing advancement is complete. | Cannot consume; unknown advancement fails the check. |
+| `ITEM` | Registered item and inventory count ≥ `amount`. | Optional item cost. Creative skips quantity and payment, but the item ID must still resolve. |
+
+All requirements are checked against the same pre-payment state, then costs are consumed sequentially. Duplicate costs for the same item or repeated experience-level costs are not aggregated during validation. Combine each consumable resource into one requirement; do not rely on separate rows proving the combined balance.
+
+A first unlock needs at least one incoming predecessor, and every predecessor must be the current node or saved as unlocked. An unvisited node with no incoming edge cannot be unlocked through this interface. Saved nodes bypass prerequisites and requirements on revisiting, but still need a valid target and undirected connectivity to the current identity.
+
+## Full example
+
+The following adds illustrative costs to an existing dragon branch. These costs are an authoring example; the bundled dragon branches currently have empty requirement lists. Use it as a replacement for `isekaiexpansion:origin` in a test pack: its reduced node list replaces the other bundled race nodes too.
+
+```json
+{
+  "layer": "origins:origin",
+  "mode": "evolution",
+  "nodes": [
+    {
+      "id": "dragon_base",
+      "target": "isekaiorigins:dragon",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "raevyx",
+      "target": "isekaiorigins:raevyx",
+      "rank": "advanced",
+      "position": [
+        0,
+        -2
+      ],
+      "hold_ticks": 30,
+      "icon": "isekaiexpansion:textures/gui/icon/origins/hdicon_raevyx.png",
+      "requirements": [
+        {
+          "type": "player_level",
+          "amount": 20
+        },
+        {
+          "type": "experience_level",
+          "amount": 12,
+          "consume": true
+        },
+        {
+          "type": "advancement",
+          "target": "minecraft:story/enter_the_nether"
+        },
+        {
+          "type": "item",
+          "target": "minecraft:amethyst_shard",
+          "amount": 8,
+          "consume": true
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "dragon_base",
+      "to": "raevyx"
+    }
+  ]
+}
+```
+
+## Validation
+
+Missing required fields, invalid identifier syntax, unsupported modes/types, wrong array shapes, non-finite/out-of-range positions, invalid holds, non-positive requirement amounts, duplicate node IDs or targets, unknown edge endpoints, self-edges, duplicate edges and directed cycles reject that file. The loader logs the failure and continues with other graphs; it replaces the previous catalogue with the successfully parsed and accepted graphs. It does not keep an old copy of a failed graph.
+
+Unknown keys are ignored. An empty object fails because required fields are missing; an empty node list fails. Explicit `null` is not omission: optional readers generally try to convert a present value and fail. Write proper JSON strings, integers and booleans; some primitive conversions are permissive, but they do not define extra supported field types.
+
+Syntactically valid layer, Origin, item and advancement IDs are not resolved at graph load. On activation the target must be nonempty, the layer enabled, and the target either a member of that layer for this player or marked special by Origins. Unknown item/advancement requirements fail when evaluated. Icon existence is a client resource concern. This loader does not enforce an Origin's ordinary-selection policy; configure that separately in the Origin definition.
+
+Keep the complete catalogue at most 64 graphs, each graph at most 512 nodes and 1024 edges, and each node at most 16 requirements. Keep rank labels within 64 characters and name/description keys within 256. These are network limits: the JSON constructor does not enforce all of them, so an oversized graph may pass loading and fail synchronisation.
+
+Graph IDs and node IDs are save keys. Renaming a graph or node does not migrate unlock history; reusing a saved ID gives the new target the old node's unlocked status. Deleted IDs are not pruned from player saves.
+
+## Reloading
+
+Definitions load as server data and reload with `/reload`. A successful complete reload pushes catalogue and player state to connected clients and invalidates open sessions, even if content is unchanged. Reopen the screen before confirming a node.
+
+Catalogue revisions derive from ordered graph content, including presentation fields and list ordering. Joining clients reuse an identical cached catalogue but always receive their own current state. Already accepted transformations retain their pending target across a graph reload; see [Progression runtime](/en/dev/progression/) for payment and interruption ordering.
+
+## Related
+
+- [Identity and progression](/en/wiki/identity/) — controls, current branches and returning to unlocked identities.
+- [Progression runtime](/en/dev/progression/) — sessions, persistence, packets and transformation.
+- [Origin icons](/en/dev/origin-icons/) — texture paths and portrait rendering.
+- [Morph data](/en/wiki/morph-data/) — powers and forms granted by identities.
+

@@ -1,0 +1,82 @@
+---
+title: "NPC 关系与隶属运行时"
+description: "关系归属、指令策略、契约暂存与交易持久化的内部约定。"
+category: systems
+order: 125
+updated: 2026-09-26
+---
+
+`NpcRelationships` 管理基础 NPC 的婚姻、好感操作和隶属。这些类型属于内部实现，不是附属模组门面。玩家规则见[NPC 隶属](/zh-cn/wiki/npc-allegiance/)。
+
+## 它做什么
+
+`NpcAccessPolicy` 分别判断管理、友好级与信任级权限，不改写好感。隶属仅向所属玩家授予指令权限。唯一 NPC 以 final 钩子拒绝隶属，绑定前也会检查 `isUnique()`。跟随会话仍归现有队伍组件管理。
+
+## 运行时模型
+
+实体数据追踪器同步所属玩家 UUID 与隶属类型。当前实体存档使用 `NpcRelationships`，不读取旧婚姻字段。唯一角色以世界婚姻记录为准，包括已经清除的绑定。关系快照不会根据最高好感推断婚姻。
+
+| 字段 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `NpcRelationships` | `compound` | 空 | 实体关系的唯一复合字段 |
+| `Spouse` | `compound` | 缺失 | 非唯一角色婚姻；唯一角色以世界状态为准 |
+| `Spouse.Uuid` | `UUID` | 存在绑定时必需 | 缺少 UUID 则没有配偶 |
+| `Spouse.Name` | `string` | 空 | 保存的玩家显示名 |
+| `Owner` | `UUID` | 缺失 | 持久隶属归属，不是临时跟随分配 |
+| `Bond` | `enum(contract, dark_magic)` | 不建立绑定 | 缺失或未知值均拒绝恢复所属玩家绑定 |
+
+`AllegianceContractLedger` 在世界持久数据中保存暂存实体快照，物品仅携带凭证 UUID。收纳时解除跟随归属，移除快照中的乘客与拴绳数据，并移除现存 NPC。兑现保留 UUID，检查所有已加载维度中的冲突，验证安全位置与目标资格，生成成功后才消耗凭证。这是服务端 tick 内的操作顺序，不是跨区块、玩家与持久数据存档的原子磁盘事务。
+
+| 物品字段 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `Claim` | `UUID` | 缺失 | 一次性账本查询；已消耗或未知凭证无法兑现 |
+| `NpcName` | `string` | 空 | 仅用于提示文本 |
+| `Recruit` | `compound` | 缺失 | 购得的契约凭据；生成新角色时必需 |
+| `Recruit.Race` | `identifier` | 必需 | 当前种族列表中的条目；缺失或无效时拒绝兑现 |
+| `Recruit.Role` | `enum(citizen, combat)` | 必需 | 选择市民或冒险者实体；缺失或未知时拒绝兑现 |
+
+`AllegianceRecruit` 是库存、拍品和契约共用的校验数据。`AllegianceRecruitSpawner` 选择 `CITIZEN` 或 `ADVENTURER`，设置种族，并在绑定前执行正常生成初始化。暂存凭证直接恢复保存的实体类型与状态，不重新初始化。不支持缺少职责的旧契约。 经纪人的竞拍文本和招募契约提示使用 `AllegianceRaces.name(race)`，以可翻译文本保留 Origins 的 `Origin.getName()`。名称使用起源配置的翻译键，按客户端语言显示；未加载的起源显示其标识符。
+
+`AllegianceRaces` 在每次 Origins 加载完成后重建招募池。`base()` 包含受支持、已加载且 Origins 的 `isChoosable()` 返回真值的起源；不可选择的起源进入进化种族池。缺失的起源不会进入任何池。经纪人库存和普通竞拍轮换使用 `base()`。分组依据已加载的数据，因此修改 `unchoosable` 会在下次重载时生效。
+
+脚本招募可调用 `AllegianceRaces.random(random)` 抽取基础种族，或显式调用 `AllegianceRaces.randomEvolved(random)` 抽取进化种族，再构造 `new AllegianceRecruit(race, role)` 并使用正常生成流程。空池会拒绝抽取，不会回退到另一池。契约数据和对话支持的种族列表仍包含进化种族。
+
+`AllegianceAuctionState` 将共享拍品与退款余额保存在 `npc/allegiance_auctions_v2`。经纪人库存沿用交易使用次数记录。竞拍按服务端主世界 tick 计时，在玩家交互时结算，因此未加载的经纪人不需要逐 tick 任务。
+
+| 持久字段 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `Contracts[]` | `array<compound>` | 空 | 契约账本条目 |
+| `Claim`, `Entity` | `UUID`, `compound` | 必需 | 凭证与暂存实体快照 |
+| `Lots[]` | `array<compound>` | 空 | 竞拍条目 |
+| `Broker`, `Closes`, `Price`, `Bidder` | `UUID`, `long`, `integer`, `UUID` | Bidder 缺失；其他值接受校验 | 经纪人身份、结束 tick、绿宝石出价与领先者；价格 8–60 |
+| `Recruit` | `compound` | 必需 | 与上方契约数据共用 `Race` 和 `Role` 字段；数据无效则跳过该拍品 |
+| `Refunds[]` | `array<compound>` | 空 | 离线退款条目 |
+| `Player`, `Amount` | `UUID`, `integer` | 必需 | 正数绿宝石余额 |
+
+## 约定
+
+变更只在服务端线程执行。普通项圈需要信任；暗魔法要求目标生命值不高于 25%。两者均拒绝唯一 NPC、已婚 NPC、已有隶属及正在跟随其他玩家的目标。建立隶属不修改好感。求婚处理会拒绝已有隶属的目标，也不会根据好感等级修复婚姻。
+
+所属玩家菜单的每次回调都会重新解析当前说话者，检查归属与距离。装备界面在使用时验证权限；随从指令与模式切换使用同一策略。指令反馈适配器使用隶属类型专属键及同类回退文本。战斗能力与队伍容量分别检查。
+
+竞价立即从背包暂存绿宝石，拒绝过期报价，并将被超价者的款项计入持久退款余额。领先者不能给自己加价。中标凭证跨重载保留，领取前不轮换拍品。每次领取退款最多交付 64 绿宝石。
+
+## 扩展
+
+可建立隶属的简单 NPC 继承 `BondableNpc`，战斗 NPC 继承 `BondableCombatNpc`，钩子为 `canPledgeAllegiance()`、`onAllegianceBound(owner, kind)` 和 `onAllegianceReleased(formerOwner)`。默认绑定钩子清除战斗并原地待命，解除后恢复游荡。`AdventurerNpcEntity` 是生成式战斗实现，使用标准战斗脑，具备物品使用能力，初始配备铁剑。唯一 NPC 仍无法建立隶属。处理游戏请求时不要绕过 `NpcRelationships` 的准入检查。
+
+对话解析在任务覆盖之后、普通菜单覆盖之前尝试 `npc/allegiance/<race>/<contract|dark_magic>/<route>/<phase>`，依次查找当前阶段和 `repeat`。隶属内容缺失时继续现有解析流程。种族与未知来源回退由 `AllegianceRaces` 定义，当前资源覆盖种族层全部 18 个条目。
+
+## 验证
+
+原型测试可用 `/summon isekaiexpansion:allegiance_broker` 放置经纪人。该实体没有自然生成规则，由世界作者放置在聚落中。
+
+运行`./gradlew.bat compileJava assembleLanguageFiles`。在游戏中检查招募、竞拍轮换、中标拍品保留及存档重载，并观察连续待机帧和共用骨架的 NPC 切换。
+
+在可丢弃的世界中验证普通与暗魔法准入、唯一 NPC、配偶、其他玩家的随从、满队、转让与兑现及重载、复制凭证的重复兑现、解除后的装备权限及同时出价。两种语言下检查每个轮盘回应和种族对话。从商店和竞拍分别兑现两种职责，确认冒险者攻击、市民逃跑，再分别转让并重载。让多个生成角色处于待机、移动、战斗、使用物品和死亡状态，确认体型比例保持稳定。这些是游戏内验收项，不代表无界面测试已经覆盖。
+
+## 相关
+
+- [NPC 运行时](/zh-cn/dev/npc/) — 实体行为与物品栏。
+- [NPC 对话](/zh-cn/dev/npc-dialogue/) — 入口与赠礼事务。
+- [对话工坊](/zh-cn/dev/dialogue-tools/) — 编写与验证。

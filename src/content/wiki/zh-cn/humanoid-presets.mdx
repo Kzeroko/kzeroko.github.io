@@ -1,0 +1,221 @@
+---
+title: "人形与 NPC 预设"
+description: "共享外观格式、玩家图库预设与 NPC 换装规则的完整参考。"
+category: data
+order: 100
+updated: 2026-09-27
+---
+
+玩家预设保存可重复使用的外观。NPC 预设保存角色基础外观及可选的换装覆盖。两者共用外观字段，但应用方式与解锁规则不同。
+
+## 文件位置
+
+| 路径 | 含义 |
+| --- | --- |
+| `data/<namespace>/humanoid_presets/<path>.json` | 玩家图库预设，ID 为 `<namespace>:<path>`。 |
+| `data/<namespace>/npc_presets/<path>.json` | NPC 预设，ID 为 `<namespace>:<path>`；NPC 必须使用该预设 ID。 |
+
+这些文件属于服务端数据包。模型和纹理属于独立的客户端资源。每个文件声明完整预设，不会作为补丁与其他预设合并。
+
+玩家预设名称使用 `humanoid_preset.<namespace>.<path>`，描述追加 `.desc`；换装名称使用 `npc_outfit.<namespace>.<preset_path>.<outfit_id>`。预设路径中的斜杠替换为点。
+
+## 最小示例
+
+将以下玩家图库条目保存为 `data/example/humanoid_presets/simple.json`，其中引用模组自带部件：
+
+```json
+{
+  "gender": "female",
+  "parts": {
+    "body": "isekaiexpansion:body/feminine",
+    "eyes": "isekaiexpansion:eyes/default"
+  },
+  "sort": 1000
+}
+```
+
+以下示例保存为 `data/isekaiexpansion/npc_presets/citizen.json`，修改自带市民衣柜。它保留市民外观生成流程，并添加明确需要奖励解锁的覆盖：
+
+```json
+{
+  "outfits": [
+    { "id": "default", "default": true },
+    {
+      "id": "without_hair",
+      "category": "hair",
+      "unlock": { "type": "granted" },
+      "parts": { "hair": "none" }
+    }
+  ]
+}
+```
+
+奖励记录按玩家保存，以预设 ID 和换装 ID 为键，因此对使用同一预设的所有 NPC 生效。
+
+## 字段
+
+### 共享根字段与预设元数据
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `gender` | `string` | `female` | `female` 或 `male`，忽略首尾空格与大小写；未知值使用默认值。 |
+| `age` | `integer` | `18` | 限制为 12–400；属于身份信息，与身高分别设置。 |
+| `nickname` | `string` | `""` | 移除格式控制符和控制字符，最多保留48个UTF-16单位且不拆分码点，再去除首尾空格；Unicode控制字符、格式字符与分节符都会移除。非空结果启用昵称。 |
+| `preset_name` | `identifier` | `absent` | [姓名池](/zh-cn/wiki/name-pools/)中的可翻译全名ID，最长256字符。与`nickname`互斥；语法无效时拒绝预设。启用姓名显示。 |
+| `origin` | `identifier` | `absent` | 种族提示；无效标识符会清空。应用玩家预设时保留玩家实际种族。 |
+| `build` | `object` | `neutral` | 体型设置，见下表；未填写的成员使用默认值。 |
+| `face` | `object` | `neutral` | 面部设置，见下表；未填写的成员使用默认值。 |
+| `palette` | `object` | `channel defaults` | 下表通道的 RGB 颜色；忽略未知通道。 |
+| `parts` | `object` | `{}` | 槽位到部件的映射。空对象不会创建模型；玩家验证流程可以补充必需部件。 |
+| `parts.<slot>` | `string / object / null` | `absent` | 部件 ID、`{part, style}` 或空部件。槽位及覆盖语义见下文。 |
+| `parts.<slot>.part` | `identifier` | `required in object` | 缺失或格式无效时移除此引用；是否存在由后续流程检查。 |
+| `parts.<slot>.style` | `string` | `default` | 去除首尾空格并转为小写，只允许 `a-z`、`0-9`、`_`、`-`，最多 64 个字符。无效值改为 `default`。 |
+| `sort` | `integer` | `1000` | 图库排序；玩家预设先按此值，再按完整标识符排序。 |
+| `tags` | `array<string>` | `[]` | 去除首尾空格并转为小写，移除空项并去重。玩家预设标签须在 48 个字符以内，以便网络同步。 |
+| `unlock` | `object` | `always` | 玩家预设规则元数据；当前预设图库不执行此条件。NPC 预设对各套外观分别设置规则。 |
+| `fixed_gender` | `boolean` | `false` | 仅用于 NPC 预设；设置 NPC 外观时强制使用预设性别。独特 NPC 本身也会固定性别。 |
+| `outfits` | `array<object>` | `fallback default outfit` | 仅用于 NPC 预设。缺失或空数组会生成始终可用的 `default` 外观，不含部件覆盖或属性加成。 |
+
+玩家预设允许空对象，此时得到没有显式部件的默认外观。应用完整预设会替换体型、面部、配色和部件，更改性别，并保留玩家年龄、角色姓名与种族。仅应用选定部件类别时，只覆盖对应槽位；身体类别同时复制体型，面部类别同时复制面部参数，且**每次局部应用都会复制整套配色**。
+
+NPC 预设只要包含任意外观字段就会被视为手工指定，即使 `parts` 是空对象。基础 NPC 使用该外观。市民重写了初始外观解析，始终生成外观，其预设主要提供衣柜。生成过程与实体接入方式见 [NPC 资源](/zh-cn/dev/npc-assets/)。
+
+### 体型
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `build.height` | `number` | `1.8` | 1.20–2.05。身高，单位为格。 |
+| `build.torso_width` | `number` | `1` | 0.85–1.20。躯干宽度倍率。 |
+| `build.arm_length` | `number` | `1` | 0.90–1.10。手臂长度倍率。 |
+| `build.arm_thickness` | `number` | `1` | 0.85–1.15。手臂粗细倍率。 |
+| `build.leg_length` | `number` | `1` | 0.90–1.10。腿部长度倍率。 |
+| `build.leg_thickness` | `number` | `1` | 0.85–1.15。腿部粗细倍率。 |
+| `build.head_scale` | `number` | `1` | 0.90–1.10。头部缩放倍率。 |
+| `build.chest_size` | `number` | `1` | 0–2。胸部缩放；允许为零。 |
+| `build.chest_lift` | `number` | `0` | -1–1。胸部抬升调整。 |
+| `build.chest_spread` | `number` | `0` | -1–1。胸部展开调整。 |
+
+身高及除 `chest_size` 之外的倍率要求为正有限值：零、负数及非有限值恢复默认值，其他值限制到表内范围。`chest_size`、`chest_lift` 和 `chest_spread` 对有限值进行范围限制，非有限值恢复各自默认值。错误的 JSON 类型可能导致整个文件加载失败。
+
+### 面部
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `face.eye_spacing` | `number` | `0` | -1–1。双眼水平间距。 |
+| `face.eye_height` | `number` | `0` | -1–1。眼睛垂直偏移。 |
+| `face.eye_depth` | `number` | `0` | -1–1。眼睛深度偏移。 |
+| `face.eye_scale` | `number` | `1` | 0.82–1.24。眼睛缩放倍率。 |
+| `face.eye_tilt` | `number` | `0` | -1–1。眼睛倾斜调整。 |
+
+带正负号的面部参数限制为 -1–1，非有限值改为 0。眼睛缩放要求为正有限值，否则改为 1。这些参数调整共享骨架，部件需要使用对应骨骼才能显示调整效果。
+
+### 配色
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `palette.skin` | `RGB` | `#FFFFFF` | `skin` 染色通道。 |
+| `palette.eye_left` | `RGB` | `#4F8FC0` | `eye_left` 染色通道。 |
+| `palette.eye_right` | `RGB` | `#4F8FC0` | `eye_right` 染色通道。 |
+| `palette.eye_sclera` | `RGB` | `#F6F3EE` | `eye_sclera` 染色通道。 |
+| `palette.hair_base` | `RGB` | `#2B2B33` | `hair_base` 染色通道。 |
+| `palette.hair_tip` | `RGB` | `#3A3A46` | `hair_tip` 染色通道。 |
+| `palette.eyebrow` | `RGB` | `#2B2B33` | `eyebrow` 染色通道。 |
+| `palette.lip` | `RGB` | `#C97A78` | `lip` 染色通道。 |
+| `palette.blush` | `RGB` | `#E39C96` | `blush` 染色通道。 |
+| `palette.trait_primary` | `RGB` | `#FFFFFF` | `trait_primary` 染色通道。 |
+| `palette.trait_secondary` | `RGB` | `#CCCCCC` | `trait_secondary` 染色通道。 |
+| `palette.outfit_primary` | `RGB` | `#FFFFFF` | `outfit_primary` 染色通道。 |
+| `palette.outfit_secondary` | `RGB` | `#FFFFFF` | `outfit_secondary` 染色通道。 |
+| `palette.outfit_accent` | `RGB` | `#FFFFFF` | `outfit_accent` 染色通道。 |
+| `palette.underwear_primary` | `RGB` | `#FFFFFF` | `underwear_primary` 染色通道。 |
+| `palette.underwear_secondary` | `RGB` | `#FFFFFF` | `underwear_secondary` 染色通道。 |
+| `palette.accessory_primary` | `RGB` | `#FFFFFF` | `accessory_primary` 染色通道。 |
+| `palette.accessory_secondary` | `RGB` | `#CCCCCC` | `accessory_secondary` 染色通道。 |
+| `palette.accessory_accent` | `RGB` | `#FFFFFF` | `accessory_accent` 染色通道。 |
+
+颜色接受整数或十六进制字符串，字符串可带 `#` 或 `0x` 前缀；没有前缀的字符串也按十六进制解析。仅保留低 24 位，忽略透明度。缺失通道保留表内默认颜色；显式 null 或无效十六进制文本改为 `#FFFFFF`。颜色字段使用数组或对象可能导致解析失败。
+
+### 部件槽位与覆盖
+
+| 类别 | 槽位 |
+| --- | --- |
+| `body` | `body` |
+| `face` | `face`, `eyes`, `eyebrows`, `facial_hair` |
+| `trait` | `trait_ear`, `trait_horn`, `trait_tail`, `trait_wing`, `trait_other` |
+| `hair` | `hair` |
+| `underwear` | `underwear_top`, `underwear_bottom` |
+| `outfit` | `socks`, `outfit_top`, `outfit_bottom`, `gloves`, `shoes` |
+| `accessory` | `ear_accessory`, `face_accessory`, `neck_accessory`, `head_accessory`, `back_accessory` |
+
+槽位名称忽略首尾空格和大小写，未知槽位会被跳过。部件引用可写成标识符字符串，也可写成包含 `part` 与可选 `style` 的对象。预设 JSON 不导入自定义绘制数据。
+
+基础外观中的 null、空白字符串、`none` 或无效部件 ID 会使该槽位为空。换装覆盖中，缺失槽位、null 或无效 ID 表示继承基础外观；显式字符串 `none` 才会清空槽位。这适用于包括 `body` 在内的所有槽位。切换换装后，基础外观提供的内容仍可恢复。
+
+有些部件是链在一起的：同一件衣物分布在多个槽位上，例如默认男性内裤 `isekaiexpansion:underwear_top/default_male` 与 `isekaiexpansion:underwear_bottom/default_male`。换装中写出一个成员就会穿上整条链，对一个成员写 `none` 会清空整条链。玩家预设只写了一个成员时，外观校验会补上其余成员，前提是它们的槽位为空；否则整条链被移除。详见[部件链](/zh-cn/dev/humanoid-parts/)。
+
+标识符格式正确不代表部件、模型或纹理确实存在。找不到指定样式时只尝试 `default`；该样式也不存在时，渲染器跳过此部件。
+
+### NPC 换装
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `outfits[].id` | `string` | `required` | 去除首尾空格并转为小写，不得为空；衣柜同步要求不超过 128 个字符。 |
+| `outfits[].category` | `enum` | `outfit` | `outfit`、`hair`、`accessory`；未知值改为 `outfit`。仅用于界面分组。 |
+| `outfits[].default` | `boolean` | `false` | 强制使用 `always` 解锁规则；只有首个声明的默认项保留该标记。 |
+| `outfits[].unlock` | `object` | `always` | 规则字段同下表。奖励外观必须显式声明 `granted`。 |
+| `outfits[].sort` | `integer` | `1000` | 衣柜先按类别，再按此值及 ID 排序；不决定初始外观。 |
+| `outfits[].parts` | `object` | `{}` | 槽位覆盖；缺失时继承基础外观，`none` 清空槽位。也可以替换 `body`。 |
+| `outfits[].attributes` | `array<object>` | `[]` | 穿戴期间的临时属性修饰符。 |
+| `outfits[].attributes[].attribute` | `identifier` | `required` | 属性注册 ID；格式错误导致预设失败，注册表中不存在则记录警告并跳过此加成。 |
+| `outfits[].attributes[].value` | `number` | `0` | 修饰符数值；加载器不检查范围或有限性。 |
+| `outfits[].attributes[].operation` | `enum` | `addition` | `addition`、`multiply_base`、`multiply_total`；忽略首尾空格与大小写，未知值改为 `addition`。 |
+
+初始换装依次选择：首个仍带默认标记的条目、首个 `always` 条目、首个规则不是 `locked` 的条目、首个条目。该回退过程不检查具体玩家的进度。空列表会补充后备 `default` 换装。
+
+重复 ID 保留最后一个定义，但位置沿用首次插入的位置。只有首个声明的默认项保留标记；后续默认项在标记被移除之前，解锁规则已经变为 `always`。使用唯一 ID 和一个明确的默认项，可避免这些规则相互影响。
+
+属性加成要求 NPC 本身拥有对应属性。缺失时跳过并记录警告。同一套换装中每个属性只应出现一次：修饰符身份包含预设、换装与属性，不包含运算方式，重复条目不会成为可独立叠加的加成。降低最大生命值时，当前生命值会限制到新的上限。
+
+### 解锁规则
+
+以下字段位于玩家 `unlock` 或 NPC `outfits[].unlock` 对象内：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `enum` | `always` | `always`、`level`、`advancement`、`progression`、`granted`、`locked`；未知值按 `always` 处理。 |
+| `id` | `identifier` | `absent` | 进度 ID 或成长图 ID；格式错误等同于缺失，对应条件不成立。 |
+| `node` | `string` | `""` | 成长图节点；去除首尾空格后须非空，该条件才可能成立。网络限制为 64 个字符。 |
+| `level` | `integer` | `0` | 最低冒险者等级；负数改为 0。仅供 `level` 使用。 |
+
+| 规则 | 选择条件 |
+| --- | --- |
+| `always` | 始终可用；也是 JSON 省略规则时的默认值。 |
+| `level` | 玩家在 IsekaiCore 中的冒险者等级达到 `level`；读取等级失败时使用 0。 |
+| `advancement` | 服务端存在对应进度，且该玩家已完成。 |
+| `progression` | 玩家已解锁成长图 `id` 中的 `node`。 |
+| `granted` | NPC 换装检查玩家的衣柜奖励记录。通用玩家预设及部件检查没有奖励来源，结果为 false。 |
+| `locked` | 玩家不可选择；不阻止脚本直接指定 NPC 换装。 |
+
+**NPC 换装省略规则时使用 `always`，并非 `granted`**。设置 `default: true` 也会强制使用 `always`，覆盖填写的规则。
+
+当前玩家预设图库不检查预设的 `unlock` 规则，全部已加载预设都会生成可选卡片。提交内容是外观而不是预设 ID，服务端分别验证结果中的各个部件。因此，预设规则不能限制该模板的使用；部件规则与 NPC 换装规则有各自的检查流程。
+
+## 验证
+
+未知字段会被忽略。字段转换发生异常时，整个预设及其全部换装都会被拒绝。加载器记录该文件错误，并以成功解析的文件替换目录；失败定义不会保留上一版本。缺失的可选字段使用上述默认值。标识符格式检查与目标内容是否存在属于不同步骤。
+
+玩家预设标签超过 48 个字符、解锁节点超过 64 个字符或换装 ID 超过 128 个字符时，可能成功加载却超过网络写入限制。JSON 加载器并不强制这些长度上限。
+
+当前 NPC 导出器会省略显式 `granted` 规则，而读取器将省略解释为 `always`。导出奖励换装后，在放入数据包之前补回该规则。外观导出也会省略绘制数据，将非默认形状参数四舍五入到 3 位小数，并以十六进制 RGB 输出颜色。
+
+## 重载
+
+服务端数据包重载成功后，在线玩家收到部件目录和玩家预设图库，已保存的外观接受重新验证，已加载 NPC 则刷新预设。客户端模型与纹理需要另行重载。
+
+玩家预设是模板：修改预设不会向所有曾选择它的玩家重新应用。重新验证根据当前部件目录和解锁规则检查已保存外观。手工指定外观的 NPC 重新读取初始外观；生成式市民仍执行自己的生成逻辑。已移除的换装 ID 回退到当前默认选择。
+
+当前属性清理存在限制：刷新只移除**新**换装目录所声明的修饰符。因此，删除旧换装或属性声明后，其临时修饰符可能仍留在已加载的 NPC 上。修改定义时，应同时检查已有 NPC 和新生成 NPC 的属性。
+
+## 相关页面
+
+[NPC 资源制作](/zh-cn/dev/npc-assets/)、[NPC 运行时](/zh-cn/dev/npc/)与[身份](/zh-cn/wiki/identity/)。

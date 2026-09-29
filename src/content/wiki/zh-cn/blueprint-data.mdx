@@ -1,0 +1,134 @@
+---
+title: "蓝图与知识数据"
+description: "证据来源、发现条件、显示元数据与必填的铁匠委托条款。"
+category: data
+order: 70
+updated: 2026-09-19
+---
+
+知识文件定义可消耗的证据；蓝图组合知识要求、锻造配方及委托条款。研究进度属于每件蓝图物品，规范化时按当前数据包要求调整存档进度。
+
+## 文件放在哪里
+
+| 路径 | 每个文件定义 |
+| --- | --- |
+| `data/<namespace>/knowledge/<path>.json` | ID 为 `<namespace>:<path>` 的知识领域。 |
+| `data/<namespace>/blueprints/<path>.json` | ID 为 `<namespace>:<path>` 的蓝图。 |
+
+高优先级数据包覆盖相同资源路径，不逐字段合并。不同蓝图可以共用发现材料或配方；发现按 ID 顺序选择首个匹配蓝图，按配方查找也保留该顺序中的首个 ID。命名空间参与标识，子目录保留在 ID 内。
+
+## 最小示例
+
+最小知识定义，保存为 `data/example/knowledge/metal.json`：
+
+```json
+{
+  "sources": [
+    {
+      "ingredient": {
+        "item": "minecraft:iron_ingot"
+      },
+      "insight": 4
+    }
+  ]
+}
+```
+
+这个最小格式可以加载，但生成的标题与描述仍需要翻译条目。下例是自带钻石剑蓝图的精简版，保存到 `data/isekaiexpansion/blueprints/diamond_sword.json` 可覆盖该蓝图。引用的知识 ID 已由自带数据提供。
+
+```json
+{
+  "recipe": "isekaiexpansion:ise_forgery/minecraft_diamond_sword",
+  "discovery": {
+    "item": "minecraft:diamond_sword"
+  },
+  "requirements": [
+    {
+      "knowledge": "isekaiexpansion:metallurgy",
+      "amount": 24
+    },
+    {
+      "knowledge": "isekaiexpansion:weaponcraft",
+      "amount": 12
+    }
+  ],
+  "blacksmith": {
+    "work_days": 3,
+    "daily_work_hours": 4,
+    "cost": 24000
+  }
+}
+```
+
+## 字段
+
+### 知识定义
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `name_key` | `string` | `knowledge.<namespace>.<path>.name` | 显示翻译键；路径斜杠改为点。 |
+| `description_key` | `string` | `knowledge.<namespace>.<path>.description` | 描述翻译键。 |
+| `discipline` | `string` | `general` | 界面学科标签，无枚举限制；网络上限 64 字符。 |
+| `color` | `number` | `0xFF69C8E8` | 也接受可带 # 的十六进制字符串。数字和不超过 6 位的字符串强制不透明；更长字符串保留解析的 ARGB。 |
+| `sources` | `array<object>` | 必填 | 非空证据来源列表，按列表顺序优先选择。 |
+| `sources[].ingredient` | `ingredient` | 必填 | Minecraft 材料条件；示例使用物品对象。 |
+| `sources[].ingredient.item` | `item id` | 必填（物品形式） | 精确匹配的证据物品，与自带来源格式一致。 |
+| `sources[].ingredient.tag` | `tag id` | `absent` | 可改用标签形式；材料对象中的标签 ID 不带 #。 |
+| `sources[].consume` | `integer` | `1` | 单个主物品栏物品堆所需的正整数数量；非创造模式每次抄录消耗。 |
+| `sources[].insight` | `integer` | 必填 | 每次抄录的正整数领悟量；消耗材料后，按剩余进度截断。 |
+
+### 蓝图定义
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `recipe` | `identifier` | 必填 | 配方 ID；加载时仅校验语法，砧与委托使用时要求有可用锻造配方。 |
+| `discovery` | `ingredient` | 必填 | 另一只手中参考物品的材料条件。 |
+| `discovery.item` | `item id` | 必填（物品形式） | 精确匹配的参考物品。 |
+| `discovery.tag` | `tag id` | `absent` | 可改用不带 # 的参考标签。 |
+| `discovery_consume` | `integer` | `1` | 该手中所需正整数数量；创造模式仍须满足数量，但不消耗。 |
+| `requirements` | `array<object>` | 必填 | 知识要求；允许空数组，服务端规范化时会立即揭示。知识 ID 应保持唯一。 |
+| `requirements[].knowledge` | `identifier` | 必填 | 必须存在于本次成功加载的知识目录。 |
+| `requirements[].amount` | `integer` | 必填 | 正整数所需领悟量。 |
+| `blacksmith` | `object` | 必填 | 委托条款；即使不使用委托也必须填写。 |
+| `blacksmith.work_days` | `integer` | 必填 | 精确整数 2–30，表示至少完成多少天的每日工作额度。 |
+| `blacksmith.daily_work_hours` | `integer` | 必填 | 精确整数 2–6；每个游戏工作小时为 1000 刻（50 秒）。 |
+| `blacksmith.cost` | `integer` | 必填 | 正的有符号 64 位整数，以铜币单位计价，无默认价格。 |
+| `type` | `enum(EMPTY, UNKNOWN, WEAPON, ARMOR, TRINKET)` | `unknown` | 不区分大小写的显示类型，不去除首尾空格；不决定配方实现。 |
+| `complexity` | `integer` | `1` | 显示复杂度，1–5；不用于计算委托耗时。 |
+| `decor` | `integer` | `0` | 显示装饰索引，0–7。 |
+| `creative_visible` | `boolean` | `true` | 在创造目录中加入已绑定的未鉴定变体。 |
+| `required_mods` | `array<string>` | `[]` | 仅蓝图：要求全部模组已加载，否则在解析其他字段前跳过文件。 |
+| `name_key` | `string` | `blueprint.<namespace>.<path>.name` | 揭示后的标题；路径斜杠变为点。 |
+| `description_key` | `string` | `blueprint.<namespace>.<path>.description` | 揭示后的描述。 |
+| `unidentified_name_key` | `string` | `item.isekaiexpansion.blueprint_unknown` | 揭示前标题。 |
+| `unidentified_description_key` | `string` | `item.isekaiexpansion.blueprint_unknown.description` | 揭示前描述。 |
+
+### 材料与显示字符串
+
+材料对象属于 Minecraft 1.20.1。精确物品使用 `item` 对象，物品标签使用 `tag` 对象，参见 [Fabric 的 1.20 材料示例](https://wiki.fabricmc.net/tutorial:recipes#through_1206)。这些字段交给 Minecraft 材料解析器；本加载器不在其中加入 NBT 条件或自定义数量字段。
+
+所有标题／描述翻译键的网络长度上限为 256 字符。显示复杂度与装饰不能替代明确委托条款。总工作量为 `work_days × daily_work_hours × 1000` 刻，每日上限为 `daily_work_hours × 1000`。
+
+先按文件中的来源顺序，再按主物品栏槽位顺序查找证据。单个来源必须匹配单个数量足够的物品堆，不会合并多个堆。首个匹配项优先，即使其他来源的领悟量更高。副手证据不在搜索范围内。即使剩余进度不足，仍消耗完整的来源数量。
+
+## 校验
+
+文件格式错误、空文件、缺少必填键、ID 错误、类型名无效或模型数值越界时，逐文件记录错误并跳过。成功文件替换目录；**错误定义不会保留旧版本**。知识先加载，因此知识文件失败也会让引用它的蓝图失败。
+
+未知键被忽略。蓝图的 `required_mods` 是专用条件；加载器不处理 `fabric:load_conditions`。知识文件没有模组前置条件。配方缺失不导致加载失败，但会阻止委托报价及有效锻造。
+
+铁匠字段使用精确整数解析，拒绝字符串、小数、溢出及非正价格。其他整数字段使用常规 JSON 整数读取器，应填写整数。requirements 缺失会失败，空数组则在规范化时直接揭示。重复知识 ID 不会被拒绝，但进度共用一个键，数量不同时可能无法完成；每个 ID 只填写一次。
+
+十六进制颜色允许开头的 `#`，非法文本导致知识文件失败。数字颜色强制不透明；需要透明度时使用 8 位 ARGB 字符串。
+
+目录最多保留 2048 个蓝图，每个界面最多 32 个知识要求及 32 个配方步骤，每步最多 64 个材料。这些是客户端包解码上限，不是加载器检查；超量数据可能加载成功却无法打开。
+
+## 重载
+
+服务端资源重载时加载两个目录，再依次替换知识与蓝图。数据包内容同步及成功重载会向玩家发送显示目录。服务端停止时清空服务端目录。已打开的研究界面是快照；修改数据后重新打开。
+
+物品规范化会刷新显示／配方元数据，将进度限制到当前要求，并重新计算揭示状态。新增未满足要求可能撤销揭示；不再使用的旧知识键仍保留。已接受的铁匠订单独立保存条款与产物快照，不受后续定义修改影响。
+
+## 相关页面
+
+[蓝图研究](/zh-cn/wiki/blueprints/)、[铁匠委托](/zh-cn/wiki/blacksmith-commissions/)与[研究运行时](/zh-cn/dev/blueprint-research/)。

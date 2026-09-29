@@ -1,0 +1,108 @@
+---
+title: "人形架构与扩展点"
+description: "外观归属、权威修改、共享显示，以及人形系统的扩展约定。"
+category: systems
+order: 100
+updated: 2026-09-26
+---
+
+玩家与 NPC 共用人形外观模型和渲染流程。本参考说明这些状态由哪些内部组件管理，以及如何通过现有入口修改。
+
+## 它做什么
+
+人形系统为玩家和 NPC 提供统一外观模型：身份、体型、面部、配色、已选部件及可选种族 ID。`HumanoidProfile` 是带版本的值对象，当前版本为 1。JSON 制作分别见[预设数据](/zh-cn/wiki/humanoid-presets/)与[部件制作](/zh-cn/dev/humanoid-parts/)。
+
+本文 Java 类型位于 `internal.humanoid` 或客户端实现包，属于内部接入点，并不存在 `HumanoidAPI` 门面。
+
+## 运行时模型
+
+| 归属／阶段 | 职责 |
+| --- | --- |
+| `HumanoidAppearanceComponent` | 玩家外观、创建阶段、保存外观和修订号；组件 ID 为 `isekaiexpansion:humanoid_appearance`，重生采用 `ALWAYS_COPY`。 |
+| `HumanoidSubject` | 非玩家约定：读取和设置外观，并提供修订号。 |
+| `BaseNpcEntity` | 分开保存基础角色与叠加换装后的显示外观。 |
+| `HumanoidAppearanceAccess` | 统一读取玩家或主体外观，并提供内部直接赋值。 |
+| `HumanoidAppearanceService` | 服务端玩家外观清理、种族解析、解锁和绘制验证，以及创建阶段提交。 |
+| `HumanoidPartCatalogRegistry` | 服务端编写的部件定义、兼容性清理和目录修订号。 |
+| `HumanoidPartAssetRegistry` | 客户端资源发现，与服务端目录成员关系分开。 |
+| `HumanoidRenderResolver` | 将身体、可见层、样式、染色与绘制纹理、护甲和特征隐藏规则解析为快照。 |
+| `HumanoidProfileCodec` / `HumanoidProfileTracker` | 组件和实体跟踪显示共用的紧凑网络格式。 |
+
+玩家当前外观、修订号与创建阶段同步给接收者，个人保存槽只发送给所属玩家。组件设置器跳过相同替换值，在需要时重新计算尺寸，并在接受变更后增加修订号。修订号用于缓存失效，不是授权令牌。
+
+NPC 预设解析出手工指定或生成的基础外观，再由当前换装覆盖显示。编辑或导出角色时读取 `getBaseHumanoidProfile()`，渲染时读取 `getHumanoidProfile()`。市民生成与 NPC 预设钩子见 [NPC 资源](/zh-cn/dev/npc-assets/)。
+
+客户端创建编辑持有独立工作外观，最多保留 48 个撤销条目，不直接修改真实玩家组件。提交后先执行服务端范围合并，再清理验证；界面是否显示本身并不是权威边界。
+
+## 约定
+
+### 通过统一入口读取
+
+`HumanoidAppearanceAccess.profileOrNull(entity)` 对不支持的实体返回空，`profileOf(entity)` 则返回 `HumanoidProfile.DEFAULT`。`revisionOf` 对不支持的实体返回 0。读取时先匹配玩家，再匹配非玩家主体接口。
+
+`displayName`在角色姓名启用时返回其文本：预设姓名使用可翻译文本，手动昵称使用字面文本；否则返回实体自身名称，不会重命名实体。`buildOf` 从同一外观入口读取体型。
+
+`applyProfile` 直接调用玩家组件设置器或主体设置器，**不会**执行服务端玩家外观清理。不可信玩家提交应经过带范围的网络包和服务流程。直接组件赋值只适用于调用方明确负责验证的情况。
+
+### 在服务端验证
+
+`sanitizeForPlayer` 先解析实际 Origins 种族，再清理目录兼容性、移除锁定部件、移除未知绘制引用，最后在角色尚未创建完成时补充声明的起始部件。目录为空时按数据尚不可用处理，保留已有部件。
+
+目录清理检查槽位、性别和种族兼容性，修复样式，补充必需身体与种族特征，再反复移除不满足配套条件的部件。以上检查不证明客户端模型或纹理存在；解锁检查和资源解析仍是独立阶段。
+
+创建阶段通常只向前推进，显式重置另行处理。`HumanoidCreationFlow.owedScope` 决定待完成步骤，`OpenHumanoidCreationPacket.send` 先发放范围会话，再请求客户端显示。完整范围矩阵和当前请求处理器限制见运行时参考。
+
+### 让体型尺寸有统一来源
+
+`HumanoidBodyScale.of(player)` 仅在玩家组件含身体引用且没有活动变形实体时使用 `height / 1.8`，否则返回 1。玩家碰撞箱、视线高度与外层玩家渲染缩放共用此策略。
+
+玩家特征层设置 `HumanoidRigRenderState.setBodyScaleApplied(true)`，骨架渲染器据此跳过重复体型缩放。独立预览和 NPC 渲染有各自的显示上下文。不要同时在玩家外层变换和骨架上乘以玩家身高比。
+
+客户端身体渲染还要求共享骨架资源存在，并让位于活动变形显示。服务端尺寸策略不依赖客户端资源可用性，因此缺失资源可能影响显示，却不移除服务端身体引用。
+
+## 扩展方式
+
+### 添加通道、槽位或界面章节
+
+| 变更 | 必查内容 |
+| --- | --- |
+| 颜色通道 | 在 `HumanoidColorChannel` 添加 ID 与默认值，在 `CreationChapter` 提供控制，添加翻译，并检查目录和插件通道绑定。 |
+| 部件槽位 | 在 `HumanoidSlot` 添加 ID、类别、绘制顺序和护甲默认规则；开放对应章节，按需更新 `showsOnArm` 与特征映射，同时更新插件的显式槽位列表。 |
+| 界面章节 | 在 `CreationChapter` 定义槽位、配色通道与镜头焦点，加入允许范围；通用槽位构建器不足时增加专用控件。 |
+| 非玩家主体 | 实现 `HumanoidSubject`，负责持久化与同步，并在显示变更时增加修订号。 |
+| NPC 专用生成 | 重写 `resolveInitialHumanoidProfile`；通过 `getNpcPresetId` 让多个实体类型共用预设。 |
+
+配色 NBT 按通道枚举序号保存数组，网络格式按序号位保存配色、按序号保存槽位。扩展时保留既有枚举顺序并检查兼容性；绘制顺序取自槽位显式数值，并非枚举序号。配色网络编码使用整数位掩码，增加通道时也要检查掩码容量。
+
+Blockbench 插件有显式槽位和通道表，增加枚举常量不会自动更新整条制作流程。Java 声明、界面入口、导出器、语言条目和数据定义须保持一致。
+
+显示字符串通过 `language_assemble` 添加。章节键为 `screen.isekaiexpansion.creation.chapter.<id>` 及其 `.hint`；部件、通道和槽位键参照制作参考与既有语言分类。
+
+### 将界面接入创建流程
+
+需要等待角色阶段的界面使用 `ClientHumanoidScreenSequencer.hold(screen, gate)`，门槛为 `AFTER_CHARACTER_BASE` 或 `AFTER_CHARACTER_COMPLETE`。返回 false 表示门槛已开放，调用方可以显示界面。同一门槛的新等待界面会替换旧界面。
+
+服务端许可进入队列，客户端在没有活动界面时释放等待界面或许可。新的阶段判断应集中在 `HumanoidCreationFlow`；增加 UI 章节本身不会授予修改权限，也不会改变阶段推进。
+
+### 保留渲染职责
+
+身体提供共享骨骼姿势，部件动画先计算，然后身体姿势按匹配名称覆盖共享骨骼。体型和面部调整归于 `HumanoidBoneShaper`，纹理合成归于 `HumanoidTextureComposer`，资源发现归于对应重载监听器。
+
+渲染快照缓存包含外观及修订号、目录和资源版本、绘制修订号、护甲及特征掩码、合成纹理代次。增加视觉输入时也需增加对应失效输入。不要另建能无版本控制地跨目录或资源重载存活的缓存。
+
+## 验证
+
+- 在玩家本人、另一客户端、NPC 和独立预览上对比同一外观。
+- 向各授权范围提交越界字段，检查实际保存外观，而不只看界面预览。
+- 确认重生保留外观、阶段和保存槽，且保存外观只发给所属玩家。
+- 改变身高、身体引用和变形状态，检查碰撞箱、视线高度、手持物品和显示缩放。
+- 分别重载目录与客户端资源，检查保存外观及渲染缓存失效。
+- 新槽位或通道须往返验证 NBT 和网络状态、检查枚举兼容，再通过插件导出。
+- 测试中断的首次创建流程及等待界面，确认不覆盖活动界面。
+
+姓名与文化选择见[命名API](/zh-cn/dev/naming/)。
+
+## 相关页面
+
+- [人形存档、编辑器与涂绘运行时](/zh-cn/dev/humanoid-runtime/)
+[预设数据](/zh-cn/wiki/humanoid-presets/)、[部件制作](/zh-cn/dev/humanoid-parts/)、[Blockbench 插件](/zh-cn/dev/blockbench-plugin/)与 [NPC 基础](/zh-cn/dev/npc/)。

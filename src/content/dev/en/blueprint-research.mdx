@@ -1,0 +1,150 @@
+---
+title: "Blueprint research and commissions"
+description: "Item-owned research, authoritative transcription, escrow persistence and attended villager labour."
+category: systems
+order: 50
+updated: 2026-09-19
+---
+
+Research uses item NBT; blacksmith commissions use a server-wide escrow ledger. The research implementation under `item.blueprint` and the commission implementation under `internal.blacksmith` are implementation surfaces. The public villager integration facade is `api.blacksmith.BlacksmithAPI`.
+
+## What it does
+
+`ResearchDataLoader` loads knowledge before blueprints, skips invalid files and replaces each catalogue with successful definitions. [Blueprint data](/en/wiki/blueprint-data/) owns the JSON contract; [Research](/en/wiki/blueprints/) and [Commissions](/en/wiki/blacksmith-commissions/) own the player workflow.
+
+`BlueprintResearchService` validates discovery and transcription on the server. It does not create a player or team knowledge ledger. `BlacksmithService` snapshots a revealed plan, its recipe output and terms into a commission; accepted work no longer resolves those terms from the catalogue.
+
+## Runtime model
+
+### Item state
+
+The item root `IsekaiBlueprint` must be an NBT compound. These fields are written by `BlueprintResearchState`; this is a save contract, not a second data-pack format.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Schema` | `int` | 1 | Written on bind; current reads do not validate or migrate this version. |
+| `Definition` | `string` | required for binding | Blueprint identifier; unresolved IDs retain their bound state. |
+| `NameKey` | `string` | definition | Revealed name translation key. |
+| `DescriptionKey` | `string` | definition | Revealed description translation key. |
+| `UnknownNameKey` | `string` | definition | Unidentified name translation key. |
+| `UnknownDescriptionKey` | `string` | definition | Unidentified description translation key. |
+| `Recipe` | `string` | definition | Cached recipe ID; returned only when Revealed is true. |
+| `Type` | `string` | definition | Uppercase display enum; invalid stored value falls back to UNKNOWN. |
+| `Complexity` | `int` | definition | Display complexity copied from the definition. |
+| `Decor` | `int` | definition | Display decoration copied from the definition. |
+| `Revealed` | `boolean` | false on bind | Recomputed from all current requirements during normalisation. |
+| `Knowledge` | `compound` | empty on bind | Identifier-keyed integer progress. Attachment creates it if absent or wrong type. |
+| `Knowledge.<id>` | `int` | 0 | Nonnegative reads; current requirements cap values during normalisation. Unused keys remain. |
+
+Binding replaces the whole research compound. Normalisation rebinds a mismatched definition, refreshes metadata, caps each current requirement and recalculates revelation; an empty requirement list is complete. It retains unrelated knowledge keys. Existing compounds do not have their Schema rewritten on every normalisation, and the old `BlueprintRecipeId` tag has no migration path here.
+
+`revealedRecipe` trusts the stored Revealed flag and cached Recipe. It does not independently resolve the current definition. Research opening and commission quoting normalise first; the anvil's recipe accessor alone does not perform that refresh.
+
+### Snapshots and client UI
+
+`ResearchSystem.init()` registers the reload listener once. Data-pack content sync and successful reload send `BlueprintCatalogPacket`; server stop clears knowledge and blueprint registries. The catalogue contains display data for creative variants, not mutable research progress.
+
+`BlueprintScreenPacket` carries a view of requirements, selected evidence, recipe steps and output. Recipe information is included even for unrevealed plans, so the UI's reveal state is not a secrecy boundary. Limits are 2048 catalogue entries, 32 requirements, 32 steps and 64 ingredients per step; keys use 256 characters and disciplines 64. Decode limits are not enforced by the JSON loader.
+
+Both receiving handlers queue onto the Minecraft client executor. `ResearchScreenController` updates a matching active blueprint on the ModernUI thread instead of reopening it; a different blueprint creates a screen and plays its opening sound. Font order is ArchitectsDaughter, ZhiMangXing, then the selected ModernUI fallback families. Missing/broken custom fonts log and leave the remaining chain usable.
+
+### Commission persistence
+
+`ForgeOrderStorage` uses the overworld-backed key `blacksmith/commissions_v1`, saved at `data/isekaiexpansion/blacksmith/commissions_v1.dat`. Owner and smith UUID indexes each permit one active order. Blueprint and output are defensive ItemStack copies.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Orders` | `list<compound>` | empty | Root list of active orders followed by preserved unreadable entries. |
+| `Orders[].Id` | `UUID` | required | Order identity used to reject stale callbacks. |
+| `Orders[].Owner` | `UUID` | required | Server-wide owner index; duplicate owners fail loading that entry. |
+| `Orders[].Smith` | `UUID` | required | Assigned villager index; duplicate smiths fail loading that entry. |
+| `Orders[].Dimension` | `string` | required | World identifier for the assigned workshop. |
+| `Orders[].Station` | `long` | 0 when absent | Packed BlockPos of assigned job site. |
+| `Orders[].SmithPosition` | `long` | required, exact long type | Last known smith position used for loading leases. |
+| `Orders[].Blueprint` | `compound` | required, nonempty item | Escrowed ItemStack NBT snapshot. |
+| `Orders[].Output` | `compound` | required, nonempty item | Accepted output ItemStack NBT snapshot. |
+| `Orders[].Cost` | `long` | required, positive | Accepted copper price; cancellation does not refund it. |
+| `Orders[].RequiredTicks` | `int` | required | 2–30 whole daily quotas; divisible by DailyLimit. |
+| `Orders[].DailyLimit` | `int` | required | 2000–6000 work ticks per day. |
+| `Orders[].Worked` | `int` | 0 | Completed labour, from 0 through RequiredTicks. |
+| `Orders[].Day` | `long` | 0 | Last work day / initial acceptance day; calendar floor division by 24000. |
+| `Orders[].DailyWorked` | `int` | 0 | 0 through DailyLimit, never greater than Worked. |
+
+UUIDs use Minecraft's UUID NBT representation. Other absent numeric fields use the NBT getter's zero before constructor validation. Invalid identifiers, escrow, labour bounds or duplicate indexes fail that entry. Its raw compound is retained in `unreadableOrders`, logged and written back after active entries; it is not automatically repaired or available for collection.
+
+Adding, removing, transferring, moving the tracked smith or advancing labour marks storage dirty. Transfer changes the smith, dimension and station without replacing the snapshot or resetting daily progress.
+
+### Labour and remote workshops
+
+`ForgeWorkProgress` accepts labour during `2000 <= timeOfDay % 24000 < 9000`, subject to the daily quota. `work` increments once for a distinct server tick. A later calendar day resets DailyWorked on the next actual work tick; a backwards day blocks work until the saved day is reached. Elapsed offline time and skipped days never generate labour.
+
+`BlacksmithWorkTask` runs only for an eligible, alive, awake villager with AI, no conversation engagement or threat, and the matching claimed workstation. It temporarily owns the brain's exclusive `BLACKSMITH_WORK` activity. At the station it requires squared centre distance at most 4, vertical difference at most 1 and an unobstructed ray or a hit on the station. Otherwise it navigates at speed 0.5 with completion range 1, refreshing the walk request every 40 ticks (2 seconds). Work effects also run every 40 ticks; completion marks ready and notifies an online owner.
+
+| Scheduler setting | Value |
+| --- | --- |
+| Remote workshop leases | 8 maximum; loaded workers are not capped by this count. |
+| Check interval | 20 ticks (1 second), at END_SERVER_TICK. |
+| Initial load grace | 100 ticks (5 seconds). |
+| No-progress timeout | 1200 ticks (60 seconds). |
+| Retry delay after failure | 1200 ticks (60 seconds). |
+| Ticket radius argument | 2, at the station and last-known smith chunk centres. |
+| Ticket expiry | 100 ticks (5 seconds), refreshed while leased. |
+
+The lease refreshes the dimension idle timeout and follows the smith's recorded position. These are chunk centres with surrounding loading effects, not a promise to load only 2 chunks. Completion, invalid assignment or nonworking hours release leases; failed loading/stalls release and delay retries. Transfer/collection/cancellation clears that order's lease/retry state. Server stopping closes all leases. Iteration over stored orders does not guarantee fair queue ordering.
+
+## Contracts
+
+### Authoritative research
+
+Discovery tests the opposite hand; transcription searches main inventory by source order then slot order. Creative mode bypasses consumption, not matching. Transcription checks current hand, blueprint item, definition ID, requested knowledge membership, completion and evidence before mutation. The packet contains no unique stack token: another same-definition blueprint swapped into that hand can receive the operation. Repeated requests after completion consume nothing.
+
+Evidence is consumed before capped insight is added. Inventory dirtying and screen-handler content updates follow successful mutation, then a new snapshot is sent. A stored anvil review passes a supplied stack to the snapshot builder; transcription still resolves the player's held stack and cannot target an arbitrary stored anvil item.
+
+Run research and commission mutations on the server thread. These helpers do not lock or marshal arbitrary asynchronous callers. `TranscribeBlueprintKnowledgePacket.handle` invokes the service directly through the IsekaiCore packet framework; do not infer an extra executor hop from this handler.
+
+### Transaction boundaries
+
+Commission acceptance checks availability, both unique indexes, reachable claimed workstation and a fresh quote. ItemStack equality and terms equality reject changed blueprint, output or price. Currency availability/payment is checked before clearing the player's slot and adding escrow. Numismatic payment behaviour beyond `isLoaded`/`tryPay` belongs to IsekaiCore; this code does not implement a wallet.
+
+Collection validates owner/order ID, assigned smith and readiness, then simulates inventory capacity for both items together before removing the order and inserting copies. Cancellation checks unfinished state and room for the blueprint; it may use another eligible smith and never refunds the price. Transfer validates a free target and reachable job site and preserves all accepted terms. These are synchronous service transactions, not a crash-journalled distributed payment protocol.
+
+Blabber callbacks re-resolve the active villager and check captured smith/order IDs. The menu ID is `isekaiexpansion:blacksmith/villager`. Ordinary trading remains a menu option. The village dialogue handler separately gates entry using negative gossip; profession eligibility alone does not imply a transaction can proceed.
+
+## Extending it
+
+Use `net.kzeroko.isekaiexpansion.api.blacksmith.BlacksmithAPI` for villager wiring:
+
+| Method | Side | Contract |
+| --- | --- | --- |
+| `init()` | common startup | Registers scheduler and dialogue; call once, no facade idempotence guard. |
+| `eligible(VillagerEntity)` | entity context | Adult smith profession check only; not availability or order validation. |
+| `dialogue()` | common | Returns the menu Identifier. |
+| `registerBrainActivity(Brain<VillagerEntity>)` | server brain setup | Registers the exclusive work activity. |
+| `createWorkTask()` | server brain setup | Returns a fresh work task. |
+
+The existing villager mixins install the work task at core priority 10 and register the activity after brain initialisation. Do not install duplicate tasks from an additional caller. Acceptance, cancellation and settlement remain internal service operations.
+
+`api.research.KnowledgeLedger` is an existing public NBT utility, not a research facade. For a separate server-owned compound:
+
+```java
+static int recordInsight(NbtCompound owner, Identifier knowledge) {
+    var ledger = KnowledgeLedger.attach(owner, "Knowledge");
+    return ledger.add(knowledge, 4, 24);
+}
+```
+
+`attach` mutates absent/wrong-type storage into a compound. `get` and `set` floor at 0; `add` clamps to the supplied nonnegative limit and returns the actual difference. `entries` returns an immutable sanitised copy and ignores invalid identifier keys; `copyNbt` returns a detached compound. The caller owns dirty marking and synchronisation. Use the blueprint service/state path for actual blueprints so revelation is recalculated.
+
+## Verifying
+
+- Discover and transcribe in survival and creative mode. Check reference hand, insufficient single stacks, evidence priority, offhand exclusion and full consumption on the final insight.
+- Move a researched item through a chest, trade/drop and save/reload. Change definitions, remove knowledge, add requirements and test malformed files; verify normalisation and successful-catalogue replacement.
+- Swap to a different blueprint definition before a queued transcription, then test a same-definition replacement. Repeated completion requests must not consume more evidence.
+- Reject an unrevealed plan at the anvil; bind a revealed plan, retrieve it before progress, review it after a completed step with empty ingredient slots, and collect finished output first.
+- Check both languages, narrow/wide screens and UI scales. Verify text fallback, scroll bounds, the quill/reveal transition and snapshot updates without replaying the opening sound.
+- Commission with insufficient money, stale quotes, full inventories, duplicate owners/smiths and missing/blocked workstations. Collect both items together; cancel without refund; transfer across dimensions without resetting labour.
+- Save/restart an order, move or remove its smith, unload its area, exhaust the lease budget and verify release/retry timing. Skip time and reverse days; neither should grant missed work. Corrupt an order in a disposable save and confirm its raw escrow remains preserved.
+
+## Related
+
+[Blueprint data](/en/wiki/blueprint-data/), [Blueprint research](/en/wiki/blueprints/) and [Blacksmith commissions](/en/wiki/blacksmith-commissions/).

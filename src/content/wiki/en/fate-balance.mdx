@@ -1,124 +1,120 @@
 ---
 title: "Fate Balance"
-description: "The blessings-and-burdens budget you spend at character creation, and what each built-in pair actually changes."
+description: "Choose daily-life blessings and burdens for meals, rest, social encounters and discoveries."
 category: core
 order: 20
-updated: 2026-09-01
-tagline: "Every advantage is paid for by something."
-tags: ['character creation', 'traits']
+updated: 2026-09-27
 ---
 
-Fate Balance is the trait system you spend before you have played a single minute. It is a **points budget**: blessings cost points, burdens refund them, and a profile that does not balance cannot be submitted.
+Fate Balance shapes your daily life with a starting budget of 10 points. Blessings spend points; burdens supply up to 6 more. Meals, sleep, personality and social traits share this budget.
 
-There is no free advantage in Urdas. The decision is *which* price you are willing to pay.
+## The budget
 
-## How the editor works
-
-<Steps>
-
-1. Choices are grouped into **categories**, each with its own sort order.
-2. Every choice has a **polarity** (blessing or burden), a **cost**, and a **severity** (minor, standard, and so on).
-3. Choices can **conflict** with each other, sit in **exclusive groups**, or require **prerequisites**.
-4. The editor deliberately lets you hold a temporary conflict or overspend while you rearrange. Only a *valid* profile can be submitted.
-
-5. On submit the whole profile is evaluated again, and one that fails that check is not stored.
-
-</Steps>
-
-<Callout type="note" title="Presets are a starting point, not a shortcut">
-Applying a preset only replaces the draft in front of you. It skips neither the confirmation nor the validation.
-</Callout>
-
-## Built-in pairs
-
-Most Fate Balance choices install ordinary attribute modifiers. A handful are read by the owning system instead, so they never appear on your attribute sheet and only show up on that system's next update.
-
-### Appetite
-
-| Choice | Max hunger | Effect |
-| --- | --- | --- |
-| `hearty_appetite` | 26 | 30% more reserve before starvation |
-| `birdlike_appetite` | 14 | Reaches full sooner, 30% less reserve |
-
-Because Isekai Core disables hunger-based health regeneration, appetite never secretly changes your healing rate — only your reserve.
-
-### Temperament
-
-Read by [Comfort](/en/wiki/comfort/) when it scales gain, loss and decay.
-
-| Choice | Comfort gain | Comfort loss | Natural decay |
-| --- | --- | --- | --- |
-| `optimistic_nature` | ×1.20 | ×0.80 | ×0.80 |
-| `pessimistic_nature` | ×0.80 | ×1.20 | ×1.25 |
-
-### Countenance
-
-Read per faction, and **only while that faction's reputation is already at or below the wanted threshold**. A kind face does not help you with people who already like you.
-
-| Choice | Effect |
+| Rule | Value |
 | --- | --- |
-| `kind_countenance` | Softens faction reaction while you are in bad standing |
-| `fierce_countenance` | Hardens it |
+| Starting points | `10` by default; server setting `fateBalanceMaxPoints`, limited to `0–64` |
+| Burden contribution limit | `6` |
+| Remaining points | Starting points + burden gain − blessing cost |
+| Confirmation | Remaining points at least `0`; availability, prerequisites, conflicts and exclusive groups must all pass |
+| Empty profile | Allowed; points may remain unspent |
 
-See [Reputation](/en/wiki/reputation/) for how faction standing is tracked.
+Opposing pairs cannot be selected together. All palate paths share one exclusive group, so choose at most one palate blessing or burden. A palate is unavailable if its food tag contains no items. Categories are General, Rest, Mental, Social, Dining and Special.
+
+## Building a profile
+
+Select a path to inspect its effect, then choose or release it. Remove a conflicting choice before adding another. Undo and redo change the draft; reset restores the profile captured when the editor opened. Presets replace the draft and still require confirmation.
+
+The server evaluates the complete profile again when you seal it. An invalid or overspent draft cannot be confirmed. The confirmed profile persists and is copied on respawn.
+
+## Built-in paths
+
+There are 28 built-in paths. Every short ID below has the prefix `isekaiexpansion:fate_balance/`. Points are a blessing's cost or a burden's contribution. Each table alternates blessing and opposing burden.
+
+### Rest
+
+| Path and ID | Polarity | Points | Effect |
+| --- | --- | --- | --- |
+| Dreamwoven Rest `restful_sleeper` | blessing | 2 | Sleep Comfort ×1.25 |
+| Restless Nights `fitful_sleeper` | burden | 2 | Sleep Comfort ×0.75 |
+
+### Mental
+
+| Path and ID | Polarity | Points | Effect |
+| --- | --- | --- | --- |
+| Scholar's Spark `quick_study` | blessing | 2 | Loot/eligible quest experience ×1.15 |
+| Wandering Mind `wandering_mind` | burden | 2 | Loot/eligible quest experience ×0.85 |
+| Far Horizon `long_horizon` | blessing | 2 | Daily loot experience cap ×1.20 |
+| Narrow Horizon `short_horizon` | burden | 2 | Daily loot experience cap ×0.80 |
+| Sunward Nature `optimistic_nature` | blessing | 2 | Comfort gain ×1.20, loss ×0.80, decay interval ×1.25 |
+| Gloomward Nature `pessimistic_nature` | burden | 2 | Comfort gain ×0.80, loss ×1.20, decay interval ×0.80 |
 
 ### Social
 
-NPC dialogue gates read two independent social attributes:
-
-| Attribute | Measures | Pair | Swing |
+| Path and ID | Polarity | Points | Effect |
 | --- | --- | --- | --- |
-| `isekaiexpansion:eloquence` | Verbal persuasion and argument | `silver_tongue` / `tongue_tied` | ±8 |
-| `isekaiexpansion:charm` | Presence, appeal, first impressions | `captivating_presence` / `unassuming_presence` | ±8 |
+| Silver Tongue `silver_tongue` | blessing | 2 | Eloquence +8 |
+| Tongue-Tied `tongue_tied` | burden | 2 | Eloquence −8 |
+| Magnetic Presence `captivating_presence` | blessing | 2 | Charm +8 |
+| Faded Presence `unassuming_presence` | burden | 2 | Charm −8 |
+| Kind Countenance `kind_countenance` | blessing | 2 | Wanted-faction reputation gain ×1.25, loss ×0.80 |
+| Grim Visage `fierce_countenance` | burden | 2 | Wanted-faction reputation gain ×0.80, loss ×1.25 |
 
-They are checked separately. Talking a guard round and charming a shopkeeper are different skills, and a build can be good at one and bad at the other.
+### Dining
 
-## For add-on authors
+| Path and ID | Polarity | Points | Effect |
+| --- | --- | --- | --- |
+| Bottomless Appetite `hearty_appetite` | blessing | 2 | Maximum hunger 20 → 26 |
+| Birdlike Appetite `birdlike_appetite` | burden | 2 | Maximum hunger 20 → 14 |
+| Familiar Table `contented_diner` | blessing | 1 | Repeated meal retention ×1.25, capped at 1.00 |
+| Restless Palate `fussy_diner` | burden | 1 | Repeated meal retention ×0.75 |
+| Harvest Harmony `garden_palate` | blessing | 1 | Matching fresh produce: +4 Comfort |
+| Garden-Bound `garden_bound` | burden | 1 | Other foods: −3 Comfort |
+| Hearthbread `hearth_palate` | blessing | 1 | Matching bread: +4 Comfort |
+| Breadbound `hearth_bound` | burden | 1 | Other foods: −3 Comfort |
+| Coastal Supper `coastal_palate` | blessing | 1 | Matching cooked fish: +4 Comfort |
+| Coastbound `coastal_bound` | burden | 1 | Other foods: −3 Comfort |
+| Rootcellar Comfort `root_palate` | blessing | 1 | Matching carrot dishes: +4 Comfort |
+| Rootbound Taste `root_bound` | burden | 1 | Other foods: −3 Comfort |
+| Ember Palate `spice_palate` | blessing | 1 | Matching spicy foods: +4 Comfort |
+| Spicebound `spice_bound` | burden | 1 | Other foods: −3 Comfort |
 
-Fate Balance definitions are **common-side content**: the same definition backs the client's draft preview and the server's validation, so availability predicates must be safe on both logical sides.
+## Meals and rest
 
-Register through a dedicated entrypoint in `fabric.mod.json`:
+Palates apply only when the food's quality-adjusted base Comfort is positive. A palate blessing adds +4 to matching meals. A palate burden subtracts 3 from meals outside its family; the result can become negative. Zero and already-negative base foods keep their values. These are Comfort changes with no consume action or timed buff.
 
-```json
-{
-  "entrypoints": {
-    "isekaiexpansion:fate_balance": ["example.addon.ExampleFateBalance"]
-  }
-}
-```
+Food families use item tags under `isekaiexpansion:fate_balance/meals/`:
 
-```java
-public final class ExampleFateBalance implements FateBalanceEntrypoint {
-    private static final Identifier CATEGORY = new Identifier("example", "fate_balance/traveler");
-    private static final Identifier BLESSING = new Identifier("example", "sure_footed");
-    private static final Identifier BURDEN = new Identifier("example", "restless_sleep");
+| Palate pair | Tag suffix | Foods |
+| --- | --- | --- |
+| `garden_palate` / `garden_bound` | `fresh_produce` | fresh produce |
+| `hearth_palate` / `hearth_bound` | `bread` | bread |
+| `coastal_palate` / `coastal_bound` | `cooked_fish` | cooked fish |
+| `root_palate` / `root_bound` | `carrots` | carrot dishes |
+| `spice_palate` / `spice_bound` | `spicy_foods` | spicy foods |
 
-    @Override
-    public void register(FateBalanceRegistrar registrar) {
-        registrar.registerCategory(new FateBalanceCategory(
-                CATEGORY, "screen.example.fate_balance.category.traveler", 20));
+After the palate adjustment, positive meals use the [Comfort](/en/wiki/comfort/) history of 6 foods. The ordinary retained fractions are 1.00, 0.70, 0.40 and 0.10 for 0, 1, 2 and at least 3 prior occurrences. Dining traits multiply retention only for repeated meals, capped at 1.00. Positive results round down with a minimum of 1; negative results skip repetition. Personality applies afterwards. Food tooltips use the same calculation.
 
-        registrar.registerChoice(FateBalanceChoice.builder(BLESSING, FateBalancePolarity.BLESSING, 2)
-                .category(CATEGORY)
-                .severity(FateBalanceSeverity.STANDARD)
-                .tags("travel", "movement")
-                .build());
+Completed sleep restores the smaller of 30 and 70% of missing Comfort, rounded down, then applies the sleep trait and rounds again. Personality applies last and Comfort clamps to 0–100. Only players sleeping long enough to reset time receive this recovery when the world wakes its sleepers.
 
-        registrar.registerChoice(FateBalanceChoice.builder(BURDEN, FateBalancePolarity.BURDEN, 1)
-                .category(CATEGORY)
-                .severity(FateBalanceSeverity.MINOR)
-                .conflictsWith(BLESSING)
-                .build());
-    }
-}
-```
+## Other interactions
 
-Translation keys default to `fate_balance.<namespace>.<path>` and `…​.description`; override them with `nameKey` and `descriptionKey`. Custom icons expect a 16×16 source texture.
+Loot and eligible quest rewards must use IsekaiCore's grant event to receive the learning multiplier. Expansion's direct `isekaiexpansion:xp` quest reward and level potion bypass it. Combat experience is unchanged. Grants round to integers; small grants may not change.
 
-### Applying effects
+Fate Balance changes only the daily loot cap. Home-rest effects manage the combat cap separately. Each modified cap is recalculated every second from the current level; removing its last modifier restores that cap's default once. Neither path clears experience already used. See [level progression](/en/wiki/leveling/).
 
-Definitions carry **no effect callbacks**. Subscribe to `FateBalanceEvents.PROFILE_CHANGED` and reconcile from the immutable previous and current identifier sets. Listeners run after the synchronised component updates and must be idempotent.
+Personality scales non-direct Comfort changes and the decay interval. Gains and losses round to integers while retaining a signed unit for a nonzero result; direct assignments bypass the scaling. Countenance changes apply only to factions whose current reputation is at or below −100. Eloquence and Charm remain separate dialogue attributes. Appetite changes hunger capacity without defining a healing multiplier.
 
-For read-only gameplay checks use `FateBalanceApi.isSelected(player, choiceId)`. Trusted server systems may call `FateBalanceApi.commit` to reuse the same validation, persistence, synchronisation and event path as the selection screen.
+## Built-in presets
 
-Cross-choice rules go through `registerRule`; rules return localised `FateBalanceProblem` values and **must not mutate player state**.
+| Preset | Selected short IDs | Blessing cost | Burden gain |
+| --- | --- | --- | --- |
+| Wayfarer | `quick_study`, `long_horizon`, `hearty_appetite`, `restful_sleeper`, `contented_diner`, `root_palate` | 10 | 0 |
+| Hearthkeeper | `restful_sleeper`, `optimistic_nature`, `hearty_appetite`, `captivating_presence`, `contented_diner`, `hearth_palate` | 10 | 0 |
+| Storyteller | `silver_tongue`, `captivating_presence`, `kind_countenance`, `quick_study`, `optimistic_nature` | 10 | 0 |
+| Simple Living | `restful_sleeper`, `optimistic_nature`, `contented_diner`, `garden_bound` | 5 | 1 |
+
+Every preset fits the default budget. A different server budget or additional rules can make it invalid.
+
+## Where the definitions live
+
+Choices and effects are registered by the mod. Add-ons use the [Fate Balance API](/en/dev/fate-balance-api/); data packs can edit meal tags and [Comfort food values](/en/wiki/comfort-food/).

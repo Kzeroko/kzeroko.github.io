@@ -1,0 +1,245 @@
+---
+title: "Dungeon data and authoring"
+description: "Define native dungeon layouts, encounter scripts, temporary upgrades and placed authoring blocks."
+category: data
+order: 94
+updated: 2026-09-19
+---
+
+A native dungeon combines a server definition, Jigsaw templates and a configured entrance in the world. Scripts control encounters, gates and completion; selecting a mode alone does not build those encounters.
+
+## Where the files live
+
+Definitions live at `data/<namespace>/dungeons/**/*.json`. A file normally uses its resource ID, unless `id` overrides it. Jigsaw pools and templates remain ordinary world-generation resources; titles and messages use client language files.
+
+The shipped definitions are `isekaiexpansion:dark_delves` (Dark Delves), `isekaiexpansion:sunken_sanctum` (Sunken Sanctum) and `isekaiexpansion:verdant_temple` (Verdant Temple). The built-in `isekaiexpansion:dungeon_instance` dimension has an empty flat generator: templates must supply the floors and all playable blocks.
+
+## Minimal example
+
+Save this reduced form of the shipped Dark Delves encounter at `data/example/dungeons/trial.json`, then configure a gateway for `example:trial`. It uses the mod's existing starting pool, spawns one zombie after `100` ticks (`5` seconds), and begins a `600`-tick (`30`-second) extraction after its hazard is cleared.
+
+```json
+{
+  "difficulty": "uncommon",
+  "modes": [
+    "hazard"
+  ],
+  "structure": {
+    "start_pool": "isekaiexpansion:dark_dungeon/dungeon_spawn",
+    "start_jigsaw": "isekaiexpansion:spawn",
+    "base_y": 80,
+    "jigsaw_depth": 64
+  },
+  "scripts": [
+    {
+      "id": "example:opening",
+      "trigger": "session_started",
+      "actions": [
+        {
+          "type": "spawn_hazard",
+          "offset": [
+            7,
+            0,
+            0
+          ],
+          "waves": [
+            {
+              "entries": [
+                {
+                  "entity": "minecraft:zombie",
+                  "count": 1,
+                  "delay_ticks": 100
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "example:finish",
+      "trigger": "hazard_cleared",
+      "actions": [
+        {
+          "type": "complete",
+          "completion_delay_ticks": 600
+        }
+      ]
+    }
+  ]
+}
+```
+
+## Fields
+
+Unknown fields reject the definition at every parser-owned object level. Arrays and objects must have the expected container type. Enum strings are trimmed and case-insensitive; blank values use that enum's default, unknown values reject. Numeric fields below describe the post-parse clamps; syntactically invalid numbers still fail parsing.
+
+### Root
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | `identifier` | File resource ID | Optional override; invalid identifier rejects this definition. |
+| `title_key` | `string` | `dungeon.<namespace>.<path>` | Translation key; trimmed, blank uses the derived key. Slashes remain slashes. |
+| `difficulty` | `string` | common | common, uncommon, rare, epic, legendary, unique. Selects rarity/portal colour; does not scale enemies automatically. |
+| `modes` | `array<string>` | [common] | common, timed, rogue_like, must_complete, hazard; duplicates collapse. Missing/empty becomes common; modes can be combined. |
+| `team_policy` | `string` | party | solo, party, open. Changes the recorded party key; gateway reuse currently does not enforce party separation. |
+| `time_limit_ticks` | `int` | 0 | Ticks; negative clamps to 0. Only timed uses it. Choose a positive duration: 0 normally expires immediately. |
+| `structure` | `object` | Defaults below | Missing uses the default empty start pool. If present, start_pool and start_jigsaw are required. |
+| `scripts` | `array<object>` | [] | Ordered scripts; missing/empty adds no automatic completion. |
+| `powerup_pool` | `array<object>` | [] | Weighted references to registered temporary upgrades for rogue_like offers. |
+
+### Structure
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `structure.dimension` | `identifier` | isekaiexpansion:dungeon_instance | Target dimension; existence is checked on entry, not by the parser. |
+| `structure.start_pool` | `identifier` | Required when structure exists | Jigsaw template-pool ID. Whole-object default minecraft:empty cannot provide a playable layout. |
+| `structure.start_jigsaw` | `identifier` | Required when structure exists | Named starting Jigsaw connector; whole-object default is `isekaiexpansion:spawn`. |
+| `structure.entry_offset` | `array<number>` | [0, 0, 0] | Exactly 3 coordinates relative to the instance origin, converted to integers. Invalid length rejects; fractional values truncate. |
+| `structure.base_y` | `int` | 96 | Instance origin Y in blocks; no further range clamp. |
+| `structure.spacing` | `int` | 1152 | Clamped to at least 320 blocks, then must satisfy spacing ≥ 2 × max_distance + 64 or reject. |
+| `structure.jigsaw_depth` | `int` | 0 | Clamped to 0–64 Jigsaw expansion levels. |
+| `structure.max_distance` | `int` | 512 | Clamped to 16–512 blocks from the generation anchor. |
+
+### Scripts and actions
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `scripts[].id` | `identifier` | Required | Replay-history key; duplicate IDs are accepted and share once/cooldown memory. |
+| `scripts[].trigger` | `string` | area_entered | session_started, player_entered, area_entered, hazard_cleared, tick. |
+| `scripts[].replay_mode` | `string` | once_per_session | once_per_session, cooldown, repeatable. |
+| `scripts[].cooldown_ticks` | `int` | 0 | Clamped to 0–72000 ticks (0–3600 seconds). cooldown requires positive; every other mode requires 0. |
+| `scripts[].actions` | `array<object>` | [] | Executed in order. Even an empty script records its replay state. |
+| `scripts[].actions[].type` | `string` | spawn_hazard | spawn_hazard, spawn_return_portal, complete, offer_powerup, unlock_gate, message. |
+| `scripts[].actions[].offset` | `array<number>` | [0, 0, 0] | Exactly 3 doubles relative to the origin's block centre. unlock_gate instead uses whole block offsets from the origin and rejects fractions. |
+| `scripts[].actions[].waves` | `array<object>` | [] | Hazard waves; spawn_hazard with no waves does nothing. Other actions ignore them. |
+| `scripts[].actions[].completion_delay_ticks` | `int` | 600 | complete extraction delay: nonpositive uses 600 ticks (30 seconds), then clamps to 20–12000 ticks (1–600 seconds). Ignored by other actions. |
+| `scripts[].actions[].message_key` | `string` | Empty string | Trimmed translation key for message; blank sends nothing. Ignored by other actions. |
+
+### Hazard waves
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `waves[].entries` | `array<object>` | [] | Ordered spawn batches; missing/empty waves advance without spawning. |
+| `waves[].entries[].entity` | `identifier` | Required | Entity type ID; load-time validation checks identifier syntax only. |
+| `waves[].entries[].count` | `int` | 1 | Clamped to 1–64 entities per batch. |
+| `waves[].entries[].delay_ticks` | `int` | 0 | Clamped to 0–12000 ticks (0–600 seconds). Delay before this batch from hazard/wave start or the preceding batch. |
+| `waves[].entries[].offset` | `array<number>` | [0, 0, 0] | Exactly 3 doubles relative to the hazard, before the spawn ring and collision search. |
+| `waves[].entries[].nbt` | `object` | {} | Typed JSON NBT applied after mob initialisation, preserving transform/UUID. Wrong container or invalid typed NBT rejects. |
+
+### Powerup pool
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `powerup_pool[].powerup` | `identifier` | Required | Registered powerup ID. Unknown or maximum-level entries are excluded during offer selection. |
+| `powerup_pool[].weight` | `int` | 1 | Clamped to at least 1. Offers contain up to 3 distinct IDs; duplicate references are accepted at load. |
+
+The `nbt` value uses the same [typed JSON NBT rules](/en/wiki/quest-objectives/) as quest spawning: a compound object, homogeneous lists and explicit numeric wrappers where needed. It is not an SNBT string. Arbitrary entity NBT remains the entity's own schema; the dungeon parser validates its NBT representation, not every entity-specific key.
+
+### When scripts run
+
+| Trigger | Dispatch |
+| --- | --- |
+| `session_started` | Once a new session has placed its layout and successfully teleported its first participant. |
+| `player_entered` | After each successful entry, including the first; replay mode can still suppress it. |
+| `area_entered` | A configured trigger block requests its specific script for a bound participant in the session dimension. |
+| `hazard_cleared` | When removal of a finished hazard leaves no hazards in the session. |
+| `tick` | Every `20` server ticks while an online participant is in the dungeon and extraction has not begun. |
+
+Replay memory is per session and script ID. Actions execute before the replay state is recorded, without a transaction or per-action rollback. `repeatable` allows every qualifying dispatch; `cooldown` stores the next eligible game tick.
+
+`spawn_hazard` creates ordered waves. Within a wave, batches follow their own delays; the next wave waits until every emitted, tracked entity is gone. Unloaded entity UUIDs remain tracked rather than counting as kills. Failed spawn searches are not retried as the same batch. After all hazards clear, rogue-like offers are also generated for eligible participants, independently of an explicit `offer_powerup` action.
+
+`spawn_return_portal` creates an exit without completing the session; `must_complete` prevents its use. `complete` starts extraction rather than immediately awarding completion. During extraction, new area scripts and hazard/tick processing stop; the original timed deadline is checked first and can still fail the run. Finishing waits for an online participant in the dungeon.
+
+`unlock_gate` targets a controller at the integer origin offset; a missing controller or empty link set logs a warning and does not unlock a substitute location. `message` sends the translated message to online participants. `offer_powerup` needs `rogue_like` and a nonempty pool.
+
+### Mode and membership boundaries
+
+`timed` creates the initial deadline; `must_complete` blocks voluntary return portals and selects the native dungeon death-respawn path. `rogue_like` enables temporary upgrade offers. `common` and `hazard` do not automatically create enemies or completion rules.
+
+A physical gateway reuses an active session matching its entrance and dungeon definition. The current entry path does not compare the entrant's party with that session's recorded party key. Thus `solo`, `party` and `open` must not be used as an access-control or private-party isolation guarantee. A player already bound to an active session cannot start another.
+
+### Placed authoring blocks
+
+Editing requires creative mode and permission level `2`. Use the main hand to open the gateway, trigger or controller editor. The four block/item IDs are `isekaiexpansion:dungeon_gateway`, `isekaiexpansion:dungeon_script_trigger`, `isekaiexpansion:dungeon_unlock_controller` and `isekaiexpansion:dungeon_unlockable`.
+
+1. Place the gateway in the world-entry structure and set its dungeon ID. A nonspectator standing in its bounds charges for `40` ticks (`2` seconds); leaving clears the charge. Portal cooldown also resets charging.
+2. Place trigger blocks inside the dungeon template and bind `area_entered` script IDs. The scan uses a sphere, optional line of sight and `on_enter` or `while_present` activation. Replay mode still governs the script itself.
+3. Use the unlockable item on an existing block to capture its block state as a gate facade. This preserves the block state, not the original block entity's inventory or other NBT. A facade's appearance does not replace the gate's full-cube locked collision.
+4. Sneak-use a controller while holding its controller item to select it. Use that selected item on gate cells to toggle relative links, in the same dimension.
+5. Configure controller timings and point an `unlock_gate` action at it. A fresh session resets controllers referenced by its definition. Unlocking orders cells outward and clockwise in the two axes with the widest spans; cells remain collision-blocking until their own animation ends.
+
+Trigger scans dispatch at most one player per scan. Their occupant cache is transient and updated only through the scanned prefix before that dispatch; `on_enter` is therefore not a durable once-per-player guarantee. Use script replay rules for durable once/cooldown behaviour.
+
+The following fields are placed-block or controller-item NBT, separate from the dungeon definition JSON. Editors write them for you; runtime fields are included so a saved structure can be inspected accurately.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Dungeon` | `string` | Unset | Gateway definition ID; malformed saved ID disables it. Editing requires a valid identifier but does not require an existing definition. |
+| `Portal` | `UUID` | Absent | Gateway's spawned portal UUID, maintained by the runtime. |
+| `Script` | `string` | Unset | Area-trigger script ID; malformed saved ID disables it. Must match an area_entered script in the participant's definition. |
+| `Radius` | `double` | 2 | Trigger sphere radius in blocks, clamped to 0.5–64. |
+| `Activation` | `string` | on_enter | on_enter or while_present; blank/unknown saved value falls back to on_enter. |
+| `ScanInterval` | `int` | 10 | Ticks; nonpositive uses 10, then clamps to 1–100. |
+| `RequireLineOfSight` | `boolean` | false | Collider ray from player eyes to trigger centre; fluids ignored, hitting the trigger itself is accepted. |
+| `Targets` | `list<compound>` | [] | Gate controller offsets. Reads at most 256 entries, removes duplicates, rejects zero or any coordinate outside −64–64. |
+| `Targets[].X, Targets[].Y, Targets[].Z` | `int` | 0 | Relative block coordinates from the controller, not from the dungeon origin. |
+| `StepInterval` | `int` | 3 | Ticks between gate cells; nonpositive uses 3, then clamps to 1–40. |
+| `BlockAnimation` | `int` | 10 | Dissolve duration in ticks; nonpositive uses 10, then clamps to 2–60. |
+| `PlayBreakSounds` | `boolean` | true | Controller plays each facade's block-breaking sound during unlock. |
+| `Active` | `boolean` | false | Controller runtime sequence state; configuration cancels it. |
+| `Index` | `int` | 0 | Controller next-cell index, lower-clamped to 0; out-of-range saved index cancels the sequence. |
+| `NextStep` | `long` | 0 | World tick for the controller's next step, lower-clamped to 0. |
+| `DisplayState` | `compound` | minecraft:stone_bricks | Unlockable facade block state. Air, unlockable and controller states are rejected. Appearance does not change full-cube locked collision. |
+| `Unlocking` | `boolean` | false | Cell's dissolve state; not the block state's locked property. |
+| `UnlockStarted` | `long` | 0 | World tick when cell dissolution started. |
+| `UnlockDuration` | `int` | 10 | Same default and 2–60 tick clamp as BlockAnimation. |
+| `DungeonUnlockControllerDimension` | `string` | Absent | Controller item's selected world ID; linking requires the current dimension to match. |
+| `DungeonUnlockControllerPos` | `long` | Absent | Packed absolute selected-controller block position on the item. |
+
+Gateway and trigger/controller geometry is invisible to ordinary players. Unlockable cells retain their facade while locked, then become non-colliding when unlocked. Trigger/controller editor updates require the player within `8` blocks; gateway configuration checks creative/operator permission and the block type without that distance check.
+
+### Built-in temporary upgrades
+
+All IDs below use `isekaiexpansion:`. A draft offers up to `3` distinct eligible choices and stores the pending choices per participant. An unpicked offer is reused; choosing requires the active session, participant membership and an offered ID. Levels and pending choices survive reconnects, and levels are cleared on departure or resolution.
+
+| ID | Levels | Effect |
+| --- | --- | --- |
+| `vitality_surge` | `1` | Heals `6` health on grant; cannot be selected again in that session. |
+| `reapers_mending` | `1–3` | Killing a monster as the credited player heals `1`, `1.5` or `2` health respectively. |
+| `iron_resolve` | `1–3` | Effective damage taken grants Resistance for `60` ticks (`3` seconds), amplifier level minus `1`. |
+| `windstep` | `1–3` | Each second refreshes Speed for `30` ticks (`1.5` seconds), amplifier level minus `1`. |
+
+These event effects require an active participant in the session dimension. Clearing levels stops future hooks; existing timed status effects expire by their own durations.
+
+### Completion advancement
+
+The advancement trigger `isekaiexpansion:dungeon_completed` fires for online participants on successful native dungeon completion. Its custom condition fields are below; the ordinary advancement player predicate is handled by Minecraft. This condition object is separate from the strict dungeon definition schema.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `dungeon` | `identifier` | Any dungeon | Exact completed dungeon ID; malformed identifiers reject parsing. |
+| `minimum_difficulty` | `string` | Any difficulty | Difficulty names from the root table; completion must reach at least that rarity level. Blank uses common, unknown rejects. |
+
+## Validation
+
+The loader catches errors per file and publishes the valid subset, even if other files failed. Duplicate explicit dungeon IDs retain the first successfully inserted definition in loader iteration order and report the later duplicate. This is not an atomic rollback to the old catalogue.
+
+Definition parsing does not resolve every pool, connector, dimension, script reference, entity type or powerup. Entry later plans the Jigsaw graph and rejects missing/empty pools, missing starting connectors, unsupported pieces or a layout not containing its anchor. The layout may cover at most `256` chunks; guarded preloading adds a `1`-chunk border and has a `1024`-chunk limit.
+
+The initial entry search checks up to `8` blocks horizontally and `8` vertically for empty, fluid-free feet/head space and a supporting collision shape below. It stores the chosen feet position before participants bind. Once populated, the session keeps that exact spawn; restoring a damaged layout does not silently relocate it.
+
+In a test world, verify successful entry and return, every script replay mode, restart during a wave and gate animation, missing references, failed spawn positions and completion near the timed deadline. Test actual party admission rather than inferring it from `team_policy`.
+
+## Reloading
+
+Definitions use server data reload. Valid entries replace the previous catalogue; malformed entries can disappear on `/reload`. Active sessions look up the current definition during ticking: removing or invalidating their definition fails them. Stored session origin, spawn, slot and deadline are not recalculated from edited structure/time fields.
+
+Editing a gateway or trigger updates its placed configuration; it does not rewrite the JSON definition. Full layout replacement is not guaranteed by a definition reload: an existing placed session with a safe arrival can continue using its current blocks.
+
+## Related
+
+- [Dungeon runtime](/en/dev/dungeons/) — lifecycle, save schema, hooks and commands.
+- [Progression data](/en/wiki/progression-data/) — progression graph definitions.
+- [Quest objectives](/en/wiki/quest-objectives/) — native dungeon completion objectives and typed NBT.

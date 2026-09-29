@@ -1,0 +1,96 @@
+---
+title: "Developer Editor Preferences"
+description: "Shared editor themes, the client preference file and integration rules for the dense authoring controls."
+category: client
+order: 71
+updated: 2026-09-19
+---
+
+The in-game developer editors share a client-local theme selection with 3 palettes: Blender, Blockbench and Graphite. The implementation lives under `client.screen.editor`; it is an internal UI framework, not a public API or a server configuration system.
+
+## What it does
+
+`EditorThemePreferences` stores the shared selection. The scene recorder, scene trigger and `DungeonEditorFragment` read it when their fragment is created; the dungeon base serves the script, gateway, unlock-controller and loot-chest editors.
+
+Choosing the next theme updates the shared preference immediately and rebuilds that editor's controls. Other existing fragments keep their own theme field; there is no broadcast that repaints every screen. Newly created fragments read the current shared selection.
+
+## Runtime model
+
+The singleton loads on first class use. Its file is `isekaiexpansion-deveditors.txt` in Fabric's game directory, not the world save or the configuration directory. Reading and writing use UTF-8.
+
+```text
+# IsekaiExpansion developer editor preferences
+format 1
+theme blender
+```
+
+| Entry | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `format` | Exact text version | Required in an existing file | Must be `1`; other text, including inline comments, is invalid. |
+| `theme` | Theme name | `blender` in memory when no regular file exists | Existing files require `blender`, `blockbench` or `graphite`. Input is trimmed and case-insensitive; output is lowercase. |
+| Lines starting with `#` | Comment | Optional | Ignored after surrounding whitespace is stripped. |
+| Blank lines | Whitespace | Optional | Ignored. |
+
+Each non-comment line splits once on whitespace. Unknown keys and lines without a value are ignored. Later valid duplicate keys replace earlier values, but an unknown theme throws immediately rather than waiting for a later correction. A later invalid `format` leaves the final format invalid.
+
+| File condition | Result |
+| --- | --- |
+| Missing path or non-regular file | Keep Blender without attempting an initial write |
+| Missing required format/theme, invalid format or invalid theme | Reset to Blender and write the current format |
+| Read failure | Log a warning, reset to Blender and attempt the same rewrite |
+| Successful read | Keep the parsed theme in memory |
+| External edit after loading | No watcher or reload method; the current process keeps its in-memory selection |
+
+Writing emits only the header, format and theme lines, so custom comments and unknown fields do not survive a save. It writes a sibling `isekaiexpansion-deveditors.txt.tmp`, then moves it over the destination with atomic replacement. If atomic move is unsupported, it retries with ordinary replacement. Other I/O failures are logged; the in-memory selection is not rolled back and a temporary file may remain.
+
+## Contracts
+
+| Internal method | Behaviour |
+| --- | --- |
+| `EditorThemePreferences.current()` | Returns the singleton's current selection |
+| `EditorThemePreferences.select(EditorTheme)` | Null or the same selection returns the current theme without writing; another value updates memory, writes synchronously and returns that selection |
+| `EditorTheme.next()` | Cycles Blender → Blockbench → Graphite → Blender |
+| `EditorTheme.serializedName()` | Uses lowercase with `Locale.ROOT` |
+| `EditorTheme.fromSerializedName(String)` | Rejects null/blank; trims and parses case-insensitively |
+
+Use these methods on the client through the editor UI path. They do not marshal threads, synchronise concurrent access or queue disk writes. Do not load the preference class on a dedicated server or treat its file as synchronised player state.
+
+The palette provides colours for toolbars, normal/raised panels, borders, fields, normal/hover/active buttons, accents, primary/secondary/muted text and danger buttons. `SquareButton` prioritises danger fill, then active fill, then hover/press fill; an active button still uses the accent border.
+
+## Extending it
+
+A new editor should initialise its theme from `EditorThemePreferences.current()`. Its theme-button callback can follow the existing fragments:
+
+```java
+theme = EditorThemePreferences.select(theme.next());
+statusColor = theme.textMuted();
+rebuild();
+```
+
+Here `theme` and `statusColor` are the fragment's existing fields, and `rebuild()` recreates controls from that state. Keep editing data in the fragment's model so rebuilding its widgets does not become an implicit save or reset of authored content.
+
+| Shared helper | Behaviour to preserve |
+| --- | --- |
+| `EditorWidgets.square` | Rectangular background, corner radius 0 and 1 dp border |
+| `EditorWidgets.editText` | Single-line input; initial value is set before the text watcher is attached |
+| `EditorWidgets.field` | Changes call the supplied consumer; an optional commit callback is posted when focus is lost |
+| `EditorWidgets.choice` | Cycles the supplied options then rebuilds; provide a non-empty list |
+| `EditorWidgets.toggle` | Inverts the value then rebuilds |
+| `EditorWidgets.actionRow` | Equal-width controls separated by the common gap |
+
+The common toolbar height is 25 dp, control height 21 dp and gap 3 dp. These are layout constants, not restrictions on values edited by the widgets.
+
+`EditorI18n.option` lowercases an option, then checks translation prefixes in order: `screen.isekaiexpansion.developer_editor.option.`, `screen.isekaiexpansion.cinematic_scene.editor.option.`, `screen.isekaiexpansion.dungeon.editor.option.`. Null becomes `none`. If no translation exists, `EditorWidgets.humanize` replaces colons/underscores with spaces and capitalises words. Use the translation keys for display text while keeping the underlying serialized value unchanged.
+
+## Verifying
+
+- With the client closed, remove only a test copy of the preference file. Open an editor and confirm Blender is selected without creating the file merely by reading.
+- Cycle all themes, reopen a different editor and restart the client. Check the saved lowercase selection is reused.
+- Test a wrong format, missing theme, uppercase valid theme and invalid theme followed by a valid one. Check which inputs are accepted and which reset the file.
+- Make a test destination unwritable and select another theme. Confirm the warning and in-memory change; a returned selection does not prove the disk write succeeded.
+- Edit a field, lose focus and change theme. Confirm the model retains the edit and that rebuilding does not spuriously fire the initial text-change callback.
+
+## Related
+
+[Tutorial runtime](/en/dev/tutorials/) covers the separate tutorial UI and persistence. [Blockbench plugin](/en/dev/blockbench-plugin/) covers the external asset tool; the editor's Blockbench palette is only a theme name, not a dependency on that plugin.
+

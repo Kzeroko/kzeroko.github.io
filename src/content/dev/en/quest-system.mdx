@@ -1,0 +1,235 @@
+---
+title: "Quest runtime"
+description: "Team profiles, objective dispatch, persistence, synchronisation and internal quest extension points."
+category: systems
+order: 170
+updated: 2026-09-26
+---
+
+The quest runtime keeps authoritative progress in server profiles, dispatches gameplay events to active objectives and sends a filtered view to clients. This page covers the internal implementation and its failure boundaries; data-pack authors should start with [quest data](/en/wiki/quest-data/).
+
+## What it does
+
+The implementation lives in `internal.quest`; these registries, pickers, events and state classes are internal entry points, not a public `QuestAPI` facade. `QuestSystemInit.initCommon()` installs join synchronisation, team membership listeners, gameplay callbacks and server tick work. `QuestClientSystem.init()` owns cache, disconnect and HUD setup.
+
+Definitions and progress have separate lifetimes. A successful `QuestLoader` reload replaces the complete definition index and increments its revision; a rejected reload retains the previous index. Active progress remains in persistent profiles. Missing definitions disappear from active trigger indexes and client projections without deleting their saved records.
+
+## Runtime model
+
+### Profile ownership and picking
+
+`QuestTeamKeyResolver` selects `team:<UUID>` for an IsekaiCore team, otherwise `player:<UUID>`. Online members share that profile across dimensions. Only a solo player or team owner passes `QuestPickAuthority`; changing membership changes the selected profile and sends full snapshots, without merging, copying or deleting the old profile.
+
+`MainstoryQuestPicker` checks the actor's IsekaiCore story progress, prerequisites, prior resolution, cooldown and pick conditions. `MiscQuestPicker` additionally filters a random pick by pool and optional chapter, then draws from eligible positive weights. Direct selection still runs server eligibility checks. A packet requesting an ID is not permission to activate it.
+
+Use player-aware picker overloads for gameplay. The lower-level `pickForProfile` overloads can omit the condition context or use `Long.MAX_VALUE` as the time, so they are not equivalent to a normal player request. `unlockRepeatableForTeam` mutates persistent state but does not send a delta itself.
+
+Activation records the picker UUID and start time, dispatches `ON_QUEST_PICKED`, then synchronises the resulting profile entry. The registered listener runs each objective's `QUEST_PICKED` content against the live active progress when available. Exceptions are logged per objective; external event listeners do not have automatic exception isolation.
+
+### Dispatch and resolution
+
+`ObjectiveTracker` indexes active teams and objectives by trigger. The indexes are transient, rebuilt on loader revision changes and refreshed when a profile changes. Completed objectives leave progress, failure and manual-content indexes. A trigger processes each objective ID at most once, even when a changed condition causes the scan to restart.
+
+| Input | Runtime source and boundary |
+| --- | --- |
+| Entity defeat | Fabric combat callback; credit resolves a server player, their projectile, a following NPC or that NPC's projectile. |
+| Block or entity interaction | Server-side use callback; returns `PASS`, so observing the use does not itself consume it. |
+| Player tick | End-server-tick dispatch only while indexed objectives need it. |
+| Automatic NPC delivery | Checks every `5` ticks per player, staggered by entity ID; delivery predicates run before consumption. |
+| Player damage | Successful player damage return; payload carries the supplied damage amount. |
+| Recipe craft | Recipe hook emits one craft event by default, not the number of output items. |
+| Advancement | A successful criterion grant emits one event carrying the criterion and whether the advancement is now complete. |
+| NPC talk | Matching bound dialogue starts the event; finishing the conversation is not required. |
+| Photograph | Exposure bridge supplies frame and photographer metadata; the dependency owns exposure capture. |
+| Dungeon completion | Dungeon session completion emits the quest trigger. |
+| Manual content | Explicit `triggerManualForPlayer` or `triggerManualForTeam`; blank IDs are ignored and an absent profile is not created. |
+
+A credited event selects the actor's profile. Without a responsible player, nearby profiles can be considered within `64` blocks, but normal objective progression requires a non-null context player. Nearby uncredited kills therefore do not automatically advance another team's defeat counter.
+
+Failure rules run before objective progress and do not inherit the objective's event-condition filter. A matching failure removes the active quest, records failure and sends a delta without rewards. Otherwise matching numeric increments saturate at `2147483647`; a matching boolean objective becomes true. All objectives in the current definition must be complete before the quest resolves.
+
+Completion removes active progress and records completion before rewards execute. Rewards run in declaration order with per-entry exception handling; later rewards still run after an earlier failure. `ON_QUEST_COMPLETED` receives the results, then the changed quest IDs are synchronised. There is no transaction, automatic retry or rollback across progress, item consumption, spawned entities and rewards. See [quest objectives](/en/wiki/quest-objectives/) and [quest rewards](/en/wiki/quest-rewards/) for the individual contracts.
+
+Manual dispatch executes matching content on unfinished objectives; it does not increment the objective merely because the trigger ID matched. Content actions report profile changes separately from world effects. For example, the spawn action can create entities while returning no profile change.
+
+### Guild bounty lifecycle
+
+Block implementations live together under `net.kzeroko.isekaiexpansion.block.bounty`: `BountyBoardBlock`, `BountyBoardBlockEntity`, shared `BountyBoardLayout`, client-only `BountyBoardModel`, `GuildReceptionistAnchorBlock`, `GuildReceptionistAnchorBlockEntity` and its client-only `GuildReceptionistAnchorBlockEntityRenderer`. `BountySystem` retains registration ownership. Quest authority, quotas, connected-board discovery and ledger return processing remain under `internal.quest.bounty`; the block lifecycle calls `BountyAPI.restoreReturnedNotices(board)`, which delegates to internal `BountyBoardReturns`. The relocation changes no registry IDs or saved fields.
+
+`QuestTier.BOUNTY` shares the objective tracker, team profile, conditions and reward executor. `BountySystem` registers the board, writ, policy loader, receptionist marker and expiry sweep. Inventory movement never grants authority. `BountyLedger` saves UUID-indexed `BountyNotice` reservations, live `BountyContract` records, return queues and separate player/team taking and signing quotas in `isekaiexpansion_bounties.dat`.
+
+`RequestPickBountyPacket` carries the block position and displayed posting UUID. `BountyService.takeNotice` rechecks the loaded board, protection, a `2`-block front-face ray, current layout and exact posting identity. Admission checks duplicate reservations, native active work, authored cooldowns and requirements before removing the paper. Taking removes one posting, adds an independent reservation and inserts a new item; it never replaces another notice. The default reservation lasts `12000` ticks. Signing separately validates rank, owned offhand nameplate, leadership, quota and native eligibility, removes that reservation and activates the native quest under a new contract UUID. Contract signer, original team, quest, pool, start, expiry, cycle and standing award remain fixed.
+
+Every ordinary or manual progress event checks the `(team, quest)` contract index. Completed objectives remain active until a receptionist report. The `20`-tick sweep also expires offline contracts. Startup and successful reload reconcile orphaned bounty progress without constructing replacement authority. Removing a quest, pool or bounty metadata, or changing its pool, closes affected contracts.
+
+Reporting first validates the desk session, signer, issuing pool and original team. `BountyDeliveryObjectiveLogic` can consume supplies only inside the service's `ThreadLocal` submission scope, cleared in `finally`; arbitrary manual dispatch is inert. Its condition context targets the receptionist as `INTERACT_ENTITY`. Partial supply reports remain recorded. Settlement removes authority and records completion before applying Core standing and native rewards, retaining the reward executor's partial-failure semantics without a crash transaction across separate save files.
+
+Reissue, unsigned return and signed withdrawal resolve a server ledger UUID, not a carried item. Returning an unsigned notice removes reservation authority and matching carried copies before queueing it. The origin board may place it in its own or a connected board’s vacancy with a fresh posting UUID; it never overwrites another paper. Full or unloaded boards leave the return queued, and elapsed guild days discard queued returns. Identity, source position, dimension and pool checks prevent a replacement board from receiving old returns. Expired unsigned reservations use the same path. Signed withdrawal closes the contract without reposting it, refunding quota or returning delivered goods. Reporting requires the original team and issuing pool but no paper copy.
+
+Each board checks the elapsed overworld clock every `20` ticks. Saved `nextRestock` selects a random delay from the pool bounds; ordinary restocks fill up to `2` vacancies or replace `1` full-board posting. A new `24000`-tick guild day clears all slots and rerolls the layout. Weighted draws prefer quests absent from the connected wall, then fall back to quests absent from the local board. Reload validates current offers without forcing a reroll. Neither replacement nor guild-day refresh changes reservations already in a player’s ledger.
+
+Board save data uses `Pool` (identifier), `Board` (UUID), `GuildDay` and `NextRestock` (longs), `Variant` (byte), `Position` (packed block position), `Dimension` (identifier) and `Offers` (compound list of `Slot`, `Posting` UUID and `Quest`). Only `Pool` is an authoring field. A changed source position or dimension renews board identity. Ledger `notices` and `returns` hold `id`, `reader`, `team`, `quest`, `pool`, `expires_at`, `dimension`, `source`, `board`, `slot` and `guild_day`; `contracts` retain signed records, and `quotas` / `take_quotas` hold per-key `day`, `count` and `last`. Return queues are indexed by board UUID and pruned at the day boundary. These are prototype save structures with no legacy migration.
+
+### Receptionist API and dialogue
+
+`api.bounty.BountyAPI` delegates NPC operations to `BountyReception`. Register an entity-type resolver during common initialization; it returns the served pool or `null`. `greet(player, npc)` starts the bound parent dialogue, and `open(player, npc)` opens the ledger within that dialogue. `connectedBoards(world, origin)` delegates to `BountyBoardCluster` and returns an immutable, position-sorted list of up to `64` loaded boards, connected edge-to-edge in the same plane with matching facing and pool. All calls run on the server thread; discovery never forces chunk loads or caches world references.
+
+```java
+BountyAPI.registerReceptionist(MY_RECEPTIONIST_TYPE, npc -> npc.guildPool());
+BountyAPI.greet(player, receptionist);
+```
+
+The Blabber action `isekaiexpansion:open_guild_bounties` opens the ledger for the active registered speaker. Callbacks retain the original session UUID, NPC UUID, pool and definition revisions; they recheck living participants, same world, line of sight, `4`-block range, NPC dialogue eligibility and absence of NPC combat. Reloaded terms or a replaced speaker invalidate old callbacks.
+
+`BountyDialogue` uses Blabber's `DialoguePanel` and server-owned `DialogueScreenObject` selections. The searchable catalogue filters unsigned, active, ready and party entries; review, confirmation and result are distinct steps. Internal `BountyDialogueSummary` restricts catalogue previews to aggregate completion and expiry, and speech to a single context-dependent prompt. It never serialises the description, objective names or reward list into dialogue. Record choices follow this prompt directly without a continuation page; full details stay in the journal and parchment.
+
+Confirmation resolves the record again, names the commission and distinguishes returning an unsigned notice from withdrawing a signed contract. Reporting is offered only at the issuing guild and in the original party; server checks still run on confirmation. Previews count completed objectives without creating progress entries. NPC strings live in `language_assemble/categories/dialogues`. Blabber’s ModernUI catalogue transitions, controls and controller support remain in use. A screen payload supplies neither guild authority nor reward amounts.
+
+`GuildReceptionistEntity` uses the shared default humanoid profile, renderer and stationary mode. `GuildReceptionistAnchorBlockEntity` stores the deployed UUID and does not respawn merely because an entity is unloaded. Copying its marker to a different position or dimension clears the deployment identity. Destroyed bound entities clear their link; an enabled marker checks every `40` ticks. The marker editor reuses the developer inspector and its theme preferences. The configuration packet requires creative permission level `2`, a loaded/protected position within `8` blocks, a valid pool and finite yaw. Commands and editor setup are documented in [Bounty data](/en/wiki/bounty-data/).
+
+Verify a lost writ by deleting the paper, reopening the ledger and testing reissue, report and withdrawal separately. Also test party changes, full inventory, a stale confirmation after `/reload`, duplicate report answers, partial supplies, server restart, marker unload/reload and a copied guild structure. Automated persistence, quota and submission-scope checks run through `tools/bounty/verify.gradle`.
+
+`BountyHudOverlay` sends immutable localised presentations through a coalesced mailbox to ModernUI. `BountyAssets` owns atlas regions; `BountyTypeface` prepends MedievalSharp and LongCang to the fallback chain. The item-only tooltip component and vanilla draw hooks reuse this overlay. Body overflow pages every `10` seconds; all four sheets share bounded layout space. Acceptance can use the normal tracked quest HUD; using an active writ in the air toggles tracking.
+
+See [Bounty data](/en/wiki/bounty-data/) for authoring and [Guild bounties](/en/wiki/bounty-quests/) for the player flow.
+
+Posted papers use `textures/gui/screen/bounty/board_contents.png`, a `256 × 256` sprite stitched into the block atlas by `assets/minecraft/atlases/blocks.json`. `BountyBoardLayout.Paper` defines five tight crops. Shared precomputed geometry provides `32` layouts with shuffled paper types, positions and gentle tilts; inverse rotation for picking uses the same variant. The server stores only one variant byte per board and chooses a layout during a full guild-day refresh.
+
+`BountyBoardModel` wraps the baked block model and caches cutout meshes by facing, variant and slot. Paper material disables ambient occlusion and diffuse shading while retaining world lighting. `BountyBoardBlockEntity.getRenderData()` packs the six occupied bits and variant into one immutable integer; changes schedule a chunk rebuild. There is no posted item model or per-frame board renderer. Picked and completed writ items keep their inventory models.
+
+World previews renew `HudAPI.suppress` with a `350`-millisecond hold. See [HUD visibility](/en/dev/hud-visibility/) for the reusable client contract. Titles fit their measured font height within a lower header band, above the subtitle and separator; changing focused notices does not restart the sheet's entrance animation.
+
+### Persistent storage
+
+`ServerQuestState` is cached per server in a weak-key map and uses the overworld persistent-state manager. It selects a shard with `Math.floorMod(teamKey.hashCode(), shardCount)`. The current shard count is `64`, covering `state_00_v2.dat` through `state_3f_v2.dat` under `data/isekaiexpansion/quest/shards/`; metadata and world flags use `quest/meta_v2.dat` and `quest/world_flags_v2.dat` beneath the same mod directory.
+
+The tables describe the saved NBT, not a data-pack schema. Empty compound lists read as empty collections. Invalid identifiers or enum names inside a profile can throw; shard loading does not catch and skip every malformed profile.
+
+| Record / field | NBT type | Missing or invalid input; write behaviour |
+| --- | --- | --- |
+| Metadata `version` | `int` | Missing reads as `0`; unsupported versions warn; current value becomes `2`. |
+| Metadata `shard_count` | `int` | Missing/nonpositive uses `64`; state initialisation also resets any other count to `64`. No re-sharding migration runs. |
+| Metadata `storage_format` | `string` | Writes `sharded_v2`; the reader does not use this marker. |
+| Shard `version` | `int` | Missing/`0` and `2` accepted; another version warns and yields an empty shard. |
+| Shard `shard_index` | `int` | A mismatched stored index warns; the requested file index remains authoritative. |
+| Shard `profiles` | `compound` | Maps team key to profile compound; missing/wrong container is empty, blank keys and non-compound entries are skipped. |
+| Profile `active_quests` | `list<compound>` | Active records below; duplicate quest IDs overwrite earlier entries. |
+| Profile `completed_quests`, `failed_quests` | `list<compound>` | Resolution records below; entries without `quest_id` are skipped. |
+| Profile `unlocked_repeatables` | `list<compound>` | Each entry contains `quest_id`; missing IDs are skipped and identifiers are stored as a set. |
+| Active `quest_id` | `string` | Required valid identifier; invalid input can throw. |
+| Active `tier` | `string` | Exact enum name `MAINSTORY`, `IMPORTANT_MAINSTORY`, `MISC` or `BOUNTY`; invalid input throws. |
+| Active `started_at` | `long` | Game time in ticks; missing reads as `0`. |
+| Active `cycle` | `int` | Clamped to at least `1`. |
+| Active `picker_player_uuid` | UUID int array | Written only when a picker exists; absent/unrecognised UUID representation means no picker. |
+| Active `objective_progress` | `list<compound>` | Each entry has `id`, `numeric`, `flag`; blank IDs are skipped and duplicate IDs overwrite. |
+| Objective `id` | `string` | Local objective ID, not a namespaced quest ID. |
+| Objective `numeric` | `int` | Missing is `0`; negative values clamp to `0`. |
+| Objective `flag` | `byte` boolean | Missing is false. |
+| Active `condition_sequences` | `list<compound>` | Each entry has `id` and `value`; blank IDs are skipped. |
+| Sequence `id` | `string` | Sequence state key within this active quest. |
+| Sequence `value` | `int` | Missing/negative becomes `0`; only positive values are written. |
+| Resolution `quest_id` | `string` | Identifies the completed or failed quest. |
+| Completion `completion_count` | `int` | Missing/negative becomes `0`. |
+| Completion `first_completed_at`, `last_completed_at` | `long` | Game ticks; a stored record with missing fields reads `0`, while querying an absent record returns `-1`. |
+| Failure `failure_count` | `int` | Missing/negative becomes `0`. |
+| Failure `first_failed_at`, `last_failed_at` | `long` | Same stored-record versus absent-record distinction as completion. |
+| World flags `flags` | `compound` | Nonblank flag names map to booleans; missing container is empty, missing flag is false. False values remain stored. |
+
+Metadata repair does not migrate older filenames or redistribute profiles. World flags have a versioned filename but no `version` payload field. The wrapper used for client profiles adds `team_key` and `profile`; blank team keys read as `client:unknown`, and a missing profile compound falls back to reading the wrapper itself as the older flat profile form.
+
+State getters can return live objects. Use `updateProfile`, `updateProfileIfChanged` or `updateExistingProfileIfChanged` so changes refresh indexes and mark the shard dirty. The conditional variants depend on the callback returning true; the existing-only variant avoids creating a profile. Snapshot methods deep-copy profiles. `consumeDirtyTeams()` clears bookkeeping; it is not a network flush.
+
+### Packets and client state
+
+All channels below use the `isekaiexpansion:` namespace. IsekaiCore's C2S wrapper decodes the packet and schedules its handler through `server.executeSync`; the S2C quest handlers apply state through `client.execute`.
+
+| Channel suffix | Direction | Payload and effect |
+| --- | --- | --- |
+| `open_quest_pick_screen` | C2S | Empty; opens the handled screen. Opening does not send a fresh definition snapshot. |
+| `request_pick_mainstory_quest` | C2S | Quest identifier; authoritative story picker checks it. |
+| `request_pick_misc_quest` | C2S | Quest identifier; authoritative miscellaneous picker checks it. |
+| `request_pick_random_misc_quest` | C2S | Pool enum, chapter-present boolean and optional chapter identifier; weighted picker. |
+| `sync_quest_full` | S2C | Compressed NBT with `definitions` and `profile`; replaces client definitions and profile. |
+| `sync_quest_delta` | S2C | Compressed NBT with an `entries` list; updates individual quest records. Empty deltas are not sent. |
+
+Full synchronisation includes only definitions marked client-visible and filters the profile to those IDs. It runs on connection and membership changes; debug reset-all also sends it to affected online players. The definition loader itself does not broadcast a full sync. After editing definitions, reconnect or explicitly invoke `QuestSyncService.sendFullSync` from server-side tooling before evaluating the client view.
+
+The definition projection includes ID, chapter, tier, repeatability, pools, prerequisites, pick conditions, cooldowns, objectives and rewards. It does not carry the story selection ranges or random picker weights. Objective `clientData` is a presentation projection, with objective conditions added when present, not a copy of the executable content/failure configuration.
+
+A progress delta carries `quest_id`, `has_active`, optional `active_progress`, completion/failure counts, repeatable unlock status and first/last resolution times. It contains no definition revision or team key. `ClientQuestManager` applies it to a copied profile and leaves definitions unchanged. Increased counts emit resolution events before tracking reconciliation; full snapshots do not replay historical resolution notifications.
+
+### Screen, tracking and feedback
+
+The quest key defaults to **J**. The screen presents chapter/category lists, overview, requirements and rewards, plus status, sort and advanced filters. Advanced filters default off and the pool filter starts unset. Picking requires confirmation; random selection uses the current chapter and the selected pool, or `DEFAULT`.
+
+The client requirements preview uses players available in the current client world, while server team conditions use online members across dimensions. Unknown client condition types are not authoritative evidence of eligibility. The server rechecks the request, and story ranges are not present in the client definition projection.
+
+Tracking selects an active visible quest. After an ordinary screen pick is confirmed by synchronised progress, the screen auto-tracks it only when no quest is already tracked. Bounty signing does not write this pin. `ClientTrackedQuestState` reconciles the pin against definitions and active progress, removing an invalid pin.
+
+The **Bounties** category retains the existing list, objective panel and overview/requirements/rewards pages. It includes only carried receipts and current native party contracts, not the complete bounty catalogue. Rows are grouped by quest identity: a current contract takes precedence over old copies. The screen cannot sign or settle them. Lost-paper contracts remain inspectable and pinnable; closed receipts are never pickable or pinnable. The ordinary chapter/category routes remain unchanged.
+
+Internal `ClientBountyJournal` samples receipt identity on the Minecraft thread every five client ticks or on a changed quest revision. It never decodes embedded definitions or progress for this scan. `BountyJournalModel` matches team, signer, quest, start, cycle, status and deadline against the synchronised profile. Its immutable entries keep an absolute expiry and minute buckets; ordinary journal refreshes do not run every second. Disconnect clears the snapshot. ModernUI consumes immutable presentations and skips entrance animations during passive refresh.
+
+The tracker window uses `TrackedQuestHudPanel` for both the manual pin and up to two automatic carried contracts. Every objective uses the same native progress formatting; there is no separate abbreviated renderer. A deadline row updates once per second, uses minutes and seconds and warns during the final `60` seconds. Ready work adds a return-to-guild hint; overflow points to the journal. The manual pin is excluded from automatic panels, and inventory changes never write the pin cache. Removing a paper fades its automatic panel while the signed journal entry remains. The whole window retains `HudAPI` suppression and manual-pin resolution animation.
+
+Quest cards fit below the fixed follower stack and wrap to its right before reaching visible chat. Moved Chat Plus windows participate in the same bounds checks. Each card is measured separately; if space runs out, a journal notice replaces cards that cannot fit. See [HUD visibility and layout](/en/dev/hud-visibility/) for the render scope and verification steps.
+
+`ClientQuestCache` stores `format 1` and the pinned quest in `isekaiexpansion-quests.txt` under the game directory. It is shared across worlds/servers, not part of the world save. Invalid format resets the file; malformed pinned identifiers are removed. Writes use a sibling temporary file and atomic replacement where supported, with a replacement fallback and logged I/O errors.
+
+The tracked HUD hides when a screen is open, the HUD is disabled or no world/player is available. A visible tracked quest holds its completion/failure presentation for `2.6` seconds. Separate resolution notifications play the corresponding sound and queue a ModernUI presentation. NPC indicators represent unfinished active talk/delivery objectives, not a catalogue of new quests, and render only within `48` blocks of the camera with normal HUD visibility checks.
+
+## Contracts
+
+Use server-thread calls for authoritative mutation. Weak maps, concurrent parser registries and copied packet payloads do not make the mutable quest profiles safe for arbitrary worker threads. `ObjectiveTriggerContext` copies its NBT on construction and access; do not rely on later mutation of the caller's compound.
+
+`ServerQuestEvents.ON_QUEST_PICKED` and `ON_QUEST_COMPLETED` are notifications, not cancellable admission checks. Their contexts carry server/world, actor, team key, definition and state; picked context also carries an active-progress copy and pick position, while completed context carries completion time and reward results. Listeners run in order without a general exception barrier, so a throwing listener can interrupt later listeners or following synchronisation.
+
+Client notifications are `ON_FULL_SYNC`, `ON_PROGRESS_UPDATE` and `ON_QUEST_RESOLUTION`. Keep gameplay decisions on the server. The ModernUI overlays marshal presentation work to the UI thread rather than mutating views from packet callbacks.
+
+## Extending it
+
+Register namespaced parsers during common setup before relevant definitions load. `ObjectiveLogicRegistry`, `QuestConditionRegistry`, `ObjectiveConditionRegistry`, `ObjectiveContentActionRegistry`, `ObjectiveFailureRegistry` and `QuestRewardRegistry` reject duplicate IDs and unknown types; null registration inputs are rejected. They expose internal extension points rather than a stable external API.
+
+For an objective, define its trigger type, matching and numeric increment behaviour, client projection and any content/failure hooks. Registering a parser does not create a gameplay event source: connect the appropriate server hook to `ObjectiveTracker.trigger`. Keep entity credit, event position and payload explicit. For a reward, report its result truthfully and account for partial application; exceptions cannot undo an already-recorded quest completion.
+
+Project code can dispatch a manual content ID without fabricating a gameplay trigger:
+
+```java
+ObjectiveTracker.triggerManualForPlayer(player, "gate_opened");
+```
+
+The corresponding data belongs in the objective's manual content triggers. This call does not create a quest, change a numeric counter or promise a client delta when only world-side effects occurred.
+
+### Debug commands
+
+These commands require a player and permission level `2`. The root is `/isekaiexpansion`, with `/ise` as an alias. Replace `<questId>` with a loaded quest identifier.
+
+| Command suffix after `/ise dev quest` | Behaviour |
+| --- | --- |
+| `pick <questId>` | Requires pick authority, start eligibility and cooldown; bypasses normal story-range/pick-condition selection. |
+| `pick force <questId>` | Still requires pick authority; removes active progress and clears completion, failure and repeatable unlock state before activation. |
+| `picklook <questId>` | Same debug checks as `pick`; uses a block raycast up to `64` blocks as content anchor, falling back to player position. |
+| `picklook force <questId>` | Force reset/activation with the look anchor. |
+| `reset <questId>` | Clears the current profile's active, completion, failure and repeatable unlock entries for this loaded quest; sends its delta. |
+| `resetAll` | Removes the current nonempty profile and sends full snapshots to matching online players. |
+| `screen` | Opens the quest picker without refreshing definitions. |
+
+Debug reset does not revoke rewards already granted or remove spawned entities. Debug pick is not a substitute for testing ordinary picker eligibility.
+
+## Verifying
+
+- Connect a solo player and a team owner/member pair; attempt direct and random picks, then join/leave the team and confirm independent profiles without a merge.
+- Reload one valid and one invalid definition set; inspect retained progress, rebuilt trigger indexes and client state before and after a full sync.
+- Exercise every objective hook, including uncredited kills, NPC/projectile credit, cross-dimension members, manual content and an objective already complete.
+- Trigger a failure and a final objective on the same event; failure must win. Force one reward to fail and verify recorded completion plus later reward results.
+- Save/restart with active, completed and failed records, sequence state and world flags. Round-trip malformed/missing NBT in an isolated test save, including an unsupported shard version.
+- Track a quest, disconnect, reconnect and resolve it; check pin reconciliation, absence of historical full-sync notifications and UI-thread delivery.
+- Compare ordinary picks with debug picks so bypassed conditions cannot produce a false-positive gameplay test.
+
+## Related
+
+- [Quest data](/en/wiki/quest-data/) — definition layout and selection rules.
+- [Quest objectives](/en/wiki/quest-objectives/) — predicates, content actions and failures.
+- [Quest rewards](/en/wiki/quest-rewards/) — grant and recipient contracts.
+- [Persistent state storage](/en/dev/persistent-state/) — shared storage helper and versioned paths.
+- [NPC dialogue](/en/dev/npc-dialogue/) — dialogue and delivery integration.

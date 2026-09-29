@@ -1,50 +1,217 @@
 ---
-title: "Levels & experience"
-description: "Four separate level tracks — player, equipment, adventurer rank and NPC affinity — and the curves behind each of them."
+title: "Levels and experience"
+description: "Player levels, equipment growth, adventurer promotion and NPC favour, with verified experience thresholds."
 category: core
 order: 30
-updated: 2026-09-01
-tagline: "Four tracks, four different jobs."
-tags: ['progression', 'experience']
+updated: 2026-09-27
 ---
 
-KTM2 runs four independent level tracks. They are not variations of the same number: each one gates a different kind of content, and progress on one does not carry over to another.
+Player level, equipment level, adventurer rank and NPC favour are separate progression tracks. IsekaiCore owns their storage and curves; IsekaiExpansion connects them to the skill tree, equipment bonuses, quests and NPC interactions.
 
-| Track | Range | What it gates |
+## What each track changes
+
+| Track | Range | Role |
 | --- | --- | --- |
-| Player | 1–100 | Skill tree nodes, identity progression, most gear requirements |
-| Equipment | 1–100 | Socket slots locked below their minimum item level |
-| Adventurer rank | 0–8 | Commissions, districts, some skill tree branches |
-| NPC affinity | 0–11 | What a companion is willing to tell you |
+| Player level | 1–100 | Main-tree points and player-level requirements; active class powers can add level-scaled attributes. |
+| Equipment level | 1–100 | Per-item stat growth and socket level locks. |
+| Adventurer rank | 0–8 | Qualified promotion and authored rank conditions; stored separately from player experience. |
+| NPC favour | 0–11 | Per-player relationship gates; ordinary favour gains stop at 10, while an accepted proposal sets 11. |
 
-## Player level
+The dependency facts here were checked in the local IsekaiCore source for the configured `0.4.0-build60`; this is source verification, not a binary-equivalence check. Vanilla experience levels remain separate and can be used by other requirements or costs.
 
-The curve is deliberately in three phases: a fast opening so early sessions always produce a level, a long linear plateau through the middle game, and a steep final stretch where 91→100 alone costs more than 1→50.
+## Player experience and points
 
-<LevelTable track="player" />
+Increasing player level adds the level difference as points to the [Wheel of Fate](/en/wiki/skill-tree/). Reverting a level resets that tree's unlocked skills and sets its automatic points to the new level minus 1. Resetting player level erases the main category's state.
 
-## Equipment level
+Active class level-bonus powers scale their configured attributes by levels above 1. Their bonuses recalculate with the current level and are removed when the power is lost or inactive; they are not permanent additions earned only at the instant of levelling.
 
-Every piece of gear levels on its own. The important consequence is that **socket slots unlock with item level**: a socket whose profile sets a minimum item level stays locked until the item reaches it, no matter what gem you are holding.
+| Experience source | Behaviour |
+| --- | --- |
+| IsekaiCore hostile-mob kills | Requires a player killer outside creative and spectator modes; daily combat limit and repeated-kill reduction apply. |
+| IsekaiCore generated loot | A server-side inventory loot-fill event with a player opener; has a separate daily loot limit. |
+| `isekaiexpansion:xp` quest reward | Grants the authored positive amount directly; does not use the combat or loot limits. |
+| Level Potion·Beta, `isekaiexpansion:typeb_potion_level` | Grants 300 player experience directly. |
 
-<LevelTable track="equipment" />
+Core's combat and loot limits are budgets established when they reset. Combat's budget is 95% of the current level requirement at level 1, declining to 80% by level 61; loot is 25%, declining to 20% over the same interval. Both stay at those latter ratios thereafter. Limits are rounded to integers and do not automatically increase whenever a level changes.
 
-<Callout type="tip" title="Use one weapon, not five">
-The equipment curve is steeper than the player curve at the top end. Spreading experience across an armoury means nothing reaches its late sockets.
-</Callout>
+Fate Balance modifies loot experience and the loot cap only. Home-rest effects manage the combat cap separately. Each affected cap is recalculated from the current level every second, and its last modifier removal restores that cap once without clearing consumed experience. Fate experience effects use Core's loot/quest grant routes; combat and direct quest/potion grants bypass them.
+
+The wake reset is for players who were sleeping when their world skips the night. It is not a real-world midnight reset, and an awake player in that world is not included by that wake hook. Core also resets these budgets when its spawn-item grant path runs and when loading a saved component with a nonpositive cap.
+
+Repeated combat rewards in the same 64 × 64 horizontal cell use the player's position. The first 18 kills keep their multiplier; each further kill multiplies it by 0.84, reaching an explicit 0 at 78 kills. A gap greater than 240 ticks (12 seconds) reduces the stored streak by 2 before adding the next kill; a different cell or gap greater than 900 ticks (45 seconds) resets it. Small rewards can round to 0 earlier.
+
+## Equipment growth
+
+Equipment receives experience through [smithing-stone upgrades](/en/wiki/forgery/). Eligibility includes armour, shields, trinkets, ranged weapons, tools, guns and other items with sockets or attribute modifiers. It does not follow that every eligible item receives every kind of stat bonus.
+
+| Equipment kind | Level-growth focus | Great-success focus |
+| --- | --- | --- |
+| Armour in its matching slot | Armour, toughness, knockback resistance, health and tenacity. | Health, tenacity, environmental resistance and guts. |
+| Shield in offhand | Armour, toughness, shield gauge and regeneration. | Shield gauge, shield power and aggro generation. |
+| Ranged weapon in either hand | Attack modifiers, ranged critical stats and dexterity. | Ranged critical stats, dexterity, perception and evasion counter. |
+| Tagged magic weapon in either hand | Attack modifiers, elemental power, magic critical stats and intelligence. | Elemental power, magic penetration, magic critical chance and intelligence. |
+| Other melee item with an attack-damage modifier | Attack damage, knockback, attack-speed penalty reduction, melee critical stats and strength. | Melee critical stats, armour penetration and strength. |
+| Trinket through its accessory slot | Energy, ability haste and stamina. | Energy regeneration, healing amplification and debuff accuracy. |
+
+Level 1 contributes no level-growth bonus. Great-success stacks can still contribute independently. Positive base scaling considers additive item modifiers; it does not multiply every attribute on the character. The full formulas are in the [progression runtime reference](/en/dev/leveling/).
+
+Equipment-level gates on [gem sockets](/en/wiki/gems-and-sockets/) use this track. Item skill unlocks and awakening remain separate.
+
+## Player and equipment thresholds
+
+“Next” is the experience needed from the listed level to the next. “Total” is the cumulative experience needed to reach the listed level from level 1. At level 100, the leveler discards excess experience.
+
+### Full player and equipment experience table
+
+| Level | Player next | Equipment next | Player total | Equipment total |
+| --- | --- | --- | --- | --- |
+| 1 | 100 | 100 | 0 | 0 |
+| 2 | 150 | 100 | 100 | 100 |
+| 3 | 200 | 150 | 250 | 200 |
+| 4 | 250 | 150 | 450 | 350 |
+| 5 | 300 | 200 | 700 | 500 |
+| 6 | 350 | 200 | 1000 | 700 |
+| 7 | 400 | 200 | 1350 | 900 |
+| 8 | 450 | 250 | 1750 | 1100 |
+| 9 | 500 | 250 | 2200 | 1350 |
+| 10 | 550 | 300 | 2700 | 1600 |
+| 11 | 600 | 300 | 3250 | 1900 |
+| 12 | 650 | 300 | 3850 | 2200 |
+| 13 | 700 | 350 | 4500 | 2500 |
+| 14 | 750 | 350 | 5200 | 2850 |
+| 15 | 800 | 400 | 5950 | 3200 |
+| 16 | 850 | 400 | 6750 | 3600 |
+| 17 | 900 | 400 | 7600 | 4000 |
+| 18 | 950 | 450 | 8500 | 4400 |
+| 19 | 1000 | 450 | 9450 | 4850 |
+| 20 | 1050 | 500 | 10450 | 5300 |
+| 21 | 1100 | 500 | 11500 | 5800 |
+| 22 | 1150 | 500 | 12600 | 6300 |
+| 23 | 1200 | 550 | 13750 | 6800 |
+| 24 | 1250 | 550 | 14950 | 7350 |
+| 25 | 1300 | 600 | 16200 | 7900 |
+| 26 | 1500 | 700 | 17500 | 8500 |
+| 27 | 1600 | 850 | 19000 | 9200 |
+| 28 | 1700 | 1050 | 20600 | 10050 |
+| 29 | 1800 | 1200 | 22300 | 11100 |
+| 30 | 1900 | 1400 | 24100 | 12300 |
+| 31 | 2000 | 1600 | 26000 | 13700 |
+| 32 | 2100 | 1750 | 28000 | 15300 |
+| 33 | 2200 | 1950 | 30100 | 17050 |
+| 34 | 2300 | 2100 | 32300 | 19000 |
+| 35 | 2400 | 2300 | 34600 | 21100 |
+| 36 | 2500 | 2500 | 37000 | 23400 |
+| 37 | 2600 | 2650 | 39500 | 25900 |
+| 38 | 2700 | 2850 | 42100 | 28550 |
+| 39 | 2800 | 3000 | 44800 | 31400 |
+| 40 | 2900 | 3200 | 47600 | 34400 |
+| 41 | 3000 | 3400 | 50500 | 37600 |
+| 42 | 3100 | 3550 | 53500 | 41000 |
+| 43 | 3200 | 3750 | 56600 | 44550 |
+| 44 | 3300 | 3900 | 59800 | 48300 |
+| 45 | 3400 | 4100 | 63100 | 52200 |
+| 46 | 3500 | 4300 | 66500 | 56300 |
+| 47 | 3600 | 4450 | 70000 | 60600 |
+| 48 | 3700 | 4650 | 73600 | 65050 |
+| 49 | 3800 | 4800 | 77300 | 69700 |
+| 50 | 3900 | 5000 | 81100 | 74500 |
+| 51 | 4000 | 5400 | 85000 | 79500 |
+| 52 | 4100 | 5800 | 89000 | 84900 |
+| 53 | 4200 | 6200 | 93100 | 90700 |
+| 54 | 4300 | 6600 | 97300 | 96900 |
+| 55 | 4400 | 7000 | 101600 | 103500 |
+| 56 | 4500 | 7400 | 106000 | 110500 |
+| 57 | 4600 | 7800 | 110500 | 117900 |
+| 58 | 4700 | 8200 | 115100 | 125700 |
+| 59 | 4800 | 8600 | 119800 | 133900 |
+| 60 | 4900 | 9000 | 124600 | 142500 |
+| 61 | 5000 | 9400 | 129500 | 151500 |
+| 62 | 5100 | 9800 | 134500 | 160900 |
+| 63 | 5200 | 10200 | 139600 | 170700 |
+| 64 | 5300 | 10600 | 144800 | 180900 |
+| 65 | 5400 | 11000 | 150100 | 191500 |
+| 66 | 5500 | 11400 | 155500 | 202500 |
+| 67 | 5600 | 11800 | 161000 | 213900 |
+| 68 | 5700 | 12200 | 166600 | 225700 |
+| 69 | 5800 | 12600 | 172300 | 237900 |
+| 70 | 5900 | 13000 | 178100 | 250500 |
+| 71 | 6000 | 13400 | 184000 | 263500 |
+| 72 | 6100 | 13800 | 190000 | 276900 |
+| 73 | 6200 | 14200 | 196100 | 290700 |
+| 74 | 6300 | 14600 | 202300 | 304900 |
+| 75 | 6400 | 15000 | 208600 | 319500 |
+| 76 | 6770 | 16350 | 215000 | 334500 |
+| 77 | 7150 | 17650 | 221770 | 350850 |
+| 78 | 7520 | 19000 | 228920 | 368500 |
+| 79 | 7890 | 20350 | 236440 | 387500 |
+| 80 | 8270 | 21650 | 244330 | 407850 |
+| 81 | 8640 | 23000 | 252600 | 429500 |
+| 82 | 9010 | 24350 | 261240 | 452500 |
+| 83 | 9390 | 25650 | 270250 | 476850 |
+| 84 | 9760 | 27000 | 279640 | 502500 |
+| 85 | 10130 | 28350 | 289400 | 529500 |
+| 86 | 10510 | 29650 | 299530 | 557850 |
+| 87 | 10880 | 31000 | 310040 | 587500 |
+| 88 | 11250 | 32350 | 320920 | 618500 |
+| 89 | 11630 | 33650 | 332170 | 650850 |
+| 90 | 12000 | 35000 | 343800 | 684500 |
+| 91 | 12890 | 38900 | 355800 | 719500 |
+| 92 | 13780 | 42800 | 368690 | 758400 |
+| 93 | 14670 | 46650 | 382470 | 801200 |
+| 94 | 15560 | 50550 | 397140 | 847850 |
+| 95 | 16440 | 54450 | 412700 | 898400 |
+| 96 | 17330 | 58350 | 429140 | 952850 |
+| 97 | 18220 | 62200 | 446470 | 1011200 |
+| 98 | 19110 | 66100 | 464690 | 1073400 |
+| 99 | 20000 | 70000 | 483800 | 1139500 |
+| 100 | 0 | 0 | 503800 | 1209500 |
+
 
 ## Adventurer rank
 
-Rank starts at **0** and becomes rank 1 the moment the Adventurer's Guild registers you — the first 1,200 points are effectively your paperwork. From there each rank costs roughly 1.55× the last, so rank 8 is a long-term goal rather than a mid-game milestone.
+Rank does not rise automatically when reputation fills. A promotion action must request the next rank; the [quest promotion reward](/en/wiki/quest-rewards/) checks qualification before applying it. Moving from 0 to 1 has no reputation requirement. Later promotions need the current rank's full reputation and reset that reputation to 0, with no overflow carried into the next rank.
 
-<LevelTable track="adventurer" />
+| Current rank | Rank key | Reputation needed for the next rank |
+| --- | --- | --- |
+| 0 | `none` | 0 |
+| 1 | `copper` | 2000 |
+| 2 | `silver` | 3100 |
+| 3 | `gold` | 4700 |
+| 4 | `diamond` | 7300 |
+| 5 | `mythril` | 11300 |
+| 6 | `adamantite` | 17500 |
+| 7 | `stormyx` | 27000 |
+| 8 | `celestium` | 0 |
 
-## NPC affinity
+Rank 8 has no next promotion. Rank 0 does not accumulate ordinary completion reputation. Revealing a rank plate changes visibility, not the stored rank or promotion qualification. Faction reputation is a different system; see [Reputation](/en/wiki/reputation/).
 
-Affinity is tracked per character and moves through four named stages. They describe **how much someone lets you know and share**, not romance, and not damage.
+## NPC favour and romance
 
-<LevelTable track="affinity" />
+NPC relationships include friendship, trust and romance. Gifts and bond conversations develop favour; the Engage Ring turns a successful proposal into a spouse relationship. IsekaiCore stores favour per player and NPC identity. Friendly begins at 4, trust at 8 and proposal readiness at 10.
 
-<Callout type="note" title="What affinity does and does not do">
-Deeper stages change what a companion tells you, what she will let you help with, and which of her problems she stops hiding. They do not turn her into a better party member statistically, and they do not resolve her personal story on their own.
-</Callout>
+| Current level | Formula requirement for next level | Cumulative formula experience |
+| --- | --- | --- |
+| 0 | 50 | 0 |
+| 1 | 100 | 50 |
+| 2 | 150 | 150 |
+| 3 | 200 | 300 |
+| 4 | 300 | 500 |
+| 5 | 450 | 800 |
+| 6 | 600 | 1250 |
+| 7 | 750 | 1850 |
+| 8 | 1200 | 2600 |
+| 9 | 1650 | 3800 |
+| 10 | 2100 | 5450 |
+| 11 | 0 | 7550 |
+
+### Proposing with an Engage Ring
+
+The formula's 10 to 11 requirement is not an ordinary gift-grinding route. IsekaiExpansion's normal positive favour path stops at level 10. Hold an Engage Ring and confirm it through the NPC gift interaction. An accepted proposal consumes 1 ring, sets favour to 11 and binds that NPC as your spouse. The current proposal flow establishes the spouse relationship immediately.
+
+The NPC refuses if favour is below proposal readiness, favour is already at its maximum, they are married to another player, or an allegiance bond is active. Release allegiance before proposing. A rejected proposal consumes no ring. Reaching level 10 makes the proposal available; giving the ring and having it accepted completes this romantic commitment.
+
+Trust affects behaviour: base NPC target and attacker lookups suppress a trusted player or the [allegiance owner](/en/wiki/npc-allegiance/). Ordinary favour losses are blocked once the NPC has a spouse, or when the relationship is already at maximum. [NPC dialogue runtime](/en/dev/npc-dialogue/) covers gifts, daily bond conversations and marriage state.
+
+## Data and related pages
+
+The experience curves are supplied by IsekaiCore, not local data-pack JSON. [Quest rewards](/en/wiki/quest-rewards/) defines authored XP and promotion payloads; [identity progression](/en/wiki/identity/) and [skill-tree data](/en/wiki/skill-tree-data/) describe requirements. [Progression runtime](/en/dev/leveling/) records integration contracts and equipment formulas.

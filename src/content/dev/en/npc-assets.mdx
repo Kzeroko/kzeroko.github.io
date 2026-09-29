@@ -1,0 +1,133 @@
+---
+title: "NPC models, outfits and citizen assets"
+description: "Wire NPC presentation into shared humanoid parts, wardrobe overlays and animation sets."
+category: assets
+order: 40
+updated: 2026-09-27
+---
+
+NPC bodies and worn layers use the shared humanoid part system. The NPC-specific asset is its animation set; its character and wardrobe are supplied by a preset. Citizens use the same renderer with a generated profile.
+
+## What you are making
+
+| Resource | Location |
+| --- | --- |
+| Part catalogue | `data/<namespace>/humanoid_parts/<slot>/<part>.json` |
+| NPC character and wardrobe | `data/<namespace>/npc_presets/<entity-type-path>.json` |
+| Part mesh | `assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json` |
+| Optional gender mesh | Same part path ending in `.male.geo.json` or `.female.geo.json` |
+| Texture style | `assets/<namespace>/textures/entity/humanoid/<slot>/<part>/<style>.png` |
+| Optional tint / emissive masks | Sibling `<style>_mask.png` / `<style>_glowmask.png` |
+| Optional part animation | `assets/<namespace>/animations/entity/humanoid/<slot>/<part>.animation.json` |
+| NPC animation set | `assets/<namespace>/animations/entity/npc/<entity-type-path>.animation.json` |
+| Shared animation fallback | `assets/isekaiexpansion/animations/entity/npc/base.animation.json` |
+
+The default NPC preset ID is its entity type ID. A subclass can override `getNpcPresetId()` to share another preset. The body model and texture come from the selected `body` part through `HumanoidRenderResolver`, not from an old NPC-specific mesh directory.
+
+## Requirements
+
+### Discovery and missing resources
+
+Client part discovery indexes a lowercased slot-relative path. It currently **drops the namespace from the lookup key**. Two namespaces supplying the same relative part path can collide; discovery does not sort those collisions into a documented winner. Texture discovery likewise searches the folder across namespaces. Use distinct relative paths when authoring separate parts.
+
+A mesh without any discovered base PNG style is skipped with a warning. Masks alone are not styles; nested texture subfolders are ignored. Gender meshes override the matching gender, otherwise the base mesh is used. If only gender meshes exist, discovery promotes the male mesh first, then the female mesh if no base exists. This means a missing opposite-gender variant can still use the promoted mesh.
+
+A requested unknown style falls back specifically to `default`, not to an arbitrary first texture. If neither exists, the renderer skips that part. Keep a `default.png` when a fallback should render. Missing optional mask/glowmask files are allowed.
+
+A catalogue entry, selected reference and discovered asset are all needed. The renderer skips unknown catalogue entries, absent assets/styles and suppressed slots. With no resolved body it retains the shared rig model and texture. A declared part's `hides_slots` contributes to hidden slots before resource resolution, so a broken hiding part can still hide another layer.
+
+NPC animation lookup preserves the entity type namespace and path. `BaseNpcEntity.getNpcAnimationResource()` supplies the optional entity file; override this method to share a different file. GeckoLib 4.8.4 resolves each requested clip from that file first, then from `isekaiexpansion:animations/entity/npc/base.animation.json`. An absent file or missing clip therefore uses the shared kit. A custom clip absent from both resources remains missing; fallback does not invent character actions.
+
+### Rig and transforms
+
+Use the shared humanoid rig's hierarchy and anchors. The following are current template transforms, not a promise that the runtime validates every pivot. Pose copying addresses names; missing names lose their corresponding pose, and incorrect pivots can displace layers or held items.
+
+| Anchor | Parent | Template pivot |
+| --- | --- | --- |
+| `body` | Root | `[0, 0, 0]` |
+| `head`, `torso` | body | `[0, 24, 0]` |
+| `right_arm` | body | `[-5, 22, 0]` |
+| `left_arm` | body | `[5, 22, 0]` |
+| `right_leg` | body | `[-1.9, 12, 0]` |
+| `left_leg` | body | `[1.9, 12, 0]` |
+| `main_item` | right_arm | `[-5.625, 14.2, -0.3]` |
+| `off_item` | left_arm | `[5.625, 14.2, -0.3]` |
+
+Both item anchors carry authored rotation `[90, 0, 0]`. The renderer applies its attachment compensation, then Player Animator item offsets once through the matrix. Position uses `1/16` model units and rotation order Z/Y/X. Do not bake another copy of those live item offsets into the mesh.
+
+Player-part deltas map to Gecko as position `(x, -y, z)` and rotation `(-pitch, -yaw, roll)`. Autonomous weapon animation uses the current Gecko channels as fallback; morph presentation uses the host's sampled pose. The Gecko `body` bone is restored before host parts are applied, while the host body channel uses its separate outer matrix transform.
+
+## Steps
+
+1. Create the body and worn pieces as shared humanoid parts. Keep swappable clothes in their own slots so the character can retain its base profile.
+2. Export meshes and texture styles to the resource paths above. Check that the selected style exists, including `default` where fallback is needed.
+3. Declare each part in the humanoid catalogue and reference it from the NPC preset. The bundled `data/isekaiexpansion/npc_presets/mahoutsukai_evelina.json` is a complete named-character example; `citizen.json` supplies a wardrobe without an authored profile.
+4. Add an entity animation file only for clips you want to override or add. Keep their names identical to the requested keys; all omitted base clips fall back individually.
+5. Reload data packs for definitions and client resources for meshes/textures/animations. These are separate reload paths. Confirm the loaded NPC's displayed parts, active outfit and attributes in-game.
+
+### Citizens
+
+`CitizenNpcEntity` calls `HumanoidProfileGenerator` with entity UUID, resolved gender, identity origin and identity generation tags. This override generates the initial profile even if the preset declares profile fields; it does not adopt an authored profile through the base implementation. Its wardrobe still comes from the NPC preset. `setCitizenIdentity` regenerates the profile on the server. Generated gender uses the entity UUID, independently of displayed names. [Naming API](/en/dev/naming/) assigns unnamed non-unique NPCs from the resulting race, gender and citizen culture when the entity loads; configure citizen identity before spawning it.
+
+Generation tags include town, culture, profession and origin path when present. Gender is not a tag. The generator selects BODY, EYES, EYEBROWS, HAIR, UNDERWEAR_TOP, UNDERWEAR_BOTTOM, OUTFIT_TOP, OUTFIT_BOTTOM and SHOES. It filters by gender lock and origin, keeps always-unlocked candidates whose catalogue `gender` is the citizen's or unisex, and prefers those sharing any requested tag. If no such candidate exists, a mandatory slot takes the first catalogue candidate; optional slots remain empty. Tag matching is preference, not a requirement; the `gender` match is a requirement. A chained part picked for one slot also fills the slots of its other members, and the generator skips a slot that is already filled.
+
+The random seed uses UUID, gender and origin. The candidate catalogue and tags also influence the result, so the same UUID does not guarantee the same appearance after catalogue edits. There is no separate citizen variant catalogue to author.
+
+## Declaring it
+
+### Java wiring and animation
+
+Use a combat/unique subclass only for the behaviours it needs; combat does not introduce a separate model format. A model extends `GeoHumanNpcModel`; animation lookup uses the entity resource method independently of the model name. A renderer extends `GeoHumanNpcRenderer` with `HumanoidDimensions`, then registers through `EntityRendererRegistry` in client initialisation. Existing examples are `HumanoidNpcRenderer` and `MahoutsukaiEvelinaRenderer`.
+
+`NpcAnimationController` selects motion from the rendered NPC and its own managers. Selection order is death, sleep, riding, item use, authored combat, swimming, hovering, flight, POI activity, climbing, ground movement, emote and idle. Citizens, simple NPCs, combat NPCs and unique characters use this controller. `NpcAnimationKit` names the 12 base clips extracted from Evelina; her original file and character actions remain intact.
+
+Flight and hover are opt-in: `BaseNpcEntity.canNpcFly()` defaults to `false`. An NPC subclass must return `true` and provide `fly` and `hover` in its own animation file; neither clip exists in the shared fallback. The controller selects these clips only for flight-capable NPCs. Evelina explicitly enables flight and retains her authored clips. Citizens, simple NPCs and adventurers cannot fly by default; swimming remains available. See [NPC locomotion](/en/dev/npc-locomotion/) for flight settings.
+
+The shared NPC renderer installs `HumanoidPartGeoLayer` and held-item rendering on `main_item`/`off_item`. Example renderers also hide authoring item-proxy geometry. This is separate from hiding the real held stack. The real stack path skips sleeping/item-using NPCs, empty stacks, disallowed particlize visibility and camera distances beyond 32 blocks.
+
+| Animation group | Requested keys |
+| --- | --- |
+| Ground | `idle`, `walk`, `run` |
+| Water | `swim_idle`, `swim` |
+| Climbing | `climb_idle`, `climb` |
+| Rest / riding | `sleep`, `mount` |
+| Optional entity-owned flight | `fly`, `hover` |
+| Death | `death`, played and held |
+| Default item categories | `drink`, `eat` |
+| Authored combat fallback names | `charge_<action_id>`, `charge_loop_<action_id>`, `release_<action_id>` |
+| Missing/empty action identity fallback | `charge`, `charge_loop`, `release` |
+| Emote / POI | Key declared by its runtime definition |
+
+Continuous weapon melee is driven by Better Mob Combat outside the Gecko action timeline; it requires no per-action Gecko attack clip. See [NPC combat](/en/dev/npc-combat/) for admission and timing. Optional per-part secondary animation discovers `idle` and `run`, accepting exact names or case-insensitive names ending in `.idle`/`_idle` and `.run`/`_run`; invalid or absent animation resources leave secondary animation disabled.
+
+### Wardrobe composition and reload
+
+The entity stores a base profile separately from the displayed profile. An outfit overlays its declared slots in slot order, with `none` removing a slot for that outfit. Overlaid slots follow [part chains](/en/dev/humanoid-parts/): naming one member wears the whole chain, and replacing or clearing a member removes the others. **All slots can be overlaid, including body.** The underlying base profile survives the swap; the displayed body is not guaranteed to remain unchanged.
+
+Outfit selection through `tryEquipOutfit` checks selectability and the requesting player's unlock rule. Direct `setOutfitId` resolves the ID and refreshes appearance/attributes without those player admission checks. Outfit grants are keyed per player by preset ID plus normalised outfit ID. Unlocking one named NPC instance's preset/outfit therefore also applies to another instance using that same preset.
+
+On successful data-pack reload, loaded NPCs re-resolve their preset. The base implementation replaces an authored base profile; generated profiles are retained unless a subclass's resolution path regenerates them. Removed active outfit IDs resolve to the new default. Attribute refresh removes modifier IDs declared in the **current** catalogue and adds the active grants, then clamps health to the new maximum.
+
+A reload that deletes an old outfit/attribute grant can leave that old temporary modifier on an already loaded NPC: the cleanup only enumerates the new declarations. Do not describe this path as an unconditional removal of every old grant. Check attribute removal explicitly when reviewing wardrobe reload changes.
+
+Outfit display keys are `npc_outfit.<namespace>.<preset-path-with-dots>.<outfit-id>`. Grants are temporary modifiers keyed by preset/outfit/attribute; repeated grants for the same attribute in one outfit share a modifier UUID, so they are not independent stackable entries.
+
+## Checklist
+
+- Confirm preset and part IDs resolve, and verify each selected texture style and gender variant.
+- Check body, head, limb and item anchors with idle, walk, run, swimming, climbing, sleep and combat.
+- Remove `walk` from an entity file and verify the shared walk still plays; keep a custom `idle` to verify override precedence.
+- Switch between outfits that add, clear and replace slots, then restore the base look.
+- Check player-specific unlocks and a second NPC sharing the same preset.
+- Reload after changing and removing grants; inspect actual attributes as well as the outfit menu.
+- Verify generated citizens with different identities and catalogue tags; do not infer strict tag filtering.
+- Observe base and layered geometry from another client, including held stacks, masks and missing-resource cases.
+
+## Related
+
+- [Player and NPC preset data](/en/wiki/humanoid-presets/)
+- [Humanoid parts](/en/dev/humanoid-parts/)
+- [Blockbench plugin](/en/dev/blockbench-plugin/)
+- [NPC foundations](/en/dev/npc/)
+- [NPC combat](/en/dev/npc-combat/)
+- [NPC emotion and body emotes](/en/dev/npc-emotion/)

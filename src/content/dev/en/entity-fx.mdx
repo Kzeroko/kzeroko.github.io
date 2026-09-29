@@ -1,0 +1,118 @@
+---
+title: "Entity FX"
+description: "How death, teleport and respawn replace vanilla's presentation with particlize playback: the resolution order, the timings, and how to register your own policy."
+category: client
+order: 20
+updated: 2026-09-18
+tagline: "What plays when an entity dies, leaves, or comes back."
+tags: ['fx', 'particlize', 'death', 'teleport']
+---
+
+Three moments need an entity to visibly stop existing, or start: it dies, it teleports, or a player respawns. Each is driven by a particlize profile rather than vanilla's smoke puff, and each is decided on the server so every viewer sees the same thing. This page covers the policy and the timing. The renderer underneath is [Particlize](/en/dev/particlize/), and the Effekseer emitters some of these also spawn are in [Effekseer Particles](/en/dev/effekseer-particles/).
+
+## What it does
+
+**Death** replaces the vanilla death animation for living entities with a decompose pass, and holds the corpse for a configured number of ticks so the effect has something to dissolve.
+
+**Teleport** splits into a departure and an arrival, because the entity does not exist in one place for part of it. The wind-up is timed against an Effekseer asset so the dissolve finishes as the transfer happens.
+
+**Respawn** composes the player back into the world, but only when they actually died.
+
+What it deliberately does not own: the particle simulation, the profiles themselves, and any decision about *which* profile looks right. It owns which definition applies to which entity, and when playback starts.
+
+## Runtime model
+
+### Death resolution order
+
+`EntityDeathFxRegistry.resolve(LivingEntity)` answers with the first match:
+
+<Steps>
+
+1. **An exact entity type.** `register(EntityType, definition)` wins over everything else.
+
+2. **A class rule.** `registerClass(Class, definition)` matches by `isInstance`, so a rule on a superclass covers its subclasses. Rules are checked newest first — re-registering the same class replaces its old rule rather than adding a second one.
+
+3. **The fallback.** Shared by everything unmatched, and settable with `setFallback`. It ships as the `mob_death` profile, a 32-tick corpse, and vanilla smoke suppressed.
+
+</Steps>
+
+The exact map is a `ConcurrentHashMap` and the class rules a `CopyOnWriteArrayList`, so registration is safe from any thread and resolution never blocks.
+
+### A definition
+
+`EntityDeathFxDefinition` is a record. Its compact constructor rejects null identifiers and clamps the corpse lifetime, so an out-of-range value is corrected rather than refused.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enabled` | boolean | required | `false` leaves vanilla death presentation alone entirely. |
+| `profileId` | identifier | required | The particlize profile to play. Null throws at construction. |
+| `mode` | `ParticlizeMode` | required | `DECOMPOSE` for a death. Null throws. |
+| `removalTicks` | integer | required | How long the corpse stays before removal, clamped to `1…1200` (60 seconds). |
+| `replaceVanillaSmoke` | boolean | required | Suppresses the vanilla death puff, so the two do not play over each other. |
+| `priority` | `ParticlizePriority` | `AMBIENT` | Which effects survive when a client is over budget. |
+
+Two factories cover the common cases. `EntityDeathFxDefinition.decompose(profileId, removalTicks, replaceVanillaSmoke)` builds an enabled `DECOMPOSE` definition at `AMBIENT` priority, with an overload taking an explicit priority. `EntityDeathFxDefinition.disabled()` returns a definition whose `enabled` is `false`.
+
+### Teleport timing
+
+`TeleportFxSequence.beginTransfer` starts three things at once: a static Effekseer emitter at the source, another at the destination, and a tracked decompose on the entity itself. For a player it also sends a travel distortion.
+
+The wind-up length is not a hand-picked number. The Effekseer asset hands the entity over at frame `65`, and `FxSyncUtil.effekFrameToTicks` converts that against a 60 FPS asset and a 20 TPS server, rounding up — `22` ticks. `transferDelayTicks()` exposes it so the caller performing the transfer waits exactly as long as the art does.
+
+Arrival is separate on purpose. `prepareArrival` starts the destination emitter before the entity exists there, and `completeArrival` plays the compose *after* tracker hand-off — a compose played before the destination viewers are tracking the entity is a compose nobody sees.
+
+`beginDeparture` is the departure half alone, for storage, despawn and anything else that removes an entity without putting it somewhere.
+
+### Respawn
+
+`PlayerRespawnFxSystem.playAfterRespawn(player, alive)` returns immediately when `alive` is true. A dimension change and an end-portal return both run the respawn path with the player still alive, and neither should look like a resurrection. It runs after the full respawn placement transaction, never during it.
+
+## Contracts
+
+**The server decides, always.** Every entry point here takes a server-side entity or world and broadcasts. A client never picks a profile, so two players watching one death see one effect.
+
+**Playback is scoped by distance, and the radius is per-moment.** Teleport arrival uses `112.0` blocks because the viewers who matter are at the destination; respawn uses `96.0`. Both are wider than the vanilla particle radius on purpose — these are events a nearby player should not miss.
+
+**Priority is a budget hint, not a guarantee.** Teleport and respawn are `CRITICAL` because missing them leaves an entity that seems to blink; a routine mob death is `AMBIENT` and may be dropped when a client is saturated. The four levels are `AMBIENT`, `NORMAL`, `IMPORTANT`, `CRITICAL`.
+
+**Modes are not interchangeable.** `DECOMPOSE` scatters an existing entity, `COMPOSE` assembles one, `PULSE` does neither. A departure that uses `COMPOSE` plays backwards, and nothing in the pipeline will tell you.
+
+**`removalTicks` is a floor on how long the effect has.** The entity is removed when it expires, so a profile that runs longer than the corpse is cut off mid-play. Match the two when you author a profile.
+
+## Extending it
+
+Register during mod initialisation, before any entity can die:
+
+```java
+EntityDeathFxRegistry.register(
+    IsekaiMobEntities.SOME_MOB,
+    EntityDeathFxDefinition.decompose(ParticlizeProfiles.NPC_DEATH, 48, true, ParticlizePriority.IMPORTANT)
+);
+
+// Everything in a family, unless an exact type overrides it.
+EntityDeathFxRegistry.registerClass(
+    WaterCreatureEntity.class,
+    EntityDeathFxDefinition.decompose(ParticlizeProfiles.MOB_DEATH, 24, true)
+);
+```
+
+To opt one entity out without touching the fallback, register `EntityDeathFxDefinition.disabled()` for it.
+
+The bundled profile ids are constants on `ParticlizeProfiles`: `FIRST_JOIN`, `MOB_DEATH`, `NPC_DEATH`, `EVELINA_DEATH`, `PLAYER_RESPAWN`, `PLAYER_LOGOUT`, `TELEPORT_AWAY`, `TELEPORT_IN`, `ARCANE_PULSE`, `MORPH_TRANSITION` and `PROGRESSION_ASCENSION`. Adding a profile is a [Particlize](/en/dev/particlize/) change, not one here.
+
+<Callout type="caution" title="Register before the world loads">
+Both registries are live lookups with no snapshot. Registering after entities have started dying means the first few deaths of that type used the previous policy, which is the kind of bug that reproduces once and then never again.
+</Callout>
+
+## Verifying
+
+- Kill one entity of the type you registered. The vanilla smoke should be gone when `replaceVanillaSmoke` is set, and the corpse should persist for the ticks you configured.
+- Register a class rule and an exact rule for a type inside that class, then kill it: the exact rule wins.
+- Teleport across dimensions and watch the source: the dissolve should complete as the entity leaves, not after.
+- Teleport with a second player already at the destination: they see the compose. Teleport with nobody there, then walk over: nothing replays, which is correct — arrival is not persistent.
+- Die, then respawn: compose plays. Walk through a nether portal: it does not.
+
+## Related
+
+- [Particlize](/en/dev/particlize/) — the renderer, the profiles, and the budget these priorities feed.
+- [Effekseer Particles](/en/dev/effekseer-particles/) — the emitters the teleport sequence spawns.

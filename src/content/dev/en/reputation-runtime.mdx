@@ -1,0 +1,92 @@
+---
+title: "Reputation runtime"
+description: "Server incident hooks, persisted ownership, relation overrides and report snapshots."
+category: systems
+order: 20
+updated: 2026-09-18
+---
+
+Reputation is an internal server subsystem under `internal.reputation`, not a public `ReputationAPI`. It combines entity affiliation, relation overrides, incident accounting and report projection; [Reputation](/en/wiki/reputation/) documents player-visible numbers.
+
+## What it does
+
+`FactionContextResolver.entityFactions` combines `ReputationFactionProvider`, `BaseNpcFactionBridge` and matching data rules. Location membership is a separate operation: cities come from `CityAPI.getCitiesAt`; village structures add the general and start-chunk-specific village factions. Entity affiliation does not automatically inherit current location.
+
+`targetingFactions` adds an implicit monster side only for entities without a provider, base-NPC identity or matched rule. `FactionTargetingService` distinguishes HOSTILE, NON_HOSTILE and UNSPECIFIED. Ordinary players and missing faction sets yield UNSPECIFIED; null identities yield NON_HOSTILE. Proactive NPC acquisition requires positive hostility, while the general targeting veto only rejects NON_HOSTILE.
+
+## Runtime model
+
+`FactionReputationService` consumes applied damage, kills, loot filling and container-slot extraction. Damage attribution accepts an attacking player, a direct player source or a projectile's player owner. Slot extraction snapshots inventory stacks before `ScreenHandler.onSlotClick` and compares them after return; changed item identity counts the entire previous stack as removed. This is a screen-action hook, not an inventory-wide transaction observer.
+
+The service filters eligible factions, applies wanted-faction fate adjustment per faction, groups by resulting delta, then updates state, vanilla gossip and popups before sending a refreshed report. Directly calling `FactionReputationState.add` bypasses that orchestration.
+
+Reputation and runtime relations use the overworld persistent-state manager through `IsekaiPersistData`, with keys `faction/reputation_v1` and `faction/relations_v1` below the mod namespace. State is keyed by player UUID and normalised faction ID, independent of the player's current dimension.
+
+### Saved data
+
+Both state formats write version 1. Missing version reads as 0; a version above 1 warns and returns empty state. Malformed list entries are skipped. Later duplicate faction or relation records overwrite earlier values. Reputation numbers clamp to −1000–1000 on read.
+
+| NBT key | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `version` | `int` | `0` on read | State format version; writers emit 1. Shared by both files. |
+| `players` | `list<compound>` | empty | Reputation file's player records. |
+| `players[].player` | `UUID` | required per record | Missing/wrong UUID skips that record. |
+| `players[].factions` | `list<compound>` | required per record | Missing list skips player record. |
+| `players[].factions[].faction` | `string` | required | Normalised faction ID; registers a definition when read. |
+| `players[].factions[].value` | `int` | required | Stored standing, clamped on read. |
+| `overrides` | `list<compound>` | empty | Relation file's directed overrides. |
+| `overrides[].source` | `string` | required | Normalised source faction. |
+| `overrides[].target` | `string` | required | Normalised target faction. |
+| `overrides[].relation` | `string` | required | Relation parser accepts canonical names and aliases from the data format; invalid values warn and skip the record. |
+
+Block/entity metadata is separate from those state files:
+
+| NBT key | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `IsekaiReputationFactions` | `list<string>` | empty | Block entity's protected faction IDs; normalised and de-duplicated on read. Written only when nonempty. |
+| `IsekaiPlayerPlacedContainerOwner` | `UUID` | absent | Any valid UUID marks personal storage, exempt from faction theft for all players. Written only when present. |
+| `IsekaiStructureOriginFactions` | `list<string>` | empty | Entity's saved structure-origin affiliations. Included in reputation only through an opting-in faction rule. |
+
+Player placement clears protected factions, records the owner and marks the block entity dirty. Loot filling skips player-placed containers; otherwise it records available location factions. Theft chooses a double inventory's side by slot, checks player placement, then saved faction IDs, then location fallback.
+
+Structure-template entity loading pushes a world onto a thread-local stack. Entity NBT loading claims location factions only while that context exists. This is not a general spawn or current-position affiliation rule.
+
+## Contracts
+
+Use mutation and query entry points on the server thread with a loaded server. Internal maps provide no concurrent access contract. World-save state survives restart and data reload; incident cooldown maps are process memory, not NBT. Data reload changes rule registries without erasing saved standing or relation overrides.
+
+`FactionRelationService.setRuntimeRelation` normalises IDs, optionally writes both directions and marks state dirty. Null server/relation or blank IDs produce no change. `clearRuntimeRelation` removes the requested direction(s), revealing data-pack defaults again. Across matching override pairs, hostile has precedence over friendly, then neutral; an override result precedes all data rules.
+
+`FactionReputationState.add` returns the last processed nonnull faction's resulting value, not the delta or an aggregate. `snapshot` returns an immutable map. Missing player/faction reads return 0. Use the service's quest-reward entry point when a reward should also create gossip, popup and report updates.
+
+### Report projection
+
+`ReputationReportSyncService` builds the report from default factions, known definitions and saved entries. Unrecorded, non-default factions at 0 are omitted. Sorting uses explicit faction/kind priority, then server-composed name text, then faction ID; it is not re-sorted by the client's translated display string.
+
+`ReputationFactionNaming` maps village, profession, NPC type, unique NPC, citizen origin and citizen culture IDs to settlement, trade-circle, kinship, personal, homeland and culture records. Other IDs use charter presentation. Names, subtitles and descriptions are transmitted as `Text`; settlement descriptions are rebuilt relative to the requesting player. Names are deterministic finite combinations and can collide.
+
+The packet sends at most 512 rows. The report request packet and successful service mutations rebuild the report; the client applies the received snapshot on its thread. This is a presentation snapshot, not a client-authoritative reputation store.
+
+## Extending it
+
+For an internal story integration, set the runtime relationship through the service:
+
+```java
+void changeAlliance(MinecraftServer server) {
+    FactionRelationService.setRuntimeRelation(server,
+            "example:city", "example:guild", ReputationRelation.FRIENDLY, true);
+}
+```
+
+Use `clearRuntimeRelation(server, sourceId, targetId, true)` to remove both directions. For membership or protector roles, prefer the [data rules](/en/wiki/reputation-data/). A Java affiliation provider must supply actual faction definitions; standing at a location is not sufficient.
+
+## Verifying
+
+Check player-placed and generated containers, both halves of a double chest, stack reduction and item replacement. Repeat with an obstructed, sleeping and blinded witness, then with no witness. Confirm cooldown separation by victim/container and dimension.
+
+Set standing on each side of −100 and compare the countenance choices across factions in the same event. Save/restart and reload data to distinguish persistence from rule defaults. Set then clear a runtime relation and confirm its fallback. Request the report from different positions and dimensions, and confirm that duplicate display names still retain distinct faction IDs.
+
+## Related
+
+[Reputation](/en/wiki/reputation/) covers gameplay; [Reputation data](/en/wiki/reputation-data/) covers authoring and loader failures.
+

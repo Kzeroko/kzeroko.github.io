@@ -1,0 +1,141 @@
+---
+title: "NPC revival API"
+description: "Query identity-keyed graves, register costs and revive an NPC through a server-side payment transaction."
+category: api
+order: 20
+updated: 2026-09-26
+---
+
+`NPCReviveAPI` exposes grave metadata and revival operations for BaseNpcEntity. Graves are server-wide and keyed by stable NPC identity, so another entity with the same identity cannot overwrite an existing grave.
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.npc.NPCReviveAPI`. Public signatures expose the records `NpcGraveEntry`, `NpcReviveCost` and `NpcReviveResult` from `internal.npc.revive`; they are the facade's return/argument types. `NpcGraveState` owns persistence and its stored entity snapshot is not part of the public metadata view.
+
+The default payment is 1 Astral Cube (`isekaiexpansion:astral_cube`), 30 astral energy and 100 raw experience points. It is not 100 experience levels. Identity overrides take precedence over entity-type overrides, then the default.
+
+The API does not implement a UI, a player ownership permission check or a live-duplicate-NPC search. An integration must decide who may request a grave before invoking revival.
+
+## Common tasks
+
+### Inspect a grave
+
+```java
+static Optional<NpcGraveEntry> findGrave(
+        MinecraftServer server, String identityKey) {
+    return NPCReviveAPI.getGrave(server, identityKey);
+}
+```
+
+A metadata entry contains `npcIdentityKey`, `entityTypeId`, copied `displayName`, `unique`, `deathDimensionId`, `deathPosition`, `deathGameTime` and currently resolved `reviveCost`. It never exposes the full saved entity compound. If no custom name was saved, the name uses the entity translation key.
+
+### Register an identity-specific price
+
+```java
+static boolean registerPrice(NpcIdentity identity, Item material) {
+    var cost = new NpcReviveCost(material, 1, 30, 100);
+    return NPCReviveAPI.registerIdentityCost(identity, cost);
+}
+```
+
+All cost counts must be at least 1, and the item must be nonnull. The record does not prove that an arbitrary supplied item is obtainable. Its fields are requiredItem, requiredItemCount, astralEnergy and experiencePoints; `requiredItemId()` resolves the registered ID and `requiredItemStack()` creates a fresh stack.
+
+Overrides use put-if-absent and have no replacement/removal method. Register during common initialisation after the referenced items exist. The static maps are process-lived and are not saved into graves; querying an old grave uses the current override tables.
+
+### Revive and inspect the result
+
+```java
+static NpcReviveResult restore(ServerPlayerEntity payer, String identityKey) {
+    var result = NPCReviveAPI.revive(payer, identityKey);
+    if (result.succeeded()) {
+        payer.sendMessage(result.npc().getName(), false);
+    }
+    return result;
+}
+```
+
+The nearby search shuffles the 4 horizontal neighbours of the origin, tests supporting collision shapes below or at feet, then checks a 0.6 × 1.8 standing box. The loaded NPC's actual clearance is checked afterward. `reviveAt` skips that support search: it checks free space and overlapping living entities, not ground support, hazardous fluids or world-border suitability. Choose exact destinations accordingly.
+
+## Reference
+
+All world/player operations below belong on the server thread. Registration is a startup operation.
+
+| Method | Returns | Contract |
+| --- | --- | --- |
+| `registerIdentityCost(NpcIdentity, NpcReviveCost) / registerIdentityCost(String, NpcReviveCost)` | `boolean` | Register once per trimmed nonblank identity. Duplicate returns false and leaves the old cost. |
+| `registerEntityTypeCost(EntityType<? extends BaseNpcEntity>, NpcReviveCost) / registerEntityTypeCost(Identifier, NpcReviveCost)` | `boolean` | Register once per type ID; duplicate does not replace. |
+| `getGraves(MinecraftServer)` | `List<NpcGraveEntry>` | Immutable list, newest death first, then identity key. |
+| `getGrave(MinecraftServer, NpcIdentity) / getGrave(MinecraftServer, String)` | `Optional<NpcGraveEntry>` | Metadata and currently resolved cost; invalid/absent key returns empty. |
+| `hasGrave(MinecraftServer, NpcIdentity) / hasGrave(MinecraftServer, String)` | `boolean` | Tests the same lookup. |
+| `recordDeath(BaseNpcEntity)` | `boolean` | Server NPC only; first grave wins. Called by BaseNpcEntity.onDeath. |
+| `revive(ServerPlayerEntity, NpcIdentity) / revive(ServerPlayerEntity, String)` | `NpcReviveResult` | Find a supported position beside the payer in the payer's world. |
+| `reviveNear(ServerPlayerEntity, String, ServerWorld, BlockPos)` | `NpcReviveResult` | Search beside an origin in a world belonging to the same server. |
+| `reviveAt(ServerPlayerEntity, String, ServerWorld, Vec3d)` | `NpcReviveResult` | Use exact finite coordinates; validate actual NPC clearance. |
+| `checkCost(ServerPlayerEntity, NpcReviveCost)` | `NpcReviveResult.Status` | Read affordability only; item, energy, then raw XP priority. |
+
+### Result states
+
+`NpcReviveResult` contains status and nullable npc. Its constructor enforces that only SUCCESS carries an NPC; `succeeded()` tests that status.
+
+| Status | Meaning |
+| --- | --- |
+| `SUCCESS` | The returned npc is nonnull and the grave has been removed. |
+| `GRAVE_NOT_FOUND` | Invalid/missing identity, or grave removal lost the race after spawning. |
+| `INVALID_DESTINATION` | Different server, non-finite position, no nearby candidate or blocked clearance. |
+| `MISSING_REQUIRED_ITEM` | Required item count is insufficient. |
+| `INSUFFICIENT_ASTRAL_ENERGY` | Energy check fails, including ENERGY_INEFFICIENCY. |
+| `INSUFFICIENT_EXPERIENCE` | totalExperience is below the raw XP cost. |
+| `INVALID_ENTITY_DATA` | Loaded entity is not a BaseNpcEntity or type/identity mismatches. |
+| `SPAWN_FAILED` | World insertion fails, or the inserted NPC is dead/removed. |
+
+### Payment and settlement
+
+Items are counted across offhand and main inventory, with item identity matching rather than an NBT predicate. Cost checks run in item → astral energy → raw XP order. Creative mode has no exemption in this API. Energy uses the component's energyCheck, so ENERGY_INEFFICIENCY can block payment despite a sufficient numeric balance.
+
+The transaction checks cost, loads a copied snapshot with a fresh UUID, prepares the NPC, checks space, inserts it with passengers, checks cost again, removes the grave and only then consumes resources. A handled failure after insertion discards the attempted NPC and leaves the grave/cost intact unless the grave was already absent. Payment removes offhand items first, then main inventory, marks inventory dirty, removes/synchronises energy and subtracts raw XP.
+
+This is synchronous validation and settlement. Entity deserialisation or integration callbacks can throw; there is no general exception-to-result wrapper or crash journal. Do not advertise every possible integration failure as a returned status.
+
+### Saved grave format
+
+The overworld-backed file is `data/isekaiexpansion/npc/graves_v2.dat`. The following fields describe its custom payload inside Minecraft persistent-state storage.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `entries` | `list<compound>` | `[]` | Saved grave list; wrong/missing root gives an empty state. |
+| `entries[].npc_identity` | `string` | `required` | Trimmed nonblank stable identity key; first duplicate wins. |
+| `entries[].entity_type` | `string` | `required` | Syntactically valid entity type ID; must equal entity_data.id. |
+| `entries[].custom_name` | `string` | `absent` | Optional serialised Text JSON; present but invalid rejects the entry. |
+| `entries[].unique` | `boolean` | `required` | Byte-tag boolean recording whether the NPC was unique. |
+| `entries[].death_dimension` | `string` | `required` | Syntactically valid world ID; world need not currently be loaded. |
+| `entries[].death_position` | `compound` | `required` | Recorded finite coordinates. |
+| `entries[].death_position.x` | `double` | `required` | Numeric X coordinate; non-finite values reject the entry. |
+| `entries[].death_position.y` | `double` | `required` | Numeric Y coordinate; non-finite values reject the entry. |
+| `entries[].death_position.z` | `double` | `required` | Numeric Z coordinate; non-finite values reject the entry. |
+| `entries[].death_game_time` | `long` | `required` | Numeric world game time at death, in ticks. |
+| `entries[].entity_data` | `compound` | `required` | Defensive full entity snapshot, excluding the original UUID. |
+| `entries[].entity_data.id` | `string` | `required` | Exact entity_type string; checked before loading. |
+
+Missing/wrong required types, blank identity, invalid identifiers, mismatched entity_data.id, malformed custom-name text or non-finite coordinates skip the entry. Unknown fields are ignored. Invalid entries are not preserved as raw escrow and are not logged by this reader. The first valid duplicate identity is retained. Saving orders entries by identity; public listings instead sort newest death first, then identity. A syntactically valid but unavailable entity type may survive NBT reading and fail during revival.
+
+Snapshots and custom names are copied on construction and access. Grave record/removal marks state dirty. There is no expiry or automatic old-version migration in this storage implementation.
+
+## Threading and lifecycle
+
+Grave queries require a loaded MinecraftServer; revival requires a ServerPlayerEntity and a destination ServerWorld from the same server. `recordDeath` returns false on the client. `prepareForRevival` rejects nonserver worlds; the facade's collection maps are not concurrent and methods do not schedule caller work.
+
+BaseNpcEntity records before normal death handling. An accepted grave suppresses custom-inventory drops; rejection because a grave already exists leaves normal drop behaviour. On load, the saved entity UUID is removed again, position is overwritten, and the reconstructed type and stable identity must match the grave.
+
+Preparation restores full health/air, enables AI and clears death/hurt/regeneration timers, absorption, frozen ticks, effects, fire, velocity and fall distance. It wakes and dismounts, releases follower ownership, clears movement commands, target/attacker/combat state, relevant brain memories, navigation, sprinting and active item-use state. Durable inventory, character/outfit, anchors and relationship data come from the snapshot and their normal readers. It does not rerun the ordinary fresh-spawn initialisation path.
+
+The ordinary NPC's `NpcIdentityId` remains in the snapshot and survives revival. Its value, rather than the translated display name, supplies the individual part of the stable identity. See [NPC foundations](/en/dev/npc/) for the field contract.
+
+### Verification
+
+Test default and identity/type override precedence, duplicate registration, blank keys and each result status. Use split offhand/main material stacks; test insufficient item, energy and raw XP separately, including ENERGY_INEFFICIENCY and creative mode. Confirm blocked destinations preserve the grave and payment, successful revival removes the grave once, and duplicate stable identities do not overwrite the first snapshot.
+
+Save/restart before revival and check new entity UUID, durable inventory/outfit, cleared effects and released follower ownership. Corrupt required NBT types and entity IDs in a disposable save; invalid entries should be skipped, not reported as recoverable raw backups.
+
+## Related
+
+[NPC foundations](/en/dev/npc/) explains identity, inventory and follower ownership; [Spell integration](/en/dev/spell-integration/) covers other astral-energy consumers.

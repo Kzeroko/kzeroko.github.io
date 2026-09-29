@@ -11,8 +11,8 @@ export interface SearchDoc {
   d: string;
   /** URL */
   u: string;
-  /** Section key: wiki | codex | blog | page */
-  s: 'wiki' | 'codex' | 'blog' | 'page';
+  /** Section key: wiki | dev | codex | blog | page */
+  s: 'wiki' | 'dev' | 'codex' | 'blog' | 'page';
   /** Lower-cased haystack: title + description + headings + body excerpt */
   k: string;
   /** Optional context line (category, character epithet, date) */
@@ -65,7 +65,7 @@ function scoreDoc(doc: SearchDoc, queryTerms: string[], rawQuery: string): numbe
   }
 
   // Wiki and codex pages are the reference material people come here for.
-  if (doc.s === 'wiki' || doc.s === 'codex') score += 4;
+  if (doc.s === 'wiki' || doc.s === 'codex' || doc.s === 'dev') score += 4;
 
   return score;
 }

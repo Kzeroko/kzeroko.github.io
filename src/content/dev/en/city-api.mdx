@@ -1,0 +1,202 @@
+---
+title: "City API"
+description: "Register persistent cities, marked areas, routes and daily metadata, and resolve NPC city bindings."
+category: api
+order: 30
+updated: 2026-09-19
+---
+
+City data belongs to a server world. `CityAPI` stores city bounds, local areas and routes independently of loaded NPCs; an NPC keeps only its city, residence and optional route references.
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.city.CityAPI`. Its argument and return records live under `internal.city`; they are exposed by this facade. `CityStorage` and `CityStructureRegistry` remain internal implementation details. The event hook `internal.event.events.CityEvents.CHANGED` is also an internal integration point, not a separate public facade.
+
+This is a registration and lookup service. Binding a route does not start movement, choose a schedule or set an NPC's home position. No city data-pack loader or client synchronisation is provided by this facade.
+
+## Common tasks
+
+### Register a city, residence and route
+
+The example uses the short city constructor, which supplies priority `0`, no source structure and the generated city faction. Register the city before its children; child registration returns `false` if the city is absent.
+
+```java
+static void registerDistrict(ServerWorld world) {
+    Identifier id = new Identifier("example", "harbour");
+    BlockPos anchor = new BlockPos(0, 64, 0);
+    CityAPI.registerCity(world, new CityDefinition(
+            id, anchor, new BlockBox(0, 0, 0, 31, 127, 31)));
+    CityAPI.registerSubstructure(world, id, new CitySubstructureDefinition(
+            "inn", CitySubstructureKind.RESIDENCE, anchor,
+            new BlockBox(0, 64, 0, 7, 70, 7)));
+    CityAPI.registerRoute(world, id, new CityRouteDefinition(
+            "round", List.of(anchor, anchor.east(8)), true));
+}
+```
+
+### Bind an existing NPC
+
+`bindNpc` checks that the area and optional route exist in the NPC's current server world. It returns `false` for a null NPC, a client NPC or missing referenced data. It does not require kind `RESIDENCE`, test containment or change AI mode.
+
+```java
+static boolean assignResidence(BaseNpcEntity npc) {
+    CitySubstructureKey key = new CitySubstructureKey(
+            new Identifier("example", "harbour"), "inn");
+    return CityAPI.bindNpc(npc, key, "round");
+}
+```
+
+Pass `null` to omit the route. A non-null blank or malformed route ID throws during validation. Direct `NpcCityBinding` construction accepts a blank optional route as absent, so its validation is not identical to `bindNpc`. Removing the referenced city, area or route does not clear bindings on entities; later lookups return empty for missing data.
+
+### Update daily state
+
+`Visits` below is an example integration-owned integer, read as `0` when absent; it is not a built-in city field. The callback receives the live compound. Do not retain that reference or mutate it after the callback.
+
+```java
+static boolean recordVisit(ServerWorld world, CitySubstructureKey key) {
+    return CityAPI.updateDailyMetadata(world, key,
+            data -> data.putInt("Visits", data.getInt("Visits") + 1));
+}
+```
+
+A day is `Math.floorDiv(world.getTime(), 24000)`: elapsed world time, not `getTimeOfDay()`. Reading returns a defensive copy or a fresh empty compound. A stale saved record is replaced only on the next successful update, not on read. A callback that changes nothing still returns `true`, marks dirty and emits an event. A throwing callback can leave partial mutations without the final dirty mark or event; updates are not transactional.
+
+## Reference
+
+All world arguments are `ServerWorld`. Ordinary required null arguments fail through null checks; invalid local IDs throw `IllegalArgumentException`. Empty optionals/lists indicate absent data, not a fabricated definition.
+
+| Method (arguments) | Return type | Behaviour |
+| --- | --- | --- |
+| `initBuiltinProfiles()` | `void` | Registers the built-in profile if absent. |
+| `registerStructureProfile(structureId, profile)` | `boolean` | First registration wins; false if this source ID already has a profile. |
+| `getStructureProfile(structureId)` | `Optional<CityStructureProfile>` | Looks up the process-wide profile. |
+| `onStructurePlaced(world, structureId, bounds)` | `boolean` | Applies the registered profile; false for missing profile or an existing singleton city. |
+| `registerCity(world, definition)` | `boolean` | Creates or replaces the definition; retains existing children. Equal definition returns false. |
+| `registerStructureCity(world, cityId, sourceStructureId, anchorPos, bounds, factionId, priority)` | `boolean` | Constructs a CityDefinition and delegates to registerCity. |
+| `removeCity(world, cityId)` | `boolean` | Removes the city, substructures, routes and daily data; false if absent. |
+| `getCity(world, cityId)` | `Optional<CityDefinition>` | Looks up this world's definition. |
+| `getCitiesAt(world, pos)` | `List<CityDefinition>` | Returns all containing cities in priority order. |
+| `getCityAt(world, pos)` | `Optional<CityDefinition>` | Returns the first city from getCitiesAt. |
+| `getCityFactionId(world, cityId)` | `Optional<String>` | Returns the resolved faction if the city exists. |
+| `registerSubstructure(world, cityId, definition)` | `boolean` | Adds or replaces by local ID; false for missing city or equal definition. |
+| `removeSubstructure(world, key)` | `boolean` | Also removes that area's daily data; false if absent. |
+| `getSubstructure(world, key)` | `Optional<CitySubstructureDefinition>` | Looks up a city/local-ID pair. |
+| `getSubstructures(world, cityId)` | `List<CitySubstructureDefinition>` | Returns an insertion-ordered copy, or an empty list. |
+| `getPoiSubstructures(world, cityId, npcPoiTypeId)` | `List<SubstructureInfo>` | Filters kind POI and exact npcPoiTypeId equality; does not resolve a POI registry. |
+| `getSubstructureAt(world, pos)` | `Optional<SubstructureInfo>` | Selects within the first containing city that has a matching area. |
+| `registerRoute(world, cityId, definition)` | `boolean` | Adds or replaces by local ID; false for missing city or equal definition. |
+| `removeRoute(world, cityId, routeId)` | `boolean` | Normalises routeId and removes the route; false if absent. |
+| `getRoute(world, cityId, routeId)` | `Optional<CityRouteDefinition>` | Normalises routeId and resolves the route. |
+| `getDailyMetadata(world, key)` | `NbtCompound` | Returns a defensive copy for the current time bucket, or a new empty compound. |
+| `updateDailyMetadata(world, key, updater)` | `boolean` | Mutates current data; false only when the city or area is missing. |
+| `bindNpc(npc, residence, routeId)` | `boolean` | Validates referenced data in the NPC's server world and sets its binding. |
+| `getNpcResidence(npc)` | `Optional<SubstructureInfo>` | Resolves the current binding; null/client/unbound/unresolved gives empty. |
+| `getNpcRoute(npc)` | `Optional<CityRouteDefinition>` | Resolves the optional bound route in the NPC's current world. |
+
+`SubstructureInfo` contains `key` and `definition`. City/local keys use `CitySubstructureKey(cityId, substructureId)`; the city ID is required and the local ID is normalised.
+
+### Definition contracts
+
+| Record / field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `CityDefinition.id` | `Identifier` | Required | Non-null city ID, unique within a world. |
+| `CityDefinition.sourceStructureId` | `Identifier` | `null` in short constructor | Optional originating structure. |
+| `CityDefinition.anchorPos` | `BlockPos` | Required | Copied to an immutable position. |
+| `CityDefinition.bounds` | `BlockBox` | Required | Inclusive three-dimensional bounds; retained by reference. |
+| `CityDefinition.factionId` | `String` | Generated when null/blank | `isekaiexpansion:city/<namespace>/<path>`; nonblank input is retained. |
+| `CityDefinition.priority` | `int` | `0` in short constructor | Any signed integer; higher sorts first. |
+| `CitySubstructureDefinition.id` | `String` | Required | Normalised local ID. |
+| `CitySubstructureDefinition.kind` | `CitySubstructureKind` | `GENERIC` when null | `GENERIC`, `RESIDENCE`, `VENUE`, `WORKPLACE`, `POI`, `PATH_NODE`. |
+| `CitySubstructureDefinition.anchorPos` | `BlockPos` | Required | Copied to an immutable position. |
+| `CitySubstructureDefinition.bounds` | `BlockBox` | Required | Retained by reference; containment in the city is not checked. |
+| `CitySubstructureDefinition.npcPoiTypeId` | `Identifier` | `null` in short constructor | Optional even for kind `POI`; lookup compares IDs only. |
+| `CityRouteDefinition.id` | `String` | Required | Normalised local ID. |
+| `CityRouteDefinition.nodes` | `List<BlockPos>` | Required | Nonempty, no null list/elements; immutable list of immutable position copies. |
+| `CityRouteDefinition.loops` | `boolean` | Explicit argument | Stored policy for the caller; no automatic traversal. |
+| `CityStructureProfile.cityId` | `Identifier` | Required | Fixed destination city ID. |
+| `CityStructureProfile.factionId` | `String` | Generated when null/blank | Same generated faction as CityDefinition. |
+| `CityStructureProfile.priority` | `int` | `0` in short constructor | Passed to the city definition. |
+| `CityStructureProfile.singleton` | `boolean` | `true` in short constructor | Skip placement registration if that city already exists in this world. |
+
+Local IDs are trimmed and lowercased with `Locale.ROOT`, must contain 1–96 characters, and allow only `a-z`, `0-9`, `_`, `-`, `.` and `/`. They are not namespaced identifiers. City IDs remain normal `Identifier` values.
+
+The maximum indexed city footprint is `16384` chunks (`MAX_CITY_INDEXED_CHUNKS`), measured across inclusive X/Z chunk bounds. Oversized registration throws before replacing anything. Y extent does not affect the footprint. City queries first use the chunk index and then test full three-dimensional containment. Results sort by descending priority, ascending bounds volume, then lexical city ID.
+
+Substructure lookup follows that city order, stops at the first city with a containing area, then chooses its smallest area by volume and local ID. It does not select the globally smallest area across overlapping cities. Routes do not validate obstacles, containment or `PATH_NODE` markers.
+
+Do not mutate a retained `BlockBox` after registration: the stored definition and chunk index can disagree without a new registration. City replacement preserves areas, routes and daily records. Area removal deletes its daily record; route removal does not repair NPC bindings.
+
+### Structure placement
+
+Profiles are process-wide, first-registration-wins entries. `initBuiltinProfiles` registers source and city ID `isekaiexpansion:lucentrystel_outpost`, using priority `0`, generated faction and singleton `true`. Registering a profile alone creates no city.
+
+The `StructureStart.place` return hook calls `onStructurePlaced` when the current chunk equals the structure bounds' maximum X/Z chunk. It passes the whole structure bounds; the profile registration uses the minimum X/Y/Z corner as anchor. This coordinate condition is the actual hook contract, not a separate scan confirming every chunk's completion.
+
+With `singleton: false`, repeated placements still target the same profile city ID and update that definition. They do not create a distinct ID for each generated structure.
+
+### Saved state
+
+Each dimension stores `data/isekaiexpansion/city/cities_v1.dat`. The root and nested fields below describe saved NBT, not an authoring JSON format. Nested `Substructures`, `Routes` and `Daily` belong to each city.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Cities` | `list<compound>` | empty | Root city records; absent or wrong type loads no cities. |
+| `Cities[].Id` | `string` | required | Valid namespaced city ID; invalid city is skipped. |
+| `Cities[].SourceStructure` | `string` | absent | Optional identifier; malformed or missing becomes null. |
+| `Cities[].Anchor` | `long` | required | Packed BlockPos; reader accepts numeric NBT. |
+| `Cities[].Bounds` | `compound` | required | Bounds fields below; malformed bounds skip the city. |
+| `Cities[].Faction` | `string` | derived | Blank or missing uses `isekaiexpansion:city/<namespace>/<path>`. |
+| `Cities[].Priority` | `int` | 0 | Signed overlap priority; larger wins. |
+| `Cities[].Substructures` | `list<compound>` | empty | Area records, individually validated. |
+| `Substructures[].Id` | `string` | required | Normalised local ID; invalid record skipped. |
+| `Substructures[].Kind` | `string` | required | Exact uppercase enum; unknown or missing skips the area. |
+| `Substructures[].Anchor` | `long` | required | Packed BlockPos; accepts numeric NBT. |
+| `Substructures[].Bounds` | `compound` | required | Same required bounds fields as a city. |
+| `Substructures[].PoiType` | `string` | absent | Optional identifier; missing or malformed becomes null. |
+| `Cities[].Routes` | `list<compound>` | empty | Ordered-node route records. |
+| `Routes[].Id` | `string` | required | Normalised local ID. |
+| `Routes[].Nodes` | `long[]` | required | Nonempty long array of packed BlockPos values; missing/wrong type/empty skips route. |
+| `Routes[].Loops` | `boolean` | false | Stored loop flag; does not itself start navigation. |
+| `Cities[].Daily` | `list<compound>` | empty | Daily metadata records. |
+| `Daily[].Id` | `string` | required | Valid local ID of an existing substructure; otherwise skipped. |
+| `Daily[].Day` | `long` | required | Numeric time bucket floorDiv(world.getTime(), 24000). |
+| `Daily[].Data` | `compound` | required | Integration-owned data copied on load/save; wrong type skips record. |
+| `Bounds.MinX` | `int` | required | Coordinate of the minimum X bound; every coordinate must be numeric. |
+| `Bounds.MinY` | `int` | required | Coordinate of the minimum Y bound; every coordinate must be numeric. |
+| `Bounds.MinZ` | `int` | required | Coordinate of the minimum Z bound; every coordinate must be numeric. |
+| `Bounds.MaxX` | `int` | required | Coordinate of the maximum X bound; every coordinate must be numeric. |
+| `Bounds.MaxY` | `int` | required | Coordinate of the maximum Y bound; every coordinate must be numeric. |
+| `Bounds.MaxZ` | `int` | required | Coordinate of the maximum Z bound; every coordinate must be numeric. |
+
+Invalid records are skipped individually, including cities over the chunk footprint limit; they are not preserved as raw data for repair. Later valid duplicate city IDs replace the entire earlier city state. Later valid local IDs replace earlier records within their corresponding map. Missing child lists are empty. Daily records referring to absent substructures are discarded. There is no city-specific legacy-format reader.
+
+The NPC's separate `CityBinding` compound contains `City`, `Residence` and optional `Route`; its exact read rules are covered by [NPC foundations](/en/dev/npc/). No city catalogue is copied into that entity.
+
+## Events
+
+Subscribe to the internal `CityEvents.CHANGED` hook when working within the mod. The payload is `Change(world, type, cityId, substructureKey, routeId)`. Dispatch is synchronous after a successful storage mutation, cannot be cancelled and does not catch listener exceptions.
+
+| Type | Additional payload | Trigger |
+| --- | --- | --- |
+| `CITY_UPSERTED` | Neither optional key | Changed city registration. |
+| `CITY_REMOVED` | Neither optional key | Existing city removed. |
+| `SUBSTRUCTURE_UPSERTED` | `substructureKey` | Changed area registration. |
+| `SUBSTRUCTURE_REMOVED` | `substructureKey` | Existing area removed. |
+| `ROUTE_UPSERTED` | `routeId` | Changed route registration. |
+| `ROUTE_REMOVED` | `routeId` | Existing route removed. |
+| `DAILY_METADATA_UPDATED` | `substructureKey` | Every completed update callback. |
+
+Profile registration, NPC binding and unchanged definition registrations emit no event. A listener exception propagates after storage has already changed. Loading saved state also emits no mutation event.
+
+## Threading and lifecycle
+
+Register structure profiles during initialisation. World queries and mutations require the relevant loaded server world and run directly on the calling thread; the facade does not schedule work onto the server thread. Use the server thread for these operations. The concurrent profile map does not make city storage or NPC mutation thread-safe.
+
+Bound NPCs contribute the existing city's faction through the reputation bridge. Location context collects factions from all containing cities, not only the highest-priority result. These lookups use the current world; a binding does not carry a dimension or move a city with an NPC.
+
+Verify an integration by registering overlapping cities, querying both vertical and horizontal boundaries, replacing a city while retaining its children, and removing an area with daily data. Exercise a day change with both read-only and update calls, reload the world, and confirm stale bindings resolve empty. Check unchanged registrations and empty update callbacks separately when testing event counts.
+
+## Related
+
+- [NPC foundations](/en/dev/npc/)
+- [Reputation runtime](/en/dev/reputation-runtime/)

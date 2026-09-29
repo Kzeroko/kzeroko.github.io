@@ -1,0 +1,176 @@
+---
+title: "变身服务与扩展接口"
+description: "启动形态，注册能力、形态技能、tick、移动、乘坐处理器和变体。"
+category: api
+order: 115
+updated: 2026-09-19
+---
+
+变身包在 `net.kzeroko.isekaiexpansion.api.morph` 下公开服务端服务及注册接口。现有入口名为 `MorphService`，并非仓库标准的 `MorphAPI` 门面，部分公开上下文还暴露内部类型。应将这些耦合视为当前实现约定，不代表所有内部辅助类型都稳定。
+
+## 入口
+
+可复用授予使用 `MorphFormRequest`，直接服务端操作使用 `MorphService`。能力、形态技能、tick、移动、乘坐和变体分别注册。注册不会自动授予玩家能力、安装客户端资源或实现原生渲染器。
+
+集成前阅读[生命周期与权限](/zh-cn/dev/morphing/)；能力元数据及属性配置见[变身数据](/zh-cn/wiki/morph-data/)。
+
+## 常见用法
+
+### 授予限时形态
+
+```java
+boolean grantFox(ServerPlayerEntity player) {
+    return MorphFormRequest.timed(
+            EntityType.getId(EntityType.FOX), 18, 20 * 60)
+            .start(player, new Identifier("example", "fox_grant"));
+}
+```
+
+示例授予 60 秒激活时长，并拒绝已有变身。默认鼠标能力为 `none`，实体专用覆盖仍可生效。正时长在进入完成后计算，到期受阻时等待空间。
+
+### 注册能力
+
+```java
+void registerRecovery() {
+    MorphAbilityRegistry.register(new Identifier("example", "recover"), context -> {
+        if (context.player().getHealth() >= context.player().getMaxHealth()) {
+            return MorphAbilityResult.reject();
+        }
+        context.player().heal(1.0F);
+        return MorphAbilityResult.accept(40);
+    });
+}
+```
+
+示例成功后冷却 40 tick。在适当模块化形态的能力槽位引用该 ID。持续能力若不同于重复激活，应显式实现 `repeat`、`stop` 和冷却中再次按下规则。攻击能力必须独立验证目标。
+
+### 注册移动
+
+```java
+void registerTravel(EntityType<? extends LivingEntity> formType) {
+    MorphTravelRegistry.register(formType, MorphTravelHandlers.flight(0.04F));
+}
+```
+
+对尚无处理器的类型注册一次。辅助实现负责移动、坠落距离重置、肢体更新和移动统计。垂直输入为跳跃减下降，冲刺加速度 ×1.3，速度阻尼 ×0.91；参数必须为有限正数。内置默认飞行覆盖悦灵、蝙蝠、蜜蜂、烈焰人、恶魂、鹦鹉、幻翼和恼鬼，参数均为 0.04；默认项保留更早的注册。
+
+### 添加形态专用技能动作
+
+```java
+void registerFormSkill(EntityType<? extends LivingEntity> formType) {
+    MorphFormSkillRegistry.register(
+            formType, new Identifier("example", "recover"), context -> {
+                if (context.player().getHealth() >= context.player().getMaxHealth()) return false;
+                context.player().heal(1.0F);
+                return true;
+            });
+}
+```
+
+这只创建形态与动作处理器，不注册能力执行。模组触发注册表还需用 `MorphFormTriggerableSkill(actionId)` 桥接执行 ID；该实现类型位于 `origins.skill.handles.origin`。为玩家持有的普通能力配置对应形态的 `morph_able` 规则。技能栏动作独立于鼠标主副槽位。
+
+## 方法一览
+
+### 服务与请求值
+
+| 方法 / 值 | 侧别 | 约定 |
+| --- | --- | --- |
+| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | 服务端 | 进入能力形态，或从匹配来源返回；布尔值表示是否接受。 |
+| `morph(ServerPlayerEntity, Identifier, NbtCompound, Identifier, Identifier, Identifier, Identifier, int, int)` | 服务端 | 玩家之后依次为形态类型、视觉 NBT、来源 ID、主 ID、副 ID、可选皮肤、过渡和时长。检查实体、空间、骑乘，允许替换已有状态。 |
+| `morphFromEntity(ServerPlayerEntity, LivingEntity, Identifier, Identifier, Identifier, Identifier, int, int)` | 服务端 | 捕获并清理来源实体 NBT，再委托 `morph`。 |
+| `unmorph(ServerPlayerEntity)` | 服务端 | 开始正常退出；没有形态、已在退出或站立空间不足时返回 false。 |
+| `canReturn(ServerPlayerEntity)` | 服务端查询 | 检查当前位置的站立玩家空间，不依赖激活阶段。 |
+| `expire(ServerPlayerEntity)` | 服务端 | 仅从 `ACTIVE` 且有空间时开始退出。它本身不检查时长或截止点，组件负责该决定。 |
+| `UNLIMITED_DURATION` | 常量 | 0。 |
+| `MorphFormRequest(...)` | 值构建 | 要求形态、主、副 ID；可空 NBT 复制为空 compound，过渡最少 4，时长最少 0；皮肤可为 null。 |
+| `timed(Identifier, int, int)` | 值构建 | 无 NBT，两项能力为 `none`，无皮肤。虽然名为 timed，传入时长 0 仍是无限请求。 |
+| `withEntityNbt(NbtCompound)` / `entityNbt()` | 值操作 | 返回新请求 / NBT 防御性副本。 |
+| `start(ServerPlayerEntity, Identifier)` | 服务端 | 要求来源 ID，委托前拒绝已有变身。 |
+| `isTimed()` / `durationSeconds()` | 查询 | 是否为正时长 / tick 除以 20 后四舍五入。 |
+
+服务没有通用的 null 容错包装，只有上述标记可空的参数适合缺省。应在有效服务端上下文中使用服务端玩家类型调用，不能假定错误侧别调用会静默忽略。
+
+### 能力注册表与回调
+
+| 方法 | 侧别 / 时机 | 约定 |
+| --- | --- | --- |
+| `MorphAbilityRegistry.register(Identifier, MorphAbility)` | 公共初始化 | 注册游戏能力并返回它。 |
+| `find(Identifier)` | 查询 | 可选的已注册能力。 |
+| `registerOverride(EntityType, MorphAbilitySlot, Identifier)` | 公共初始化 | 精确实体与槽位绑定，引用能力须已存在；重复绑定抛出异常。 |
+| `registerDisplayResolver(EntityType, MorphAbilityDisplayResolver)` | 公共初始化 | 每实体类型一个，重复抛出异常；接收形态、槽位及解析后的配置或覆盖 ID。 |
+| `resolve(LivingEntity, MorphAbilitySlot, Identifier)` | 服务端查询 | 可选的解析 ID 与能力，实体覆盖优先。 |
+| `resolveDisplayId(LivingEntity, MorphAbilitySlot, Identifier)` | 双侧查询 | 显示解析器可按状态选择 ID，null 解析为 `none`；也决定数据包冷却身份。 |
+| `cooldownId(Identifier)` | 查询 | 在能力路径前加 `morph_ability/`，保留命名空间。 |
+
+`MorphAbilityContext` 提供服务端玩家、组件、未生成形态、槽位、可空目标和可空来源能力。`metaInt`、`metaDouble` 按有效技能等级读取该能力，或使用传入回退值。
+
+| 回调 / 结果 | 默认 | 约定 |
+| --- | --- | --- |
+| `use(context)` | 必须实现 | 服务端激活。 |
+| `repeat(context)` | 调用 `use` | 持续按住时激活，不等于单次持续施放。 |
+| `stop(context)` | 拒绝 | 释放回调。 |
+| `acceptsPressDuringCooldown(context)` | false | 允许新的按下通过冷却门槛，不允许重复输入绕过。 |
+| `MorphAbilityResult.reject()` | 拒绝，0 | 不更新预览或冷却。 |
+| `MorphAbilityResult.accept(int)` | 接受 | 冷却最小为零；成功释放若返回正值，也会设置冷却。 |
+
+数据包层不捕获任意能力回调异常。回调应保持有界，对预期游戏失败返回拒绝。
+
+### 形态技能与 tick
+
+`MorphFormSkillRegistry.register(formType, actionId, handler)` 拒绝重复组合。解析要求当前激活形态的实体类型精确匹配。`canTrigger`、`canTriggerOnCooldown` 和 `trigger` 捕获处理器运行时异常，记录并返回 false，不取消注册。`trigger` 执行前先检查 `canTrigger`。
+
+`MorphFormSkillHandler` 必须实现 `trigger`；资格默认 true，冷却绕过默认 false。上下文提供动作 ID、技能上下文、组件、形态、服务端玩家和 `metaInt`。支持冷却中再次触发时，桥接器保留剩余冷却，而非重启配置时长。
+
+`MorphFormTickRegistry.register(formType, handler)` 对每个精确类型只接受一个处理器。`tick` 在双侧激活形态上执行，使用 `MorphFormTickContext.isClient()` 区分。`preservesNativeRotation()` 默认 false，`detach` 默认无操作。tick 异常会在出错侧移除该类型处理器；detach 异常只记录，不移除。若处理器已因 tick 失败被移除，就不能依赖它继续收到 detach。
+
+### 移动约定
+
+上下文包含玩家、形态、移动向量、跳跃、下降、特殊移动激活状态，以及 `isClient()`。服务端和所有者客户端可驱动，观察者不能。用 `MorphTravelRegistry.register` 为精确类型注册一个处理器，重复抛出异常。`find` 可以返回只处理非激活移动的处理器，`supports` 则要求 `supportsActivation`。
+
+| 钩子 | 默认 | 含义 |
+| --- | --- | --- |
+| `travel(context)` | 必须实现 | 应用移动或返回放行结果。 |
+| `handlesInactiveTravel(context)` | false | 允许在激活关闭时处理移动。 |
+| `supportsActivation(form)` | true | 激活和输入 UI 是否将该形态视为支持特殊移动。 |
+| `supportsClientPrediction(form)` | false | 启用本地激活预览。 |
+| `activation(form)` | `DOUBLE_TAP` | 另一个选项为 `PRESS`。 |
+| `isEngaged(context)` | 激活标志 | 决定请求切换的当前状态。 |
+| `canActivate(context)` | true | 进入资格。 |
+| `remainsActive(context)` | 调用 `canActivate` | 持续资格。 |
+| `onActivated` / `onDeactivated` | 无操作 | 权威激活生命周期。 |
+| `onClientActivationPredicted` / `onClientDeactivationPredicted` | 无操作 | 所有者客户端预览生命周期。 |
+
+`MorphTravelResult.pass()` 保留原版移动；`pass(speed)` 保留原版移动并覆盖为有限非负移动速度；`handled()` 抑制原版移动。抑制与速度覆盖不能同时存在，无效构建会抛出异常。返回 handled 的处理器必须实际完成所需移动和记录更新。
+
+移动失败会清除或停用状态并放行，处理器仍保留注册。控制器受保护代码块之外查询的激活条件，并非全部具有异常屏蔽。
+
+### 乘坐与变体提供者
+
+`MorphMountRegistry.register(formType, handler)` 拒绝重复类型。乘坐处理器须实现 `canBoard(host, form, passenger)` 和 `positionPassenger(host, form, passenger, updater)`。可选 `passengerPitchDelta` 默认 0，`dismountLocation` 默认 null 以便回退。注册表不捕获提供者异常；座位检查应确定一致，定位应使用传入 updater。
+
+`MorphVariantRegistry.register(formType, provider)` 同样拒绝重复类型。提供者实现 `variants(formType)`、`defaultVariant(formType)` 和 `apply(form, variantId)`；`ownsFormTexture()` 默认 true。变体 ID 不能为 null，翻译键不能空白。
+
+快照按形态 ID 排序，跳过空目录，重复变体 ID 保留第一项。默认值为 null 时使用首个变体；非 null 默认值不会检查是否在列表中，提供者必须确保有效。直接 `apply` 不检查成员资格，玩家选择校验位于服务中。
+
+目录、默认值和应用异常会记录，并分别返回空、null 或不应用。`ownsFormTexture` 不受该异常保护。双侧提供者应提供语义一致的变体，变化时另行发布服务端目录。
+
+## 事件
+
+`internal.event.events.MorphEvents.ON_MORPH_PHASE_CHANGE` 按注册顺序向回调提供玩家、组件、前阶段和当前阶段。事件不可取消，也不隔离回调异常。它在状态和同步处理后触发，包括客户端接收 NBT 阶段变化。事件及组件类型属于内部耦合。
+
+## 线程与生命周期
+
+在玩家使用形态前的公共初始化阶段注册游戏定义。客户端预览、摄像机和渲染器钩子属于客户端初始化。注册表在进程内共享，并发映射不意味着可从工作线程安全修改实体；没有通用数据重载取消注册 API。
+
+在服务端线程使用有效 `ServerPlayerEntity` 调用服务。能力和形态技能处理器修改服务端游戏状态；tick 处理器双侧执行，需要显式区分。移动所有者预测不得施加服务端专属伤害或奖励。乘坐定位与变体应用可用于双侧，但世界修改仍须在对应游戏线程。
+
+内置服务返回的是接受结果，不是未来完成对象。成功进入只表示过渡开始，不代表已经处于 `ACTIVE`。资源可用性及观察者表现是另行处理的客户端事务。
+
+## 相关页面
+
+- [客户端表现](/zh-cn/dev/morph-client/)
+- [Saints Dragons 桥接](/zh-cn/dev/morph-dragons/)
+
+- [变身生命周期](/zh-cn/dev/morphing/)
+- [变身数据](/zh-cn/wiki/morph-data/)
+- [人形架构](/zh-cn/dev/humanoid/)

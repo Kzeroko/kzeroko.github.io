@@ -1,0 +1,205 @@
+---
+title: "Progression runtime"
+description: "Level storage, reward routing, player callbacks and exact equipment growth formulas."
+category: systems
+order: 34
+updated: 2026-09-27
+---
+
+IsekaiCore owns level curves and storage; Expansion's internal item-level helpers and event handlers connect those values to gameplay. This page describes those internal contracts and their dependency boundary, rather than introducing a new public facade.
+
+## What it does
+
+`ItemLevelingBridge` checks item eligibility and delegates to Core's `ITEM_LEVELER`. Player rewards use Core's `PLAYER_LEVELER`; NPC favour uses its per-player identity storage. The [player guide](/en/wiki/leveling/) contains complete level and rank threshold tables.
+
+Dependency behaviour was checked in the local IsekaiCore source checkout for the configured `0.4.0-build60`. This verifies the source reviewed, not equivalence with the resolved binary.
+
+## Runtime model
+
+### Storage and transitions
+
+Core's item storage uses the following NBT. Missing reads do not initialise a level; `hasLevel` requires both child keys.
+
+| Key | Type | Default | Behaviour |
+| --- | --- | --- | --- |
+| `ic_leveling` | compound | Absent | Parent for item level state. |
+| `ic_leveling.ic_lv` | int | 1 | Getter returns stored value without clamping; setter clamps to 1–100. |
+| `ic_leveling.ic_exp` | int | 0 | Experience within the current level; setter does not clamp. |
+
+Core's player adventurer component persists this separate structure:
+
+| Key | Type | Default | Behaviour |
+| --- | --- | --- | --- |
+| `ic_leveling` | compound | Empty | Player-level parent. |
+| `ic_leveling.ic_lv` | int | 0 on missing read | Constructor starts at 1; server normalisation restores the 1–100 range and clears experience for an out-of-range level. |
+| `ic_leveling.ic_exp` | int | 0 | Current player experience. |
+| `rank` | int | 0 | Adventurer rank ordinal, normalised to the supported range. |
+| `completed` | int | 0 | Current rank reputation, bounded by that rank's cap. |
+| `rankRevealed` | boolean | false | Visibility flag; revealing does not promote. |
+| `ic_daily` | compound | Empty | Daily reward-budget parent. |
+| `ic_daily.combatExp` | int | 0 | Combat experience already granted against the budget. |
+| `ic_daily.lootExp` | int | 0 | Loot experience already granted against the budget. |
+| `ic_daily.combatCap` | int | 0 | Stored combat budget; a nonpositive loaded cap causes both budgets to reset. |
+| `ic_daily.lootCap` | int | 0 | Stored loot budget; a nonpositive loaded cap causes both budgets to reset. |
+
+The level handler carries experience across successive thresholds, stops at the maximum and clears overflow there. Decreasing experience can cross levels downwards; reverting a level preserves the fraction of its previous experience bar, truncated against the new requirement. Resetting returns to the minimum and clears experience. Level-up callbacks fire only when the level increases. Direct storage mutations are not equivalent to handler transitions, and the generic handler is not a validation layer for negative or overflowing caller input.
+
+NPC favour uses `NpcFavorTarget` and an NPC identity rather than the item's NBT. Its setter clamps levels to 0–11 and experience to a nonnegative value. Expansion accepts ordinary positive gains only on the server, below level 10 and unless the NPC is married to someone else. The current gain cap subtracts only the stored within-level experience from the cumulative level 10 requirement; it does not reconstruct cumulative experience. Afterwards it clamps a level above 10 back to 10. Do not use this wrapper as a general cumulative-experience normaliser. A successful ring proposal sets level 11 directly.
+
+### Reward routes and callbacks
+
+Core's combat and loot grant routes run reward modifiers, clamp against the remaining category budget, mutate levels and publish the granted amount. Its quest route has no daily category budget. Expansion's `XpRewardLogic` and `TypeBLevelPotion` instead call the player level handler directly: these still trigger level transitions but bypass Core's grant-modifier and after-grant route. The potion grants 300 experience.
+
+Expansion's server callbacks add the level delta as automatic main-tree points on level-up, reset unlocked skills and assign new level minus 1 points on reversion, and erase the category on reset. The category is `isekaiskills:main`, with automatic points under `isekaiexpansion:auto`. Positive granted-experience notifications and level-change notifications are separate paths.
+
+`PlayerLevelChangePacket` writes these integers in order. Its client receiver requires a player, replaces the existing level-change popup and chooses the level-up sound for operation 0 or the failure sound for operations 1 and 2.
+
+| Wire field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `operation` | int | Required | 0 = increase, 1 = revert, 2 = reset. |
+| `oldLevel` | int | Required | Previous level. |
+| `newLevel` | int | Required | Resulting level. |
+
+`LevelUpBonusPower` recomputes active modifiers using `max(0, playerLevel - 1)`. Its stable modifier identity includes the power, attribute and operation; losing or disabling the power removes its contribution. This is a recalculated temporary attribute contribution, not a permanent grant per callback.
+
+### Daily budgets and repeated kills
+
+Budget ratios interpolate with `clamp((L - 1) / 60, 0, 1)`: combat 0.95 to 0.80 and loot 0.25 to 0.20. Each budget is the rounded current level requirement times its ratio. Level changes do not recompute stored budgets. The wake hook resets players captured as sleeping before night skip; the spawn-item grant path and a nonpositive loaded cap also reset them.
+
+Fate Balance modifies loot experience and the loot cap only. Home-rest effects manage the combat cap separately. Each affected cap is recalculated from the current level every second, and its last modifier removal restores that cap once without clearing consumed experience. Fate experience effects use Core's loot/quest grant routes; combat and direct quest/potion grants bypass them.
+
+The combat streak belongs to a horizontal 64 × 64 cell at the player's position. The first 18 kills are unpenalised; subsequent rewards multiply by `0.84 ^ (kills - 18)`, with an explicit zero from kill 78. A gap greater than 240 ticks (12 seconds) subtracts 2 from the old streak before incrementing; a changed cell or gap greater than 900 ticks (45 seconds) resets it. This streak is transient rather than part of the NBT above.
+
+## Contracts
+
+### Equipment dispatch and modifier order
+
+Experience eligibility is broader than attribute dispatch: armour, shields, trinkets, ranged weapons, tools, guns, items with sockets and items with NBT or built-in modifiers can qualify. Smithing stones and fusible gems are excluded. The copying helper copies the stack and adds only positive experience; callers must run eligibility separately.
+
+The ordinary item modifier hook skips trinkets. Armour applies only in its matching slot; shields only off hand; other weapons only in hand slots. Ranged classification precedes the magic-weapon tag, and the final melee branch requires an attack-damage entry. The separate Trinkets hook applies the trinket profile. Both hooks apply level growth before this mod's gem and curse modifiers, so those later modifiers do not enter the scaled base.
+
+Only positive `ADDITION` base modifiers contribute to proportional growth. Attack-speed softening sums the magnitude of negative `ADDITION` modifiers. All resulting growth modifiers use `ADDITION`, with stable UUIDs derived from the purpose, attribute and slot. Multiplicative base modifiers are not proportionally scaled by this helper.
+
+### Formula notation
+
+Let `B = max(0, itemLevel - 1)` when both level keys exist, otherwise 0. Let `S` be the nonnegative great-success count, capped at 1000000 for its logarithm.
+
+| Symbol | Definition |
+| --- | --- |
+| `C` | `clamp(0.035 × sqrt(B) + 0.0022 × B, 0, 0.80)` |
+| `G` | `log(1 + S) / log(2)` |
+| `M` | Round `min(15, 1.20 × sqrt(B) + 0.030 × B)`; positive contributions have a minimum of 1 and maximum of 15. |
+| `H` | Round `min(35, 1.05 × G)`; positive contributions have a minimum of 1 and maximum of 35. |
+
+A proportional row adds the positive base sum times its listed ratio. Other rows add the listed amount directly. Zero contributions add no modifier.
+
+### Armour
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `minecraft:generic.armor` | Positive base × ratio | `C × 2.10` |
+| `minecraft:generic.armor_toughness` | Positive base × ratio | `C × 1.35` |
+| `minecraft:generic.knockback_resistance` | Positive base × ratio | `C × 0.50` |
+| `minecraft:generic.max_health` | Level, additive | `0.30 × sqrt(B) + 0.012 × B` |
+| `isekaiexpansion:tenacity` | Level, additive | `0.12 × sqrt(B) + 0.005 × B` |
+| `minecraft:generic.max_health` | Great success, additive | `0.30 × G` |
+| `isekaiexpansion:tenacity` | Great success, additive | `0.16 × G` |
+| `isekaiexpansion:environmental_resistance` | Great success, additive | `0.14 × G` |
+| `isekaiexpansion:guts_chance` | Great success, additive | `0.020 × G` |
+
+### Shields
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `minecraft:generic.armor` | Positive base × ratio | `C × 0.65` |
+| `minecraft:generic.armor_toughness` | Positive base × ratio | `C × 0.65` |
+| `isekaiexpansion:max_shield_gauge` | Level, additive | `1.80 × sqrt(B) + 0.080 × B` |
+| `isekaiexpansion:shield_gauge_regen_speed` | Level, additive | `0.030 × sqrt(B) + 0.001 × B` |
+| `minecraft:generic.armor_toughness` | Level, additive | `0.040 × sqrt(B)` |
+| `isekaiexpansion:max_shield_gauge` | Great success, additive | `1.25 × G` |
+| `isekaiexpansion:shield_power` | Great success, additive | `0.18 × G` |
+| `isekaiexpansion:aggro_generation` | Great success, additive | `0.35 × G` |
+
+### Ranged weapons
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | Positive base × ratio | `C × 0.80` |
+| `minecraft:generic.attack_speed` | Attack-speed penalty offset | `negative additive magnitude × C × 0.18` |
+| `isekaiexpansion:range_crit_chance` | Level, additive | `0.0032 × sqrt(B) + 0.00007 × B` |
+| `isekaiexpansion:range_crit_damage` | Level, additive | `0.0080 × sqrt(B) + 0.00025 × B` |
+| `isekaiexpansion:dexterity` | Level, rounded additive | `M` |
+| `isekaiexpansion:range_crit_chance` | Great success, additive | `0.0026 × G` |
+| `isekaiexpansion:range_crit_damage` | Great success, additive | `0.0070 × G` |
+| `isekaiexpansion:dexterity` | Great success, rounded additive | `H` |
+| `isekaiexpansion:perception` | Great success, additive | `0.10 × G` |
+| `isekaiexpansion:evasion_counter` | Great success, additive | `0.18 × G` |
+
+### Magic weapons
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | Positive base × ratio | `C × 0.70` |
+| `minecraft:generic.attack_speed` | Attack-speed penalty offset | `negative additive magnitude × C × 0.18` |
+| `isekaiexpansion:elemental_power` | Level, additive | `0.50 × sqrt(B) + 0.025 × B` |
+| `isekaiexpansion:magic_crit_chance` | Level, additive | `0.0029 × sqrt(B) + 0.00006 × B` |
+| `isekaiexpansion:magic_crit_damage` | Level, additive | `0.0075 × sqrt(B) + 0.00022 × B` |
+| `isekaiexpansion:intelligence` | Level, rounded additive | `M` |
+| `isekaiexpansion:elemental_power` | Great success, additive | `0.65 × G` |
+| `isekaiexpansion:magic_penetration` | Great success, additive | `0.065 × G` |
+| `isekaiexpansion:magic_crit_chance` | Great success, additive | `0.0024 × G` |
+| `isekaiexpansion:intelligence` | Great success, rounded additive | `H` |
+
+### Melee weapons
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | Positive base × ratio | `C` |
+| `minecraft:generic.attack_knockback` | Positive base × ratio | `C × 0.40` |
+| `minecraft:generic.attack_speed` | Attack-speed penalty offset | `negative additive magnitude × C × 0.18` |
+| `isekaiexpansion:melee_crit_chance` | Level, additive | `0.0030 × sqrt(B) + 0.00007 × B` |
+| `isekaiexpansion:melee_crit_damage` | Level, additive | `0.0085 × sqrt(B) + 0.00022 × B` |
+| `isekaiexpansion:strength` | Level, rounded additive | `M` |
+| `isekaiexpansion:melee_crit_chance` | Great success, additive | `0.0028 × G` |
+| `isekaiexpansion:melee_crit_damage` | Great success, additive | `0.0075 × G` |
+| `isekaiexpansion:armor_penetration` | Great success, additive | `0.070 × G` |
+| `isekaiexpansion:strength` | Great success, rounded additive | `H` |
+
+### Trinkets
+
+| Attribute | Contribution | Formula |
+| --- | --- | --- |
+| `isekaiexpansion:max_energy` | Positive base × ratio | `C × 0.55` |
+| `isekaiexpansion:ability_haste` | Positive base × ratio | `C × 0.45` |
+| `isekaiexpansion:stamina` | Positive base × ratio | `C × 0.45` |
+| `isekaiexpansion:max_energy` | Level, additive | `1.35 × sqrt(B) + 0.050 × B` |
+| `isekaiexpansion:ability_haste` | Level, additive | `0.22 × sqrt(B) + 0.008 × B` |
+| `isekaiexpansion:stamina` | Level, additive | `0.10 × sqrt(B) + 0.004 × B` |
+| `isekaiexpansion:energy_regen_speed` | Great success, additive | `0.030 × G` |
+| `isekaiexpansion:heal_amplification` | Great success, additive | `0.35 × G` |
+| `isekaiexpansion:debuff_accuracy` | Great success, additive | `0.45 × G` |
+
+### Rank promotion
+
+Core qualifies only the next rank; the initial promotion from rank 0 is exempt from reputation. A successful promotion clears current reputation. Expansion's rank reward preflights every resolved recipient, accepting already-at-or-above recipients, before applying promotions. The later mutation loop is not a transactional rollback mechanism. The dialogue reveal action changes visibility alone.
+
+## Extending it
+
+Use Core's level handlers for actual transitions and Expansion's existing reward integration when adding a quest reward. For an internal equipment profile, add its dispatch branch before a broader matching branch, use the modifier helper's stable identities, and specify which base operations it scales. Do not expose `internal.itemlevel` as a public API or mutate an attribute map shared with another provider.
+
+For a class level-bonus power, follow the existing `isekaiclasses` power definitions and `LevelUpBonusPower` registration; see [identity data](/en/wiki/identity/) for the data boundary. Keep server reward mutation separate from client presentation.
+
+## Verifying
+
+Check a reward crossing several levels, maximum-level overflow, downward transitions and reset; compare main-tree points and notifications. Test direct quest/potion rewards separately from Core combat and loot rewards.
+
+For each equipment profile, compare level 1 and 100, no level keys, positive additive bases, negative attack speed and multiplicative bases. Confirm trinkets are processed once, slot changes remove the old modifiers, and gems do not inflate the level-growth base. Compare a great-success count of 0 and positive counts independently of item level.
+
+Exercise a wake reset with a sleeping and an awake player, a loaded zero budget, cell changes and the strict time-gap boundaries. Test NPC gains near level 10 and an accepted proposal; test rank preflight with mixed eligible and ineligible recipients. These are runtime checks to perform, not results of the documentation build.
+
+## Related
+
+- [Levels and experience](/en/wiki/leveling/)
+- [Forgery runtime](/en/dev/forgery-runtime/)
+- [Equipment skills](/en/dev/equipment-skills/)
+- [Quest runtime](/en/dev/quest-system/)

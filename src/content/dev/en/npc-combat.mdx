@@ -1,0 +1,231 @@
+---
+title: "NPC combat"
+description: "Target intent, action selection, timed attacks, weapon melee, damage guards and combat state."
+category: systems
+order: 63
+updated: 2026-09-26
+---
+
+The NPC combat stack uses `entity.CombatNpcEntity` and the internal `internal.ai.action` implementation. These are project extension types, not a public combat facade. This page covers autonomous NPCs; a player-controlled morph continues to use the player's combat input.
+
+## What it does
+
+Combat NPCs select targets through threat sensors. `NpcCombatController` schedules authored spells and support actions, while `NpcWeaponMeleeController` drives continuous weapon attacks whenever `supportsNpcCombat()` and `NpcConfig.normalMeleeAttacks()` permit them. Ordinary melee has no action index, authored timeline or additional cooldown. Special-action cooldowns leave weapon melee available.
+
+Better Combat and Better Mob Combat are external dependencies. This mod asks their weapon registry, readiness, range and upswing interfaces for the weapon attack; it does not define their weapon JSON defaults here. The local bridge also substitutes `0` for Better Mob Combat's additional mob cooldown on `BaseNpcEntity` and `SimpleCloneEntity`.
+
+## Runtime model
+
+### Target intent and protection
+
+`NpcThreatSensor` gates fast validation at `20` ticks and broader selection at `40` ticks within sensor callbacks. These are internal scan gates, not a promise that the brain invokes the sensor every tick. Recent aggressors expire after `600` ticks (30 seconds), with at most `6` remembered UUIDs; insertion-order eviction removes the first entry. Refreshing an existing entry extends expiry without moving its insertion position. Unloaded, invalid or no-longer-retaliable entities are removed.
+
+| Intent | Priority | Assist leash |
+| --- | --- | --- |
+| `HOSTILE` | 1 | No |
+| `FAVOR_HIT` | 2 | Yes |
+| `PROTECT` | 3 | Yes |
+| `REVENGE` | 4 | No |
+| `COMMAND` | 5 | No |
+
+Higher intent priority replaces lower priority. Equal-priority candidates normally need `newDistanceSquared + 1 < oldDistanceSquared`; this is a squared-distance comparison. A new `FAVOR_HIT` candidate can replace another favor-hit target without that distance advantage. A command target is always admitted by the protection-mode gate, but still faces target validity and damage guards.
+
+While following, `ASSIST` admits all ordinary intents, `DEFEND` excludes `FAVOR_HIT`, and `PASSIVE` admits only `REVENGE`. Outside follow mode these mode restrictions do not apply. Followers do not proactively choose an otherwise idle ambient hostile during the ordinary self-defence scan; a mob attacking the NPC can still be selected. Faction targeting determines proactive hostility, and faction-friendly entities are excluded by the NPC target accessors.
+
+Protection considers visible friendly players and faction allies inside `protectRange`, plus the living follow owner inside `max(protectRange, followRange)` even if not in the visible list. A candidate threat must be local to both the protectee and NPC. With `A = max(protectRange, aggroRange)`, its protectee distance is at most `A`, and its NPC distance is at most `max(followRange, protectRange, aggroRange) + A`. Assist targets retain that NPC leash.
+
+| Protection scoring input | Value |
+| --- | --- |
+| Faction ally / friendly player / follow owner priority | 1 / 2 / 3 |
+| Priority multiplier | 1000000 |
+| Mob directly targeting protectee | 10000 |
+| Protectee's recorded attacker | 9000 |
+| Recorded attacker also targeting protectee | Additional 80 |
+| Distance penalty | Subtract target-to-protectee squared distance |
+
+`FAVOR_HIT` requires a followed or trusted player's last attack timestamp to be valid and no more than `100` ticks (5 seconds) old. It uses that player's attacked entity, the same locality bounds, and score `priority × 1000000 + 9000 - targetToPlayerSquared - npcToTargetSquared × 0.25`.
+
+Current targets must be alive, in the same world, targetable and allowed by intent; Creative and spectator players are excluded. A visible valid target survives the ordinary aggro-distance test. An unseen revenge target survives while its aggressor entry remains unexpired; another unseen target must remain within `aggroRange`. Last-known position updates when a target changes or is visible. Hidden-target approach uses that stored block position in the current dimension, and holds position if it has none.
+
+### Action selection and timing
+
+The action set is built lazily from subclass registrations only. Empty sets support pure weapon melee. Blank or duplicate IDs throw; there is no default-action index. Both clients and servers must register the same authored actions in the same order.
+
+On each controller tick, per-action cooldowns and a positive global cooldown decrement first. Dead, sleeping, item-using, POI-busy or emoting NPCs stop navigation and end an active action with `BLOCKED`. Goal-effect brain suspension calls `interrupt()` instead of ticking this controller, so these cooldowns do not advance through that path.
+
+An idle controller with no global cooldown evaluates each non-cooling action: meet its minimum completed-swing count, select a live same-world target, call `isInRange`, call `canStart`, and require a finite positive score. Highest priority wins, then highest score; an exact tie keeps the earlier registered action. A positive `rangeOverride()` replaces `attackRange`; otherwise the configured range is used. The selected action reserves its next permitted melee boundary: the controller does not begin another swing while waiting, and re-evaluates eligibility every tick.
+
+| Timing field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `castTicks` | integer | Required | Non-negative controller ticks in CASTING. 0 starts in EXECUTING. |
+| `executeTicks` | integer | Required | Non-negative; controller uses at least 1 execution tick. |
+| `triggerTick` | integer | Required | Zero-based execution tick, from 0 through `max(0, executeTicks - 1)`. Other values throw. |
+
+`NpcActionTiming.instant()` is `(0, 1, 0)`. Starting an action calls `onStart` immediately; execution begins on a later controller tick. The final casting tick changes phase and returns, so it does not trigger execution in the same tick. During execution, `onTrigger` runs once at the selected tick; ATTACK also reports an attack to the emotion manager. The per-action cooldown starts after that trigger. The global cooldown starts when the action finishes or is stopped. A stop before the trigger also starts its per-action cooldown, preventing repeated cancelled casts from retrying every tick.
+
+The controller captures a target UUID and live reference. While active it checks life, removal and world, looks toward the target with `45`-degree limits, and runs the timeline. It does **not** re-run the active action’s `selectTarget`, `canStart`, range, visibility or score each execution tick. If `interruptible()` is true and the global cooldown is clear, an eligible action with strictly higher priority may replace it at its permitted melee boundary. Equal priority never pre-empts. Blocking, explicit interruption and target loss stop even non-interruptible actions.
+
+Navigation locking applies at start and during casting/execution. Movement locking zeroes forward/sideways inputs during execution; it is not a velocity reset. Stop reasons are `FINISHED`, `TARGET_LOST`, `INTERRUPTED` and `BLOCKED`. `onStop` receives the captured target, which may be null, then tracked combat state is cleared. A stop before triggering consumes the authored action cooldown; an already-applied cooldown is retained. These authored timers never delay baseline weapon attacks.
+
+If no action starts, approach logic considers the hostile target. It holds when the weapon hitbox reaches the target, including during special-action cooldowns, or while a selected ATTACK/DEBUFF action against that hostile waits at its melee boundary. Otherwise it approaches. HEAL, BUFF, CLEANSE and SHIELD do not hold offensive approach. Visible-target paths use zero target tolerance and refresh every `4–6` controller ticks, updating navigation speed in between; a long spell range cannot leave a melee fighter stopped outside weapon reach.
+
+### Support actions
+
+`NpcSupportSensor` requests a `20`-tick sensing interval. An absent or empty visible-mob cache clears the support list before owner handling. Otherwise a living, trusted follow owner within `protectRange` is inserted first. Visible friendly non-Creative/non-spectator players and faction-protected living entities in range follow; the owner is not duplicated.
+
+`NpcActions.builder` supplies these default target policies:
+
+| Type | Selection |
+| --- | --- |
+| `ATTACK`, `DEBUFF` | Current hostile target |
+| `HEAL` | Lowest health fraction among injured living self/support candidates; none if all healthy |
+| `SHIELD` | Same injured selection, falling back to self |
+| `BUFF` | Random support candidate, or self when the list is empty |
+| `CLEANSE` | First living self/support candidate with a harmful status effect |
+
+The controller validates life, world and range; the builder’s default condition adds no visibility/faction restriction. The default locks navigation but not movement inputs, is non-interruptible, and scores `1 + random × 0.001`. Lifecycle callbacks default to no-ops; supplied callback functions cannot be null. Use `target`, composable `condition` predicates and `score` to replace selection, add tactical gates and express urgency. Custom triggers own impact-time validation.
+
+### Continuous weapon melee
+
+`NpcCombatAttributes` owns the weapon-compatible attack-speed base of `4.0`. Every NPC builder inherits it. Server spawn initialisation and NBT loading restore this base after vanilla has read saved attributes, without clearing equipment, outfit or effect modifiers. Existing prototype NPCs therefore adopt the correct baseline when loaded; they do not need recreation or attribute commands. Damage, health and other saved attributes keep their existing values.
+
+Customise individual attack cadence through attribute modifiers. Direct edits to the attack-speed base are replaced at the next spawn initialisation or load. This is one current stat rule, with no version-specific migration or old-value fallback.
+
+The weapon driver calls `bettermobcombat$startUpswing` directly when its weapon is ready, like clone melee. Better Mob Combat owns attack strength, combo progression, hitboxes, packet playback and weapon recovery. This path does not call delayed upswing, does not reserve a scheduler execution window, and does not add a post-action pause. After an authored action ends, melee may resume in that same controller tick if weapon recovery permits it.
+
+Start eligibility requires a live, visible, same-world target allowed by `canAttack`, a main-hand weapon with a nonempty registered attack list, and a current attack. `NpcWeaponMeleeController.isInRange` delegates to `MobCombatHelper.isWithinAttackRange`; centre distance cannot reject a valid hitbox intersection. `NpcCombatFacing` aligns yaw and pitch as the clone attack goal does, with pitch clamped to `-75–75` degrees. Effective attack speed must be finite and positive. The dependency remains responsible for the final readiness check.
+
+Before advancing a pending hit, `BetterMobCombatNpcSwingMixin` checks that the autonomous NPC is unblocked, outside an authored action, outside goal-effect brain suspension and still attacking the same valid target. Cancellation clears the pending hit, delayed runnable and callback, stops weapon animation, and preserves existing weapon recovery. The scoped bridge corrects Better Mob Combat `1.3.1` cancellation, which otherwise leaves its hit countdown running. The bridge accesses dependency fields through post-merge `@Accessor` methods and calls the public `MobAttackWindup` and `PlayerAttackProperties` interfaces. It does not shadow members contributed by another mixin: shadow validation runs before those members are merged. Clones and player-owned morph forms do not enter this NPC bridge. The damage callback also rejects invalid attackers, cross-world/dead/removed victims and stale cancellation tokens. Players require `canApplyOutgoingDamageToPlayer`; other living targets require `canAttack`, then damage delegates to `tryAttack`.
+
+### Weaving policy
+
+Each authored action exposes `meleePolicy()`. `NpcMeleePolicy.DEFAULT` is `afterSwings(0)`: no swing quota, and wait for impact before entering.
+
+| Policy field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `transition` | enum | `AFTER_IMPACT` | `AFTER_IMPACT` waits for the pending hit; `AFTER_RECOVERY` also waits for weapon recovery; `INTERRUPT` cancels an unfinished swing. None erases weapon recovery. |
+| `minimumSwings` | integer | 0 | Non-negative committed swings since the previous authored action started. Negative values throw. |
+
+`NpcMeleePolicy.afterSwings(2)` admits an action after two committed swings. A miss counts because it completes an attack; each swing counts once regardless of targets hit. Cancelled windups do not count. Starting any authored action consumes the shared swing count. Changing hostile target resets the encounter count and invalidates queued old-target damage. This state is per NPC and transient, without additional network or NBT fields.
+
+A positive quota deliberately requires melee; do not apply it to a ranged-only spell or emergency heal that must work before any swing. Give those actions a zero quota, an appropriate priority and a health/distance condition. An interrupting action can cancel a windup, but replacing an active spell additionally requires that spell’s `interruptible()` flag. All authored actions suspend new baseline swings for their own duration. Automatic quick-use items wait until the hit boundary and no authored action is active.
+
+### Damage admission and dodging
+
+Player hostility is counted before successful health damage: the ordinary damage path rejects invulnerability, non-positive amounts and friendly fire, then records the attempt before invincibility-frame and dodge checks. Avoided projectile pass-through records an attempt only when avoidance succeeds.
+
+For `CombatNpcEntity`, attempts from a living non-Creative/non-spectator, targetable player refresh a `600`-tick (30-second) memory. The current incoming amount selects the threshold applied to the cumulative attempt count:
+
+| Current potential damage | Required attempts |
+| --- | --- |
+| At most 2 | 5 |
+| Above 2 through 7 | 2 |
+| Above 7 | 1 |
+
+Once unlocked, revenge stays unlocked until that player's memory expires. This is not a separate counter for each damage tier. The hostility map is transient. Trusted players are hidden by the NPC's normal target/attacker getters.
+
+Outgoing player damage is restricted to the captured combat target, or a player on that target player's side. Without a captured target, the ordinary target must be a player and the same rule applies. Creative, spectator, dead and otherwise untargetable players fail. `NpcTargetDamageGuard` checks responsible NPC ownership from both attacker and direct source; this is additional to team friendly-fire protection.
+
+Dodging is an explicit entity capability, enabled with `setDodgeableNpc`. The default dodge requires a living, awake, non-item-using, unmounted entity, an eligible damage source and the dependency's airborne permission. It moves away from the source, falling back to backward facing, adds roll velocity and grants a roll-evasion window. A successful dodge sets `dodgeCooldownTick`, then tests the granted window against the current hit.
+
+| Local dodge calculation | Value or behaviour |
+| --- | --- |
+| Base roll distance | `3`, plus Combat Roll's configured addition, minimum `1` |
+| Horizontal velocity | Distance × `0.475` |
+| Water multiplier | `min(waterHeight, 1) × 0.5` |
+| Lava multiplier | `0.3` |
+| Slipperier-than-grass floor | Multiply by squared grass-to-floor slipperiness ratio |
+| Window duration | Combat Roll duration × speed ratio, rounded up, minimum `1` tick |
+| Speed-ratio clamp | `0.5–2.5`, relative to `3 × 0.475` |
+| Dependency duration failure | `8` ticks fallback |
+
+The local window remains valid through its expiry tick. Damage bypassing invulnerability/effects, void, drowning, starvation, falling, suffocation and fire cannot be avoided through this helper; eligible damage also needs an attacker or direct source. This table describes local adaptation, not external Combat Roll configuration defaults.
+
+## Contracts
+
+### Configuration and persistence
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `normalMeleeAttacks` | boolean | true | Permits continuous weapon melee only on combat-capable NPCs. |
+| `attackRange` | double | 2.4 | Default action range in blocks; no constructor clamp. |
+| `protectRange` | double | 12 | Protection/support radius in blocks; no constructor clamp. |
+| `aggroRange` | double | 12 | Ordinary hostile and hidden-target range in blocks; no constructor clamp. |
+| `dodgeCooldownTick` | integer | 30 | Cooldown after successful dodge; clamped to non-negative. |
+
+Ranges are configuration inputs, not validated safe radii. Their squared uses do not reject negative inputs. These are `NpcConfig` defaults; individual NPCs override them.
+
+Combat cooldown fields live directly in entity NBT:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `CombatGlobalCD` | integer | 0 | Remaining authored-action cooldown; negative loaded values clamp to 0. Does not block melee. |
+| `CombatActionCD` | list of compounds | Empty | Positive cooldowns for known action IDs. Unknown IDs and non-positive ticks are ignored. |
+| `CombatActionCD[].ActionId` | string | Empty | Matches the current action set's exact ID. Stable IDs preserve cooldowns across action reordering. |
+| `CombatActionCD[].Ticks` | integer | 0 | Remaining positive ticks; repeated valid IDs overwrite earlier values. |
+
+Action phase, elapsed execution, captured target and triggered flag are not saved by the controller. Loading does not resume an interrupted swing. The tracker sends action index, phase, sequence, target UUID, cast start and cast duration; phase changes increment the sequence. Both sides therefore need the same deterministic action registration order.
+
+### Animation ownership
+
+Ordinary action clips default to `charge_<id>`, then `charge_loop_<id>`, and `release_<id>`. Explicit keys use their loop/hold flags. `usesExternalAnimation()` suppresses the controller’s Gecko clip for an authored action. Continuous melee owns no Gecko action clip; its animation comes from Better Mob Combat. Starting an authored action stops the remaining weapon recovery animation without shortening its server recovery timer.
+
+At the end of the model's pose work, before humanoid body shaping, `HumanoidPlayerPoseBridge` first checks for a sampled morph-host pose. Otherwise its autonomous path requires active Player Animator playback and enabled normal melee with an active Better Mob Combat animation, except for screen-space poses. It maps torso/head/arms/legs onto `torso`, `head`, `right_arm`, `left_arm`, `right_leg`, `left_leg`; missing bones are skipped. Autonomous channels use the resolved Gecko pose as fallback and approximate bends as rigid rotations.
+
+Held-item offsets are applied through matrices: position divided by `16`, then Z/Y/X rotations. They are not accumulated onto item bones. The morph body channel has a separate outer matrix transform, and the bridge restores the Gecko `body` bind transform before applying host parts. Keep animation ownership separate from server hit authority when extending renderers.
+
+## Extending it
+
+Override `registerNpcActions(NpcActionSet.Builder)` on the NPC subclass. Use stable, unique IDs and deterministic registration order. Implement `NpcAction` or use `NpcActions.builder` when its targeting rules fit.
+
+| Member group | Responsibility |
+| --- | --- |
+| `id`, `type`, `priority`, `score` | Identity, action category and selection/pre-emption ordering |
+| `selectTarget`, `canStart`, `rangeOverride` | Admission; recheck impact-specific constraints in the trigger |
+| `timing`, `cooldownTicks`, `globalCooldownTicks` | Timeline and separate cooldown lifecycles |
+| `locksNavigation`, `locksMovement`, `interruptible` | Requested locks; whether higher-priority actions may replace this action |
+| `castAnimationKey`, `executeAnimationKey`, `loopCastAnimation`, `holdExecuteAnimation`, `usesExternalAnimation` | Clip ownership and playback |
+| `meleePolicy` | Required swing count and melee-to-action transition |
+| `visualSpell` | Optional spell presentation reference |
+| `onStart`, `onTrigger`, `onStop` | Server callbacks; release external resources on every stop reason |
+
+The action context exposes server world, NPC, current hostile target, visible mobs and support candidates. Callbacks are synchronous and are not wrapped in exception recovery by the controller. Keep them on the server tick path. Do not assume `canStart` implies a later hit is still legal.
+
+The builder snapshots an immutable definition. Its defaults are instant timing, priority `0`, both authored cooldowns `0`, range override `0`, no spell presentation, no explicit animation keys, cast loop false, execute hold true and external animation false. Setters reject negative cooldowns and non-finite/negative range overrides. Repeated `condition` calls combine with short-circuit AND. Reusing the builder cannot mutate an already built action.
+
+For a combat NPC with normal melee enabled and matching Gecko charge/release clips, this definition permits a lightning cast after at least two weapon swings; its cooldowns can allow further swings before the cast. It uses the existing lightning spell; the example ID needs its corresponding animation clips on that NPC.
+
+```java
+builder.add(NpcActions.builder("short_cast_lightning", NpcActionType.ATTACK)
+        .timing(NpcActionTiming.of(20, 8, 7))
+        .cooldownTicks(22).globalCooldownTicks(22)
+        .meleePolicy(NpcMeleePolicy.afterSwings(2))
+        .visualSpell(LightningStrikeSpell.INSTANCE)
+        .onTrigger((ctx, target) -> LightningStrikeSpell.execute(ctx.npc(), target, 12.0F))
+        .build());
+```
+
+Evelina’s definitions use this builder while retaining her existing spell timing, damage and disabled normal melee. New archetypes choose their own rotation policies; the builder does not turn a caster into a melee fighter.
+
+## Verifying
+
+Run `./gradlew.bat compileJava`. In game, verify saved attribute loading, persistent modifiers, weapon swaps, action cancellation and independent NPC state with multiple players.
+
+1. Give a combat NPC a registered melee weapon and no authored actions; check uninterrupted weapon cadence. Then add a two-swing spell and verify its impact/recovery/interrupt transition policies.
+2. Test exact score ties, cooldown expiry and zero-cast timing. Confirm the trigger runs once, early cancellation consumes the authored cooldown, and melee continues through special-action cooldowns.
+3. Kill or remove the captured target, start item use, sleep, emote and apply goal-effect control during a windup. Check each stop path and absence of a stale dependency upswing.
+4. Move a custom action's target out of range or behind a wall after admission; verify its trigger implements the intended impact policy.
+5. Test assist/defend/passive modes, trusted players, faction allies and bystanders inside a melee arc. An attack against a monster must not damage an unrelated player.
+6. Test low-, medium- and high-damage player attempts, including dodged hits and expiry. Confirm no friendly-fire attempt increments hostility.
+7. Save during a cooldown, reorder actions without changing IDs, reload and confirm remaining cooldowns map correctly. Confirm no in-flight action resumes.
+8. Observe melee from a second client with base and alternate outfits. Check arm, item and body transforms without duplicate Gecko attack clips; separately verify a player morph keeps player-owned input.
+
+## Related
+
+- [Player morph lifecycle and test fixture](/en/dev/morphing/)
+- [Morph client presentation](/en/dev/morph-client/)
+
+- [NPC foundations](/en/dev/npc/)
+- [NPC locomotion](/en/dev/npc-locomotion/)
+- [NPC followers](/en/dev/npc-followers/)
+- [Reputation runtime](/en/dev/reputation-runtime/)

@@ -1,0 +1,113 @@
+---
+title: "Ground navigation and villager conversations"
+description: "Collision-aware land pathing, bounded recovery, and exclusive villager dialogue activity."
+category: systems
+order: 135
+updated: 2026-09-19
+---
+
+The vanilla integration adjusts how ground mobs execute paths and how villagers reserve their attention during conversations. These are internal mixin-backed systems: they retain vanilla destination selection and threat handling while changing collision checks and activity ownership.
+
+## What it does
+
+`CollisionAwarePathing` refines land nodes using the mob's actual footprint and collision geometry. `SmartNavigationRecovery` detects stalled paths and requests alternatives. Neither chooses a goal for a mob.
+
+`VillagerConversationLock` holds the registered `isekaiexpansion:in_dialogue` activity while a living, nearby customer or Blabber partner is present and no threat owns the brain. The dialogue handler separately chooses a trade, blacksmith, wayfinding or ordinary conversation.
+
+## Runtime model
+
+### Ground path execution
+
+| Layer | Responsibility |
+| --- | --- |
+| Common node classification | Refines OPEN/TRAPDOOR cells; a trapdoor with an empty collision shape is OPEN, otherwise initially BLOCKED. Other nonempty OPEN shapes become BLOCKED. |
+| Entity clearance | Checks recently avoided positions first. Only selected ground node types enter geometry validation; ordinary clear air above full support bypasses the detailed check. |
+| Support surface | Uses the highest overlapping collision-box top in the block layer beneath the node, bounded by node height plus epsilon. No support returns no placement. |
+| Full body | Uses the mob width/height at the resolved feet height. BLOCKED/TRAPDOOR can become WALKABLE only with a valid clear placement. |
+| Directional approach | Tracks nodes reopened from BLOCKED/TRAPDOOR, checks source and target involvement, then sweeps the transition footprint. A clear destination alone does not prove entry from every direction. |
+| Waypoint height | Land navigation outside water/lava uses the fractional support Y when finite. |
+| Jump activation | Move control only activates a jump when required climb exceeds reported step height plus epsilon; a suppressed JUMPING state is returned to WAIT. |
+
+Clearance candidates are OPEN, BLOCKED, TRAPDOOR, WALKABLE, WALKABLE_DOOR, DOOR_OPEN and RAIL. Other node types keep their result, so this is not a universal conversion of hazards or fences into walkable cells. Direction-sensitive bookkeeping clears with the node maker. Node generation uses the supplied search view; it does not request chunks through a separate loader.
+
+The collision epsilon is `0.0001` block. The helper does not raise step height; NPC step assistance is a separate subsystem. Jump suppression is injected into `MoveControl.tick` and is broader than the land-only recovery gate.
+
+### Stalled-path recovery
+
+Recovery runs at the end of navigation ticks for a `LandPathNodeMaker`. It resets on the client, while riding, without gravity, in water or in lava. A missing/finished path also resets and prunes avoidance memory.
+
+| Setting | Value | Meaning |
+| --- | --- | --- |
+| Local repair | 18 stagnant ticks (0.9 seconds) | Try advancing a node already reached at its physical support height. |
+| Replan gate | 32 stagnant ticks (1.6 seconds) | Also wait until the current replan cooldown expires. |
+| Failed replan limit | 3 attempts | On failure at/above the limit, leave navigation stopped and reset recovery tracking. |
+| Base cooldown | 16 ticks (0.8 seconds) | Used after an accepted replacement; failed retries use this multiplied by attempt count. |
+| Avoidance lifetime | 100 ticks (5 seconds), plus prior attempt count × 20 ticks (1 second) | Excludes the selected failed node during later searches. |
+| Position progress | Horizontal displacement squared at least `0.01` | Measured from the last accepted progress position. |
+| Approach progress | Horizontal node-distance squared reduction at least `0.04` | Must pass together with position progress. |
+| Avoided-node capacity | 12 per mob | A new entry at capacity evicts the soonest expiry; repeating a position can extend but not shorten expiry. |
+
+Vertical bouncing alone never counts as progress. Node-index change resets the attempt count; ordinary positional progress resets stagnation but not that count. A fresh tracked path also resets stagnation, not the attempt count. Thus “three failures” is not a lifetime cap on all accepted alternative routes.
+
+At recovery, the failed position is the current node, or the next node when the mob is within `max(0.75, width)` blocks horizontally and a successor exists. The helper stops navigation, requests the original target with distance `1`, and accepts a nonempty, different path only if starting it succeeds. Otherwise it restores the old path index and speed for another bounded attempt, unless the limit was reached.
+
+Physical-node repair uses horizontal tolerance `max(nodeReachProximity, min(0.85, width × 0.65))` and vertical tolerance `max(0.65, stepHeight + 0.15)` blocks. These tolerances advance an existing path node; they do not prove that an arbitrary teleport destination is safe.
+
+Avoidance is a transient per-mob map installed through `SmartNavigationCarrier`. An entry expires when its timestamp is at or before world time. Recovery resets do not clear this separate map; expiry/pruning or entity lifetime removes it. There is no NBT migration.
+
+### Conversation ownership
+
+Villager brain initialization registers the exclusive dialogue task list on every rebuild, including profession changes. The core list retains its existing tasks and appends the lock task at priority `0`; Blabber's `InDialogueTask` runs inside the dialogue activity at priority `20`, holding position. Blacksmith work has its own activity and a core task at priority `10`.
+
+Engagement means the merchant customer or Blabber dialogue partner is alive, in the same world, and within 16 blocks (squared range `256`). The lock itself tests those references, not a particular screen class. Its task requires the villager to be alive, reasserts ownership every tick, and has no time-limit expiration.
+
+Threats are hurt/hostile-nearby checks or active PANIC, PRE_RAID, RAID or HIDE. They prevent the lock from continuing. On entering the activity, the lock forgets PATH, WALK_TARGET, LOOK_TARGET, BREED_TARGET and INTERACTION_TARGET, then calls `doExclusively`. It does not repeatedly erase these memories while already holding the activity.
+
+Release calls `Blabber.releaseDialogueEntity`. If another activity already owns the brain, release leaves that activity alone; otherwise it resets possible activities and refreshes the schedule using current world times. It does not explicitly close a merchant screen or clear the customer itself. Range release of the lock must not be mistaken for a merchant-screen distance rule.
+
+### Villager dialogue selection
+
+`VillagerDialogueHandler` registers for vanilla villagers. The trade interaction wrapper calls Blabber on the server and invokes the original trade operation only on PASS. A separate no-trade return hook invokes the NO_TRADE event.
+
+| Decision | Rule |
+| --- | --- |
+| Rejected | Absolute sum of MAJOR_NEGATIVE and MINOR_NEGATIVE reputation at least `100`; fail with the rejected message. |
+| Unwelcomed | The same value at least `50`; bypass specialist menus and choose angry trade dialogue. |
+| Blacksmith | Eligible, welcomed villager on TRADE or NO_TRADE; checked before wayfinding. |
+| Wayfinding | Eligible, welcomed villager on TRADE after the blacksmith check. |
+| Familiar trade | TRADING reputation greater than `6` and villager level at least `3`. |
+| Ordinary trade | Uniform scenario `1–3` below `villager/<profession>/scenario_N`. |
+| No trade | Uniform scenario `1–30` below `villager/none/scenario_N`. |
+| Other events | PASS. |
+
+Trade special filenames use `scenario_angry` and `scenario_familiar`. Profession keys replace colon with underscore, add `minecraft_` if no underscore exists, then lowercase. Resulting IDs use the `isekaiexpansion` namespace.
+
+The same villager mixin also applies Charm pricing after preparing offers. Charm rate is `0.3 + 0.0625 × amplifier`; Hero of the Village is compared with the same formula, or rate `0` when absent. Only a strictly higher Charm rate adds a discount of `max(floor(rate × original first-buy count), 1)` to each offer's special price. It adds the full Charm discount rather than the difference between the rates, so do not describe this as replacing or precisely topping up vanilla's discount.
+
+## Contracts
+
+Ground geometry, recovery and conversation ownership are independent. A conversation lock chooses an activity; the dialogue task stops navigation. Water/vehicle exclusions in recovery do not imply dialogue ownership has the same exclusions.
+
+Preserve vanilla core threat tasks and register the dialogue activity whenever the brain is rebuilt. A task placed only in CORE does not create exclusive ownership. Keep transient navigation memory out of entity saves, and preserve each mob's own path penalties and step height when extending shape handling.
+
+## Extending it
+
+Add collision handling to the shared geometry helpers rather than to individual goals. Keep node generation and execution using the same feet-height calculation; otherwise a path can be accepted but never reached.
+
+Add a villager conversation branch through the registered handler's ordering, and return PASS when vanilla should proceed. For NPC-specific menus and JSON authoring, use the dedicated dialogue references; the villager handler does not use NPC relationship-tier lookup.
+
+## Verifying
+
+- Exercise zombies, villagers and NPCs on horizontal/vertical trapdoors, low ceilings, wide bodies, slabs, stairs and fractional-height surfaces. Include geometrically passable and blocked approaches to the same cell.
+- Test a stalled route with a detour and one without; verify progress needs horizontal approach, failed-node expiry is bounded, and failed retries stop.
+- Recheck doors, rails, fences, water, lava, vehicles and no-gravity movement; confirm the land recovery gate does not take ownership of those cases.
+- Open dialogue and then trade during work/rest hours, across a profession rebuild, and while approaching a bed. Confirm exclusive activity ownership and normal schedule resumption after release.
+- Introduce damage, a nearby hostile or raid/hide activity during conversation; verify the threat activity survives release. Move the player beyond 16 blocks or to another world and inspect the brain independently of the screen.
+- Check rejected, angry, familiar, ordinary and specialist dialogue paths, plus Charm below/equal/above the Hero rate.
+
+## Related
+
+- [NPC locomotion](/en/dev/npc-locomotion/) — NPC gait and step assistance.
+- [NPC dialogue](/en/dev/npc-dialogue/) — NPC interaction ownership and menus.
+- [Dialogue data](/en/wiki/dialogue-data/) — state graphs and actions.
+- [Trade overrides](/en/wiki/trade-overrides/) — offer data.

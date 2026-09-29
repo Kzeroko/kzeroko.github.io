@@ -1,0 +1,167 @@
+---
+title: "Progression runtime"
+description: "Identity graph ownership, unlock sessions, payment ordering, transformation, saves and wire contracts."
+category: systems
+order: 165
+updated: 2026-09-19
+---
+
+Progression separates shared graph definitions, durable player unlock history and short-lived server sessions. A successful request records an unlock immediately, then changes the Origins identity during a timed transformation; these are separate commits with no rollback transaction.
+
+## What it does
+
+`internal.progression` owns graph parsing/validation, catalogue snapshots, player overlays and server admission. It has no public `ProgressionAPI` facade. These implementation classes are repository extension points, not a stable integration API.
+
+The format and player rules are in [Progression graph data](/en/wiki/progression-data/) and [Identity and progression](/en/wiki/identity/). Origins owns layer membership and identity powers; Isekai Core supplies the player-level value checked by `PLAYER_LEVEL`. Progression does not discover branches from powers, target names or rank labels.
+
+## Runtime model
+
+### Catalogue and player overlay
+
+`ProgressionGraphLoader` is registered for server data. It logs individual parse failures and submits successful definitions to `ProgressionGraphRegistry.apply`. The registry sorts by graph ID, rejects same-layer target conflicts as whole graphs, and atomically replaces a volatile immutable snapshot. It does not retain a failed graph's previous definition.
+
+The revision is a nonzero `long` from the first 8 bytes of SHA-256 over ordered graph fields; a zero result becomes 1. Graph order is canonical by ID, while node, requirement and edge list order contributes to the digest. Presentation changes also change the revision.
+
+`buildState` reads the actual Origins identity in each graph's layer and emits only matching graphs. It adds the current node to a copy of saved history, then computes availability inside the undirected connected component. First unlocks require a nonempty set of incoming prerequisites, all present as current/unlocked, and every requirement. Saved nodes are available without those checks. Availability does not check target eligibility; the unlock request does.
+
+The overlay contains layer ID, graph ID, current node ID, unlocked set and available set. Display precedence is `CURRENT`, `UNLOCKED`, `AVAILABLE`, `LOCKED`. Building it does not write the current node into persistent history.
+
+### Session and acceptance
+
+`ProgressionService.open(player, layerString)` finds the graph using the player's current identity, synchronises catalogue/state, replaces that player's session with a random UUID, and sends the open packet. An active transformation prevents opening. Session lifetime is 1200 ticks (60 seconds); equality with the expiry tick is still valid.
+
+A player has one session across all layers. Opening another chapter replaces it. Session fields are UUID, layer, graph, revision, expiry tick and committed flag; they are transient server state.
+
+`requestUnlock` checks results in this order:
+
+| Result | Trigger |
+| --- | --- |
+| `TRANSFORMATION_ACTIVE` | An accepted transformation is still pending. |
+| `INVALID_SESSION` | No session, committed session, wrong UUID/graph, or current tick greater than expiry. |
+| `STALE_CATALOG` | Request revision differs from session or current catalogue; ensure catalogue sync first. |
+| `INVALID_NODE` | Graph/node/current identity missing, layer differs, or target is ineligible. |
+| `ALREADY_CURRENT` | Requested target is already the current node. |
+| `NOT_CONNECTED` | Target and current node are in different undirected components. |
+| `PREREQUISITES_MISSING` | First unlock has no incoming edge or lacks any predecessor. |
+| `REQUIREMENTS_MISSING` | At least one first-unlock requirement fails. |
+| `ACCEPTED` | Costs/history committed and transformation queued; identity has not changed yet. |
+
+For a new node, each requirement is tested before any payment. Costs are then consumed in list order; duplicate item or XP costs are not aggregated, and the consumption helper has no success result to revalidate. Creative players still need level/advancement checks and a registered item ID, but skip item quantity and all payment.
+
+After payment, current and target node IDs are inserted into history, the session is marked committed, and a pending transformation is queued. Both a state packet and an `ACCEPTED` result containing state are sent. Revisiting a saved node bypasses prerequisite/requirement/payment work but still runs session, identity, connectivity and eligibility checks.
+
+### Transformation
+
+`END_SERVER_TICK` owns the state machine. Times below are relative to acceptance; the internal transformation start follows the accepted-node effect.
+
+| Event | Server deadline |
+| --- | --- |
+| Begin transformation | +12 ticks (0.6 seconds). |
+| Apply identity | +38 ticks (1.9 seconds), or 26 ticks (1.3 seconds) after begin. |
+| Reveal identity | +50 ticks (2.5 seconds), or 38 ticks (1.9 seconds) after begin. |
+| Finish | +76 ticks (3.8 seconds), after a 64-tick (3.2-second) transformation. |
+
+Beginning rechecks the target, sends `START`, applies a 64-tick (3.2-second) action lock under `isekaiexpansion:progression_transformation`, and broadcasts a critical `PROGRESSION_ASCENSION` Particlize pulse. The lock covers item use, attacking, movement and jumping.
+
+At identity time, layer/target lookup and enabled/member-or-special eligibility are checked again. The service invokes `OriginsEvents.ON_CHOOSING_ORIGIN`, sets the Origin, synchronises it, reconciles the skill loadout and morph identity, then sends state. The event is an invocation before mutation, not a cancellation return value.
+
+The covered interval lasts 12 ticks (0.6 seconds); reveal calls the identity ascension reveal effect. Finish clears this action-lock source, sends `COMPLETE`, emits the completion message and removes the pending transformation/session.
+
+### Persistence
+
+`isekaiexpansion:progression` is a player component registered with `ALWAYS_COPY` on respawn. It implements ordinary `Component`; catalogue/overlay packets provide client state rather than component auto-sync. These NBT fields are save data, not a data-pack format.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `graphs` | `array<object>` | `[]` | Nonempty graph histories, stored as a compound list. |
+| `graphs[].id` | `identifier` | `""` | Graph ID; invalid syntax skips this record. |
+| `graphs[].nodes` | `array<string>` | `[]` | Nonblank unlocked node IDs; duplicates collapse into a set. |
+
+Read clears existing history, skips empty records, and lets the last nonempty record for a repeated graph ID win. It does not validate node syntax, catalogue membership, current target or costs. Write omits empty histories and sorts node strings. Graph/node deletion does not prune history, and renaming has no migration. Reusing a node ID changes the meaning of an old unlock.
+
+`unlock` itself accepts graph/node IDs without validation and returns whether the set changed; callers must establish entitlement first. `unlocked` returns an immutable copy. Neither sessions nor pending transformations are persisted.
+
+### Client and presentation
+
+On join, the client sends its cached revision. The server sends a catalogue only on mismatch and always sends fresh player state. Disconnect clears client player state and active screen, but retains the shared catalogue/revision for reuse.
+
+Screen opening requires a matching cached revision, graph and layer overlay. A mismatch sends a hello with revision 0 and a refresh message; the failed open is not automatically retried. Catalogue/state updates post through ModernUI and check that the same fragment is still active.
+
+Only the current connected component is drawn. Background drag pans; wheel scaling is ×1.1 or ×0.9, bounded to 0.62–1.65; reset returns zoom 1 and zero pan. Node coordinates multiply horizontal/vertical layout spacing and do not affect unlocking.
+
+The default hold is 30 ticks (1.5 seconds). The hold uses the monotonic UI clock at 50,000,000 nanoseconds per tick. Primary down selects/starts, leaving bounds or releasing before completion cancels, and the draw update submits at completion without requiring release. `canHold` allows only available/unlocked nodes while no response is pending. The screen does not pause.
+
+`ProgressionTransformationController` closes the UI and temporarily applies `THIRD_PERSON_BACK`. It acquires the cinematic input lock only if previously unlocked, and releases only a lock it owns. Completion, local timer expiry or disconnect releases the sequence; the prior camera perspective is restored only if it still equals the perspective this controller applied. A received duration is clamped to at least 1 tick (0.05 seconds).
+
+The dossier resolves morph variations from the selected target's powers, not just the player's current powers, caches those form IDs, and invalidates the cache on variation updates. Selecting a variation still requires owning that form. Progression stores no variation state.
+
+## Contracts
+
+### Authority and interruptions
+
+Call server service operations on the logical server thread; its mutable player maps are unsynchronised. Registry apply serialises replacement with `synchronized`; consumers should capture one immutable snapshot for a multi-step lookup. S2C handlers schedule work through `client.execute`, with screen updates dispatched separately to the UI thread.
+
+The unlock packet contains no hold duration, start proof or release proof. Holding is a client interaction contract, not a server authorisation check. Server protection comes from session/revision/current-identity/eligibility/connectivity/prerequisite/requirement checks.
+
+An eligible target is nonempty, its layer is enabled, and it belongs to that layer for this player or is special. `unchoosable` is not a progression admission check. The subsystem does not grant invulnerability, and it does not re-run payment or graph checks when applying an already accepted transformation.
+
+A successful data reload sends full catalogue/state and clears sessions even if the revision is unchanged. Pending transformations remain queued against their captured layer/target; they recheck target eligibility, not the replacement graph. An old open screen may receive updated graph data but still carries its old session/revision and must be reopened.
+
+Disconnect removes pending server transformations without undoing costs or unlock history. A failed begin/apply clears the action lock and client sequence and removes the session; it also does not refund or roll back. After interruption, saved history may contain the target while the active identity still names the previous target. Reconnect and activate the saved node after it becomes eligible. No recovery queue resumes the old timeline.
+
+### Wire format and limits
+
+All packet paths below use the `isekaiexpansion` namespace.
+
+| Packet path | Direction | Payload order |
+| --- | --- | --- |
+| `progression_catalog_hello` | C2S | Revision `long`. |
+| `request_open_progression` | C2S | Layer identifier. |
+| `request_progression_unlock` | C2S | Session UUID, graph identifier, node string (64), revision `long`. |
+| `sync_progression_catalog` | S2C | Revision `long`, graph count `VarInt` (0–64), graph records. |
+| `sync_progression_state` | S2C | Player overlay. |
+| `open_progression_screen` | S2C | Session UUID, layer identifier, graph identifier, revision `long`. |
+| `progression_unlock_result` | S2C | Result enum byte, node string (64; empty on rejection), player overlay. |
+| `progression_transformation` | S2C | Phase byte (`START`, `COMPLETE`), duration `VarInt`; completion sends 0. |
+
+Graph records contain ID, layer, mode byte, node count and nodes, then edge count and edge endpoint strings. Each node carries ID (64), target ID, rank (64), x/y floats, hold `VarInt`, optional-icon boolean/ID, name and description strings (256 each), then requirements. Each requirement carries type byte, optional-target boolean/ID, amount `VarInt` and consume boolean.
+
+Readers bound graphs to 0–64, graph nodes to 1–512, requirements per node to 0–16 and edges to 0–1024. The player overlay has 0–64 layer records, each containing IDs/current node (64), an unlocked set and an available set, each at most 512 node strings (64). Node sets write in sorted order and deduplicate on read. Invalid enum ordinals throw.
+
+These limits are not all enforced by JSON construction. Overlarge catalogues or retained save histories can pass server construction and fail client decoding; overlong text can fail writing. Keep authored content and recovery edits within both validation layers.
+
+## Extending it
+
+Add graph content through data packs, with stable graph/node IDs and all required targets present. For a repository-owned server interaction, open the existing service rather than mutating Origins directly:
+
+```java
+static void openRaceProgression(ServerPlayerEntity player) {
+    ProgressionService.open(player, "origins:origin");
+}
+```
+
+This uses `internal.progression.ProgressionService` and `net.minecraft.server.network.ServerPlayerEntity`; it is not a new public facade. For another layer, pass that layer ID and ensure its current Origin belongs to a registered graph.
+
+A new requirement type needs enum parsing, validation, network read/write compatibility, server evaluation/payment and client labels together. A new transformation stage needs explicit interruption handling and camera/action-lock cleanup. Keep a new consumable resource's combined affordability check consistent with actual payment; the current sequential helper supplies no transaction rollback.
+
+## Verifying
+
+Use a test world with disposable player progress and a replacement graph:
+
+- Reject empty nodes, duplicate IDs/targets, self/unknown/duplicate edges, cycles, non-finite coordinates, holds outside 10–200 ticks (0.5–10 seconds), and invalid consume/type combinations.
+- Test all incoming prerequisites, an unvisited root, a disconnected target, a saved return, creative level checks and repeated consumable requirements.
+- Open two chapters, submit the old UUID, wait beyond 1200 ticks (60 seconds), reload identical and changed graphs, and confirm the old screen cannot commit.
+- Confirm payment/history at acceptance, identity at +38 ticks (1.9 seconds), and cleanup at +76 ticks (3.8 seconds). Remove target eligibility between acceptance and apply; verify the documented lack of rollback.
+- Disconnect before and after identity mutation. Reconnect, inspect history, reactivate the saved node, and check perspective/input recovery.
+- Exercise catalogue mismatch/reuse, malformed enum/count packets, retained unknown history, respawn copy, and maximum supported graph/text sizes.
+- Preview an unowned morph variation, acquire the form, then choose it; verify progression history and variation state remain separate.
+
+These are regression procedures, not a claim that in-game checks were run during documentation authoring.
+
+## Related
+
+- [Identity and progression](/en/wiki/identity/) — player controls and current content.
+- [Progression graph data](/en/wiki/progression-data/) — complete authored schema.
+- [Morph runtime](/en/dev/morphing/) — identity reconciliation and variation ownership.
+- [Particlize](/en/dev/particlize/) — transformation presentation.
+- [Origin icons](/en/dev/origin-icons/) — portrait resources.

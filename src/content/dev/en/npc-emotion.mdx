@@ -1,0 +1,231 @@
+---
+title: "NPC emotion runtime"
+description: "Emotion reservoirs, complete temperament tuning, reaction formulas, persistence and body-emote contracts."
+category: systems
+order: 65
+updated: 2026-09-19
+---
+
+Emotional simulation belongs to `UniqueNpcEntity` and is implemented by `internal.ai.emotion.UniqueNpcEmotionManager`. The shared `NpcEmotionManager` is an internal interface, not a public facade; other NPCs use a no-op implementation. See [NPC moods and personalities](/en/wiki/npc-emotions/) for player meanings and dialogue fields.
+
+## What it does
+
+Events add impulse and memory, context sensing changes situational targets, and the manager resolves primary and secondary moods. Only the primary mood ordinal travels through entity tracked data. Reservoirs remain server-side, while dialogue obtains a separate snapshot. `NpcEmoteManager` handles body animations independently of emotional intensity and emoji stickers.
+
+## Runtime model
+
+### Reservoirs and time
+
+Each mood stores `Impulse`, `Memory` and `Context`, each clamped to 0–100. Displayed intensity is `min(100, Impulse + Memory + Context)`. Stimulation sanitises raw intensity to finite 0–100, then multiplies by temperament `reactivity × responseScale(mood)`. Retention, clamped to 0–1, splits that amount into memory and impulse; each reservoir caps separately. Soothing does not apply temperament multipliers: it removes impulse, then context, then memory, using at most 100 sanitised intensity.
+
+State updates every 20 ticks and mood resolution runs on a separate 20-tick schedule. Recovery uses elapsed world ticks divided by 20, capped at 7 days; time moving backwards resets the baseline first. Context movement uses at most 2 seconds per update. Impulse/memory lose `seconds × 100 / lifetime × recoveryScale`; sensitive moods additionally multiply recovery by resilience. Residuals below 0.01 become zero.
+
+Construction advances composed context to 9. NBT reading first clears every reservoir; an absent or mismatched schema does not reinsert that initial 9, so later sensing approaches the target gradually. The idle counter advances once per sample, without converting offline seconds into samples.
+
+### Mood tuning
+
+Lifetimes are seconds for a full 100-intensity reservoir to empty at recovery multiplier 1, not a fixed duration for every stimulus. Context rates are intensity per second. A true resilience column applies the extra resilience recovery multiplier.
+
+| Mood key | Impulse lifetime | Memory lifetime | Context rise | Context fall | Activation threshold | resilience |
+| --- | --- | --- | --- | --- | --- | --- |
+| `composed` | 55 | 300 | 8.0 | 12.0 | 0.0 | false |
+| `joyful` | 90 | 900 | 6.0 | 7.0 | 7.0 | false |
+| `affectionate` | 120 | 1800 | 5.0 | 5.0 | 8.0 | false |
+| `flustered` | 32 | 210 | 13.0 | 15.0 | 6.0 | false |
+| `excited` | 36 | 240 | 12.0 | 14.0 | 7.0 | false |
+| `focused` | 45 | 180 | 15.0 | 18.0 | 8.0 | false |
+| `bored` | 48 | 300 | 7.0 | 12.0 | 8.0 | false |
+| `uneasy` | 65 | 960 | 9.0 | 8.0 | 7.0 | true |
+| `hurt` | 135 | 2100 | 5.0 | 5.0 | 8.0 | true |
+| `angry` | 80 | 1350 | 10.0 | 7.0 | 8.0 | true |
+| `exhausted` | 210 | 2700 | 7.0 | 5.0 | 8.0 | true |
+
+Primary selection starts with composed, then follows enum order, accepting a mood at its threshold only when strictly stronger than the current candidate. Equal intensity retains the earlier candidate. A different candidate replaces the current mood if any condition holds: lead of at least 3.5, current mood below its threshold, or 60 ticks since the last switch. Completed dwell does not also require a 3.5 lead. Secondary selection takes the strongest active non-composed mood other than the primary, also keeping the earlier candidate on a tie.
+
+Event wrappers, `stimulate(MoodImpulse)` and `soothe` request resolution no later than the next server tick rather than immediately synchronising a switch. The internal three-argument `stimulate(Mood,float,float)` does not request fast resolution itself; the reaction model uses it to combine changes.
+
+### Context targets
+
+Each sample clears targets, takes the maximum of overlapping sources, multiplies by that mood's responseScale and clamps to 0–100. Reactivity does not apply.
+
+| Situation | Raw target |
+| --- | --- |
+| Ordinary / sleeping | composed 9.0 / 22.0 |
+| Busy POI | focused 34.0 × energy |
+| Target exists or combat phase is not NONE | focused 16.0 × courage; excited 23.0 × energy × courage |
+| Awake and health fraction below 0.50 | exhausted 38.0 × danger; also uneasy 25.0 × danger × inverse(courage) in combat |
+| More than 25 idle samples | bored 30.0 × clamp((idleSeconds - 25) / 100, 0, 1) × energy |
+
+Here `danger = (0.50 - healthRatio) / 0.50`. Idling requires no sleep, active POI, combat, dialogue or tracked item use, idle navigation and total velocity squared below 0.0025. Any failed condition resets the counter. `inverse(t) = clamp(2 - t, 0.45, 1.55)`. Leaving a situation approaches zero at the fall rate; clearing the target does not immediately clear the context reservoir.
+
+### Temperament tuning
+
+The manager captures its personality profile from NPC configuration at construction. Traits must be finite and positive. Mood-scale arrays must match the mood count and are copied on construction; a missing personality profile fails registry initialisation. Unspecified response/recovery scales are 1.00.
+
+| Trait | Use |
+| --- | --- |
+| `temper` | Anger and attack excitement. |
+| `resilience` | Recovery of sensitive moods; exhaustion relief on consumption. |
+| `energy` | Excitement, work focus and boredom. |
+| `empathy` | Hurt from friendly damage or negative gift signals. |
+| `pride` | Anger from hostile damage or negative gift signals. |
+| `bondAffinity` | Affection and other positive gift reactions; friendly-damage hurt. |
+| `courage` | Combat focus/excitement; inverse contribution to uneasiness. |
+| `composure` | Inverse contribution to fluster. |
+| `reactivity` | All event intensity; not context targets. |
+
+| Personality key | temper | resilience | energy | empathy | pride | bondAffinity | courage | composure | reactivity |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `default` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `tsundere` | 1.30 | 0.95 | 0.95 | 0.95 | 1.25 | 1.10 | 1.05 | 0.82 | 1.12 |
+| `optimistic` | 0.90 | 1.30 | 1.08 | 1.00 | 0.90 | 1.05 | 1.15 | 1.05 | 0.95 |
+| `yandere` | 1.12 | 0.78 | 1.00 | 1.30 | 1.08 | 1.45 | 0.95 | 0.72 | 1.22 |
+| `gloomy` | 0.88 | 0.78 | 0.90 | 1.12 | 0.92 | 0.95 | 0.82 | 0.94 | 0.96 |
+| `kuudere` | 0.82 | 1.25 | 0.88 | 0.92 | 1.05 | 0.92 | 1.10 | 1.42 | 0.72 |
+| `genki` | 1.05 | 1.05 | 1.38 | 1.00 | 0.95 | 1.05 | 1.18 | 0.86 | 1.18 |
+| `loyal` | 1.08 | 1.18 | 1.05 | 1.18 | 1.08 | 1.35 | 1.22 | 1.05 | 1.05 |
+| `shy` | 0.78 | 0.92 | 0.82 | 1.15 | 0.82 | 1.22 | 0.78 | 0.72 | 1.08 |
+| `dojikko` | 0.92 | 0.92 | 1.08 | 1.08 | 0.88 | 1.12 | 0.84 | 0.68 | 1.18 |
+| `lazy` | 0.72 | 1.02 | 0.68 | 0.92 | 0.82 | 0.90 | 0.92 | 1.08 | 0.78 |
+| `tennen` | 0.78 | 1.28 | 1.12 | 1.00 | 0.78 | 1.08 | 1.02 | 0.76 | 0.92 |
+| `chatterbox` | 0.98 | 1.05 | 1.28 | 1.08 | 0.92 | 1.18 | 1.00 | 0.78 | 1.20 |
+| `mukuchi` | 0.72 | 1.24 | 0.78 | 0.95 | 1.02 | 0.82 | 1.08 | 1.48 | 0.62 |
+| `ojou_sama` | 1.18 | 0.88 | 1.05 | 0.92 | 1.42 | 0.98 | 1.02 | 0.82 | 1.18 |
+| `onee_san` | 0.78 | 1.32 | 1.00 | 1.30 | 0.92 | 1.15 | 1.18 | 1.30 | 0.88 |
+| `tomboy` | 1.22 | 1.12 | 1.28 | 0.92 | 1.08 | 0.98 | 1.34 | 0.88 | 1.08 |
+| `bookworm` | 0.75 | 1.12 | 0.76 | 1.08 | 0.92 | 0.92 | 0.92 | 1.28 | 0.78 |
+| `trickster` | 1.02 | 1.12 | 1.34 | 0.78 | 0.82 | 1.00 | 1.15 | 0.72 | 1.22 |
+| `cowardly` | 0.68 | 0.82 | 0.82 | 1.12 | 0.72 | 1.08 | 0.58 | 0.68 | 1.20 |
+| `justice` | 1.20 | 1.20 | 1.15 | 1.12 | 1.08 | 1.02 | 1.42 | 1.00 | 1.05 |
+| `workaholic` | 0.92 | 1.05 | 1.12 | 0.92 | 1.05 | 0.88 | 1.10 | 1.05 | 1.05 |
+| `chuunibyou` | 1.12 | 0.98 | 1.22 | 0.88 | 1.24 | 0.92 | 1.28 | 0.62 | 1.22 |
+
+| Personality key | responseScale | recoveryScale |
+| --- | --- | --- |
+| `default` | — | — |
+| `tsundere` | `angry` 1.30, `flustered` 1.65, `affectionate` 0.78 | `angry` 0.90, `flustered` 1.15 |
+| `optimistic` | `joyful` 1.35, `hurt` 0.72, `uneasy` 0.75 | `hurt` 1.35, `uneasy` 1.30 |
+| `yandere` | `affectionate` 1.50, `hurt` 1.40, `angry` 1.20 | `affectionate` 0.72, `hurt` 0.68, `angry` 0.78 |
+| `gloomy` | `hurt` 1.45, `bored` 1.18, `joyful` 0.72 | `hurt` 0.62, `bored` 0.82 |
+| `kuudere` | `composed` 1.30, `flustered` 0.55, `excited` 0.65 | `angry` 1.30, `uneasy` 1.30 |
+| `genki` | `joyful` 1.25, `excited` 1.45, `bored` 1.35 | `bored` 1.30, `hurt` 1.15 |
+| `loyal` | `affectionate` 1.30, `hurt` 1.20, `focused` 1.20 | `uneasy` 1.20 |
+| `shy` | `flustered` 1.75, `affectionate` 1.20, `uneasy` 1.30, `angry` 0.62 | `flustered` 0.88 |
+| `dojikko` | `flustered` 1.55, `uneasy` 1.25, `joyful` 1.18 | `flustered` 1.15 |
+| `lazy` | `composed` 1.35, `bored` 0.72, `excited` 0.60, `exhausted` 1.38 | `exhausted` 0.78 |
+| `tennen` | `joyful` 1.45, `hurt` 0.62, `angry` 0.58 | `hurt` 1.42 |
+| `chatterbox` | `excited` 1.42, `bored` 1.35, `joyful` 1.20, `composed` 0.72 | `bored` 1.25 |
+| `mukuchi` | `composed` 1.42, `flustered` 0.42, `excited` 0.55, `angry` 0.70 | `angry` 1.30 |
+| `ojou_sama` | `angry` 1.38, `bored` 1.32, `flustered` 1.18 | `angry` 0.82 |
+| `onee_san` | `affectionate` 1.32, `focused` 1.18, `angry` 0.68, `uneasy` 0.72 | `hurt` 1.28 |
+| `tomboy` | `excited` 1.42, `focused` 1.18, `uneasy` 0.58, `flustered` 0.72 | `bored` 1.30 |
+| `bookworm` | `focused` 1.45, `composed` 1.22, `bored` 0.62, `excited` 0.58 | `focused` 0.85 |
+| `trickster` | `excited` 1.52, `joyful` 1.28, `bored` 1.42, `hurt` 0.62 | `bored` 1.35 |
+| `cowardly` | `uneasy` 1.75, `exhausted` 1.28, `angry` 0.52, `excited` 0.58 | `uneasy` 0.72 |
+| `justice` | `angry` 1.32, `focused` 1.28, `excited` 1.22, `uneasy` 0.55 | `hurt` 1.28 |
+| `workaholic` | `focused` 1.60, `exhausted` 1.32, `bored` 0.62, `composed` 0.62 | `focused` 0.78, `exhausted` 0.85 |
+| `chuunibyou` | `excited` 1.52, `focused` 1.20, `flustered` 1.20, `uneasy` 0.65 | `excited` 0.82 |
+
+### Built-in reaction formulas
+
+The table gives stimuli before the common temperament response multiplier. `s = clamp(amount / max(1, maxHealth), 0, 1)`; `d = clamp((0.45 - healthRatio) / 0.45, 0, 1)`; `m = clamp(abs(favorGain) / 30, 0, 1)`. `R(x,a,b) = a + (b-a) × x² × (3-2x)`; inverse is defined above. The ordinary damage path notifies emotions only after successfully applied damage, separately from combat's attempted-hit hostility counter.
+
+| Event | Mood | Raw intensity | Memory retention |
+| --- | --- | --- | --- |
+| Friendly/trusted player damage | `hurt` | `(8 + 48s) × empathy × bondAffinity` | `R(s, 0.35, 0.86)` |
+| Same event | `angry` | `(2 + 17s) × temper` | `R(s, 0.12, 0.48)` |
+| Other damage | `uneasy` | `(3 + 25s) × inverse(courage)` | `R(s, 0.10, 0.56)` |
+| Other living attacker | `angry` | `(5 + 31s) × temper × pride` | `R(s, 0.12, 0.64)` |
+| Damage with current target | `excited` | `(2 + 10s) × energy × courage` | `R(s, 0.0, 0.20)` |
+| Post-hit health below 0.45 | `exhausted` | `5 + 22d` | `R(d, 0.18, 0.66)` |
+| Same low-health event | `uneasy` | `(4 + 18d) × inverse(courage)` | `R(d, 0.16, 0.72)` |
+| Consumed eat/drink category or food stack | `joyful` | `5 × max(0.85, bondAffinity)` | `0.08` |
+| Same consumption | `excited` | `2.4 × energy` | `0.0` |
+| Negative gift signal | `hurt` | `(5 + 14m) × empathy` | `R(m, 0.22, 0.62)` |
+| Same negative signal | `angry` | `(2 + 10m) × pride` | `R(m, 0.08, 0.35)` |
+| Zero gift signal | `flustered` | `2 × inverse(composure)` | `0.0` |
+| Positive gift signal | `joyful` | `(7 + 15m) × bondAffinity` | `R(m, 0.08, 0.28)` |
+| Same positive signal | `affectionate` | `(5 + 18m) × bondAffinity` | `R(m, 0.24, 0.66)` |
+| Same positive signal | `flustered` | `(3 + 10m) × bondAffinity × inverse(composure)` | `R(m, 0.0, 0.20)` |
+| Attack performed | `excited` | `4 × energy × max(0.85, temper)` | `0.0` |
+| Same attack | `focused` | `2.5 × courage` | `0.0` |
+
+Additional soothing: consumption removes bored 4 and exhausted `3 × resilience`; a zero gift removes bored 2; a positive gift removes bored 6, hurt `2 + 4m` and angry `1 + 3m`; an attack removes bored 4. The negative gift-signal branch does not soothe. Gift acceptance belongs to the interaction layer; the emotion method receives only an integer signal and does not validate an item.
+
+## Contracts
+
+### Interface and saved fields
+
+`BaseNpcEntity.getEmotionManager()` returns the shared internal interface. The disabled implementation reports composed, intensity 0, a snapshot without secondary mood and the default temperament; events and persistence are no-ops. Unique NPCs invoke the active manager from role ticks, successful damage, item use and role-NBT hooks.
+
+| Interface | Effect |
+| --- | --- |
+| `serverTick` | Advance recovery, context targets and primary resolution |
+| `onDamageTaken`, `onItemConsumed`, `onGiftReceived`, `onAttackPerformed` | Built-in reaction wrappers |
+| `stimulate(MoodImpulse)` | Apply profile-scaled stimulus; null payload/mood rejected |
+| `soothe(Mood,float)` | Soothe a mood; null mood rejected, nonfinite intensity treated as 0 |
+| `currentMood`, `intensity`, `snapshot`, `temperament` | Read current primary, total intensity, presentation snapshot and captured profile |
+| `writeToNbt`, `readFromNbt` | Save or clear then restore versioned state |
+
+`MoodImpulse` clamps intensity to 0–100 and retention to 0–1, treating nonfinite values as 0. Fleeting uses retention 0; lingering uses the supplied retention. Snapshot normalisation divides each intensity by 100 and clamps to 0–1.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `NpcEmotion` | compound | Absent | Root of schema-controlled state. |
+| `NpcEmotion.Schema` | integer | 0 | Must equal 1. Missing/mismatched schema leaves cleared state. |
+| `NpcEmotion.CurrentMood` | string | composed | Case-insensitive mood key; unknown/blank falls back, surrounding whitespace is not trimmed. |
+| `NpcEmotion.LastChangeTick` | long | 0 | World tick of last dominant switch; read without time clamp. |
+| `NpcEmotion.LastUpdateTick` | long | 0 | Last recovery tick; absent root/reset uses an unset sentinel instead. Future time resets to current time on tick. |
+| `NpcEmotion.IdleSeconds` | integer | 0 | Non-negative idle sample counter, not offline elapsed seconds. |
+| `NpcEmotion.States` | compound | Empty | One compound per known lowercase mood key; unknown entries ignored. |
+| `NpcEmotion.States.<mood>.Impulse` | number | 0 | Finite 0–100; out-of-range clamped, nonnumeric/nonfinite becomes 0. |
+| `NpcEmotion.States.<mood>.Memory` | number | 0 | Same validation; retained event intensity. |
+| `NpcEmotion.States.<mood>.Context` | number | 0 | Same validation; current situational intensity, not the target. |
+
+Only Schema 1 is accepted. Missing mood compounds remain cleared; loading enumerates current keys, so unknown fields are not retained for later recovery and old emotion roots are not migrated. Persistence uses keys while client tracking uses enum ordinals; enum order changes require matching clients and servers. Load synchronisation does not invoke the mood-change hook; normal dominant switches invoke `onMoodChanged`. Direct `setMood` changes the tracker, not server reservoirs, and the manager can overwrite it later.
+
+### Body emotes
+
+NPC `registerDefaultEmotes` and `registerEmotes` populate definitions lazily, then the manager caches them. The base default-registration hook is empty. Array indices synchronise to clients, so order must match. Duplicate IDs do not throw: ID lookup takes the last registration while the idle pool retains every flagged entry.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | string | Required | Non-null, nonempty; whitespace is accepted. Duplicate lookup resolves to last registration. |
+| `animationKey` | string | Required | Non-null, nonempty Gecko clip key; constructor does not verify asset existence. |
+| `durationTicks` | integer | Required | Clamped to at least 1; limits both looping and non-looping playback. |
+| `loop` | boolean | Required | Loop clip when true; otherwise play and hold until duration ends. |
+| `priority` | integer | Required | Clamped to 0–1000; ordinary interruption needs at least current priority. |
+| `cooldownTicks` | integer | Required | Clamped to at least 0; applies both local and global cooldown at start. |
+| `flags` | integer bitmask | Required | 1 idle pool; 2 navigation lock; 4 movement lock, also implies navigation lock. Unknown bits ignored by these checks. |
+| `interruptible` | boolean | Required | Whether ordinary requests may replace this emote; force bypasses it. |
+
+`tryEmote` respects cooldowns and the current emote's interruption/priority rules. `forceEmote` bypasses those checks, but still obeys physical state and ordinary dialogue locking. `queueEmote` holds a single pending ID: later requests replace it and an unknown ID clears it. When idle, the manager consumes that slot and attempts one forced start; failure does not retain the request.
+
+Playback requires the server side, a living nonremoved NPC, no sleep, swimming, flight/hover, riding, climbing, tracked item use, busy POI, combat phase or attackable target, and horizontal velocity squared at most 0.0001. Losing eligibility stops playback. Navigation locking also forgets WALK_TARGET/PATH and disables sprinting. Movement locking clears forward/sideways input, not velocity.
+
+Per-emote and global cooldowns start immediately at the maximum of current and defined values, and continue ticking through dialogue pauses. Looping clips still end at durationTicks. Ordinary dialogue clears the queue and stops non-session emotes. `playDialogueEmote` requires the player's active dialogue to target this NPC, binds its session UUID, and stops when the session changes or becomes invalid.
+
+Base idle scheduling uses at least 80 idle ticks, a random 120–320-tick check interval and chance 0.45. The first eligible check can happen immediately; there is no guarantee of waiting a full interval first. It samples the idle pool once, without retrying another entry if that emote is cooling. Leaving dialogue resets the random check interval. This manager does not persist emote state, queue or cooldowns.
+
+## Extending it
+
+Call emotion methods on the server tick/event path; the active manager does not automatically route every mutation to the server. Subclass the unique NPC layer and choose a profile through `NpcConfig.Builder.personality`. A new mood requires aligned `Mood`, `MoodCatalog`, reaction/context logic, personality arrays and both language entries. A new personality needs a complete `TemperamentProfiles` registration. These are code definitions, not data-pack reload surfaces.
+
+Register body-emote definitions and react through `onEmoteStarted`/`onEmoteStopped`. There is no automatic one-to-one mapping from emotions to emotes. Verify Gecko resources when changing animation keys: a valid constructor does not establish that a clip exists. Keep this internal interface distinct from a stable public API.
+
+## Verifying
+
+1. Send equivalent events to a unique NPC and ordinary citizen. Only the former should change reservoirs; the latter stays composed/0.
+2. Apply low- and high-retention stimuli to the same mood; inspect splitting, linear recovery and soothing order.
+3. Test gifts, applied damage, avoided damage, eating, attacking, work and dialogue. Dialogue must not accumulate boredom.
+4. Test the 3.5 lead, 60-tick dwell and below-threshold switch paths, observing the primary mood from another client.
+5. Save, unload and advance world time; check recovery cap, context step and idle count. Also test backwards time, unknown moods, missing fields, wrong schema and nonfinite values.
+6. Test duplicate emote IDs, forced/ordinary replacement, single-slot queue, loop duration, cooldowns and session replacement. Movement or combat must stop playback.
+7. After code tuning changes, run language assembly and Java compilation, then check tracked state with matching client/server registration order.
+
+## Related
+
+- [NPC moods and personalities](/en/wiki/npc-emotions/)
+- [NPC foundations](/en/dev/npc/)
+- [NPC combat](/en/dev/npc-combat/)
+- [Emoji API](/en/dev/emoji-api/)

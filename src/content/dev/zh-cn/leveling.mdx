@@ -1,0 +1,205 @@
+---
+title: "成长系统运行时"
+description: "等级存储、经验授予路径、玩家回调与装备成长的完整公式。"
+category: systems
+order: 34
+updated: 2026-09-27
+---
+
+IsekaiCore 负责等级曲线和存储，异界扩展通过内部装备等级工具与事件处理器将其接入玩法。本页说明这些内部约定及依赖边界，并不新增公共门面。
+
+## 它做什么
+
+`ItemLevelingBridge` 判断装备资格并委托 Core 的 `ITEM_LEVELER`。玩家奖励使用 `PLAYER_LEVELER`；NPC 好感使用按玩家与 NPC 身份分开的存储。[玩家指南](/zh-cn/wiki/leveling/)列出了完整的等级和阶级经验表。
+
+依赖行为根据本地 IsekaiCore 源码检验，对应项目配置的 `0.4.0-build60` 依赖。这证明的是已读源码的行为，并不证明解析到的二进制与该源码完全一致。
+
+## 运行时模型
+
+### 存储与等级变更
+
+Core 的物品存储使用以下 NBT。读取缺失值不会初始化等级；`hasLevel` 要求两个子键同时存在。
+
+| 键 | 类型 | 默认值 | 行为 |
+| --- | --- | --- | --- |
+| `ic_leveling` | compound | 不存在 | 物品等级状态的父对象。 |
+| `ic_leveling.ic_lv` | int | 1 | 读取直接返回存储值；写入器限制到 1–100。 |
+| `ic_leveling.ic_exp` | int | 0 | 当前等级内的经验；写入器不限制数值。 |
+
+Core 的玩家冒险者组件另行持久化以下结构：
+
+| 键 | 类型 | 默认值 | 行为 |
+| --- | --- | --- | --- |
+| `ic_leveling` | compound | 空 | 玩家等级的父对象。 |
+| `ic_leveling.ic_lv` | int | 缺失时读取为 0 | 构造时从 1 开始；服务端归一化使等级恢复到 1–100，并清空越界等级的经验。 |
+| `ic_leveling.ic_exp` | int | 0 | 当前玩家经验。 |
+| `rank` | int | 0 | 冒险者阶级序号，会归一化到支持的范围。 |
+| `completed` | int | 0 | 当前阶级的声望，受本阶级上限限制。 |
+| `rankRevealed` | boolean | false | 显示标记；揭示阶级不会晋升。 |
+| `ic_daily` | compound | 空 | 每日奖励额度的父对象。 |
+| `ic_daily.combatExp` | int | 0 | 已占用额度的战斗经验。 |
+| `ic_daily.lootExp` | int | 0 | 已占用额度的战利品经验。 |
+| `ic_daily.combatCap` | int | 0 | 保存的战斗额度；载入时非正数会重置两类额度。 |
+| `ic_daily.lootCap` | int | 0 | 保存的战利品额度；载入时非正数会重置两类额度。 |
+
+等级处理器会依次跨越经验阈值，在最高等级停止并清空溢出经验。扣除经验可连续降级；回退等级会保留旧经验条的比例，再按新阈值截断为整数。重置会回到最低等级并清空经验。只有等级确实提高时才触发升级回调。直接修改存储不等价于经处理器变更；通用处理器也不负责校验调用者传入的负值或整数溢出。
+
+NPC 好感使用 `NpcFavorTarget` 和 NPC 身份，不采用物品 NBT。其写入器将等级限制到 0–11，经验限制为非负。异界扩展只在服务端接受普通正向好感，要求等级低于 10，且 NPC 未与其他玩家结婚。当前增量上限只用通往等级 10 的累计经验减去已存储的当前级内经验，没有重建累计已得经验；之后再将超过 10 的等级压回 10。不要将此包装方法当作通用累计经验归一化工具。戒指求婚成功会直接设为等级 11。
+
+### 奖励路径与回调
+
+Core 的战斗和战利品授予路径先运行奖励修正，再限制到类别剩余额度，随后变更等级并发布实际授予量。其任务路径没有每日类别额度。异界扩展的 `XpRewardLogic` 和 `TypeBLevelPotion` 直接调用玩家等级处理器：仍触发等级变更，但绕过 Core 的授予修正和授予后事件。等级药水提供 300 经验。
+
+异界扩展的服务端回调在升级时按等级差增加主技能树自动点数；回退时重置已解锁技能并将点数设为新等级减 1；重置时清除类别状态。类别为 `isekaiskills:main`，自动点数使用 `isekaiexpansion:auto`。正向经验通知与等级变更通知是不同路径。
+
+`PlayerLevelChangePacket` 按下表顺序写入整数。客户端接收时要求玩家存在，替换已有等级提示，并为操作 0 播放升级音效，为操作 1 和 2 播放失败音效。
+
+| 传输字段 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `operation` | int | 必填 | 0 = 升级，1 = 回退，2 = 重置。 |
+| `oldLevel` | int | 必填 | 原等级。 |
+| `newLevel` | int | 必填 | 结果等级。 |
+
+`LevelUpBonusPower` 使用 `max(0, playerLevel - 1)` 重新计算生效中的修饰符。稳定修饰符身份包含能力、属性和运算方式；失去能力或能力停用时移除贡献。因此它是持续重算的临时属性贡献，并非每次回调永久加点。
+
+### 每日额度与重复击杀
+
+额度比例使用 `clamp((L - 1) / 60, 0, 1)` 插值：战斗从 0.95 到 0.80，战利品从 0.25 到 0.20。额度为当前等级经验需求乘以比例后四舍五入的整数。等级变化不会重算已存额度。跳过夜晚的唤醒钩子只重置事先捕获的睡眠玩家；发放初始物品的路径以及载入非正额度时也会重置。
+
+命运天平只修饰战利品经验与战利品上限，家园休息效果独立管理战斗上限。每个受影响的上限每秒按当前等级重算，最后一项修饰移除时单独恢复一次，不清除已消耗经验。命运经验倍率使用Core的战利品与任务发放路径，战斗及直接任务、药水发放都会绕过。
+
+连续击杀计数绑定玩家所在的水平 64 × 64 区域。前 18 次不减收益；之后乘以 `0.84 ^ (kills - 18)`，从第 78 次起明确为零。间隔超过 240 ticks（12 秒）时，先从旧计数减去 2 再递增；切换区域或间隔超过 900 ticks（45 秒）时重置计数。该计数属于临时状态，不在上述 NBT 中。
+
+## 约定
+
+### 装备分派与修饰符顺序
+
+可获得经验的范围比属性分派更广：护甲、盾牌、饰品、远程武器、工具、枪械、有镶孔的物品以及带 NBT 或内建属性修饰符的物品均可能符合条件；锻造石和可融合宝石除外。复制辅助方法先复制物品堆，再仅添加正经验；调用者必须另行检查资格。
+
+普通物品修饰符钩子跳过饰品。护甲只在对应槽位生效；盾牌只在副手生效；其他武器只在手部槽位生效。远程分类优先于魔法武器标签，最后的近战分支要求存在攻击伤害条目。独立的 Trinkets 钩子应用饰品方案。两个钩子均先应用等级成长，再应用本模组的宝石和诅咒修饰符，因此后者不参与基础值缩放。
+
+比例成长只汇总正数 `ADDITION` 基础修饰符。攻速惩罚抵消汇总负数 `ADDITION` 修饰符的绝对值。生成的成长修饰符均采用 `ADDITION`，UUID 根据用途、属性与槽位稳定生成。辅助方法不会按比例缩放乘法基础修饰符。
+
+### 公式符号
+
+两个等级键均存在时，`B = max(0, itemLevel - 1)`；否则为 0。`S` 为非负的大成功次数，在对数计算前限制到 1000000。
+
+| 符号 | 定义 |
+| --- | --- |
+| `C` | `clamp(0.035 × sqrt(B) + 0.0022 × B, 0, 0.80)` |
+| `G` | `log(1 + S) / log(2)` |
+| `M` | 对 `min(15, 1.20 × sqrt(B) + 0.030 × B)` 四舍五入；正贡献至少为 1，至多为 15。 |
+| `H` | 对 `min(35, 1.05 × G)` 四舍五入；正贡献至少为 1，至多为 35。 |
+
+比例行添加正数基础值之和乘以所列比率的结果；其余行直接加上公式数值。零贡献不会添加修饰符。
+
+### 护甲
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `minecraft:generic.armor` | 正数基础值 × 比率 | `C × 2.10` |
+| `minecraft:generic.armor_toughness` | 正数基础值 × 比率 | `C × 1.35` |
+| `minecraft:generic.knockback_resistance` | 正数基础值 × 比率 | `C × 0.50` |
+| `minecraft:generic.max_health` | 等级，加法 | `0.30 × sqrt(B) + 0.012 × B` |
+| `isekaiexpansion:tenacity` | 等级，加法 | `0.12 × sqrt(B) + 0.005 × B` |
+| `minecraft:generic.max_health` | 大成功，加法 | `0.30 × G` |
+| `isekaiexpansion:tenacity` | 大成功，加法 | `0.16 × G` |
+| `isekaiexpansion:environmental_resistance` | 大成功，加法 | `0.14 × G` |
+| `isekaiexpansion:guts_chance` | 大成功，加法 | `0.020 × G` |
+
+### 盾牌
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `minecraft:generic.armor` | 正数基础值 × 比率 | `C × 0.65` |
+| `minecraft:generic.armor_toughness` | 正数基础值 × 比率 | `C × 0.65` |
+| `isekaiexpansion:max_shield_gauge` | 等级，加法 | `1.80 × sqrt(B) + 0.080 × B` |
+| `isekaiexpansion:shield_gauge_regen_speed` | 等级，加法 | `0.030 × sqrt(B) + 0.001 × B` |
+| `minecraft:generic.armor_toughness` | 等级，加法 | `0.040 × sqrt(B)` |
+| `isekaiexpansion:max_shield_gauge` | 大成功，加法 | `1.25 × G` |
+| `isekaiexpansion:shield_power` | 大成功，加法 | `0.18 × G` |
+| `isekaiexpansion:aggro_generation` | 大成功，加法 | `0.35 × G` |
+
+### 远程武器
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | 正数基础值 × 比率 | `C × 0.80` |
+| `minecraft:generic.attack_speed` | 攻速惩罚抵消 | `负数加法修饰符的绝对值之和 × C × 0.18` |
+| `isekaiexpansion:range_crit_chance` | 等级，加法 | `0.0032 × sqrt(B) + 0.00007 × B` |
+| `isekaiexpansion:range_crit_damage` | 等级，加法 | `0.0080 × sqrt(B) + 0.00025 × B` |
+| `isekaiexpansion:dexterity` | 等级，取整后加法 | `M` |
+| `isekaiexpansion:range_crit_chance` | 大成功，加法 | `0.0026 × G` |
+| `isekaiexpansion:range_crit_damage` | 大成功，加法 | `0.0070 × G` |
+| `isekaiexpansion:dexterity` | 大成功，取整后加法 | `H` |
+| `isekaiexpansion:perception` | 大成功，加法 | `0.10 × G` |
+| `isekaiexpansion:evasion_counter` | 大成功，加法 | `0.18 × G` |
+
+### 魔法武器
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | 正数基础值 × 比率 | `C × 0.70` |
+| `minecraft:generic.attack_speed` | 攻速惩罚抵消 | `负数加法修饰符的绝对值之和 × C × 0.18` |
+| `isekaiexpansion:elemental_power` | 等级，加法 | `0.50 × sqrt(B) + 0.025 × B` |
+| `isekaiexpansion:magic_crit_chance` | 等级，加法 | `0.0029 × sqrt(B) + 0.00006 × B` |
+| `isekaiexpansion:magic_crit_damage` | 等级，加法 | `0.0075 × sqrt(B) + 0.00022 × B` |
+| `isekaiexpansion:intelligence` | 等级，取整后加法 | `M` |
+| `isekaiexpansion:elemental_power` | 大成功，加法 | `0.65 × G` |
+| `isekaiexpansion:magic_penetration` | 大成功，加法 | `0.065 × G` |
+| `isekaiexpansion:magic_crit_chance` | 大成功，加法 | `0.0024 × G` |
+| `isekaiexpansion:intelligence` | 大成功，取整后加法 | `H` |
+
+### 近战武器
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `minecraft:generic.attack_damage` | 正数基础值 × 比率 | `C` |
+| `minecraft:generic.attack_knockback` | 正数基础值 × 比率 | `C × 0.40` |
+| `minecraft:generic.attack_speed` | 攻速惩罚抵消 | `负数加法修饰符的绝对值之和 × C × 0.18` |
+| `isekaiexpansion:melee_crit_chance` | 等级，加法 | `0.0030 × sqrt(B) + 0.00007 × B` |
+| `isekaiexpansion:melee_crit_damage` | 等级，加法 | `0.0085 × sqrt(B) + 0.00022 × B` |
+| `isekaiexpansion:strength` | 等级，取整后加法 | `M` |
+| `isekaiexpansion:melee_crit_chance` | 大成功，加法 | `0.0028 × G` |
+| `isekaiexpansion:melee_crit_damage` | 大成功，加法 | `0.0075 × G` |
+| `isekaiexpansion:armor_penetration` | 大成功，加法 | `0.070 × G` |
+| `isekaiexpansion:strength` | 大成功，取整后加法 | `H` |
+
+### 饰品
+
+| 属性 | 贡献方式 | 公式 |
+| --- | --- | --- |
+| `isekaiexpansion:max_energy` | 正数基础值 × 比率 | `C × 0.55` |
+| `isekaiexpansion:ability_haste` | 正数基础值 × 比率 | `C × 0.45` |
+| `isekaiexpansion:stamina` | 正数基础值 × 比率 | `C × 0.45` |
+| `isekaiexpansion:max_energy` | 等级，加法 | `1.35 × sqrt(B) + 0.050 × B` |
+| `isekaiexpansion:ability_haste` | 等级，加法 | `0.22 × sqrt(B) + 0.008 × B` |
+| `isekaiexpansion:stamina` | 等级，加法 | `0.10 × sqrt(B) + 0.004 × B` |
+| `isekaiexpansion:energy_regen_speed` | 大成功，加法 | `0.030 × G` |
+| `isekaiexpansion:heal_amplification` | 大成功，加法 | `0.35 × G` |
+| `isekaiexpansion:debuff_accuracy` | 大成功，加法 | `0.45 × G` |
+
+### 阶级晋升
+
+Core 只批准晋升到下一阶级；从阶级 0 开始的首次晋升免除声望要求。晋升成功会清空当前声望。异界扩展的阶级奖励先检查所有解析出的接收者，允许已达到或超过目标的接收者通过，再逐个晋升。后续修改循环并非带回滚的事务。对话中的揭示动作只改变显示状态。
+
+## 扩展方式
+
+实际等级变更应调用 Core 等级处理器；新增任务奖励时使用现有奖励集成。新增内部装备方案时，将具体分类放在更宽泛的分支之前，沿用稳定修饰符身份，并明确缩放哪些基础运算。不要将 `internal.itemlevel` 作为公共 API，也不要原地修改其他提供者共享的属性映射。
+
+职业等级加成能力可参照已有 `isekaiclasses` 能力定义及 `LevelUpBonusPower` 注册；数据边界见[身份数据](/zh-cn/wiki/identity/)。服务端奖励修改与客户端展示应分别处理。
+
+## 验证
+
+检查跨越多个等级的奖励、满级溢出、降级与重置，对照主技能树点数和通知。直接任务奖励及药水要与 Core 的战斗、战利品授予路径分别测试。
+
+逐类比较等级 1 和 100、缺失等级键、正数加法基础值、负攻速及乘法基础值。确认饰品只处理一次，换槽位能移除旧修饰符，宝石不会抬高等级成长的基础值。独立于装备等级比较大成功次数 0 与正数。
+
+同时安排睡眠和清醒玩家检查唤醒重置，并测试载入零额度、切换区域及严格时间边界。检查临近好感等级 10 的增量和成功求婚；以混合符合及不符合条件的接收者检查晋升预检。这些是需要执行的运行时验证步骤，不是文档构建的测试结果。
+
+## 相关页面
+
+- [等级与经验](/zh-cn/wiki/leveling/)
+- [锻造运行时](/zh-cn/dev/forgery-runtime/)
+- [装备技能](/zh-cn/dev/equipment-skills/)
+- [任务运行时](/zh-cn/dev/quest-system/)

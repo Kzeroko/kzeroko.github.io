@@ -1,0 +1,186 @@
+---
+title: "Talent runtime"
+description: "Talent registration, rolls, practice formulas, saved state, synchronisation and operator tools."
+category: systems
+order: 160
+updated: 2026-09-19
+---
+
+Each player stores an innate rank, hidden potential, proficiency level and practice counter for every talent, plus a separate reveal component. Gameplay reads the effective rank after practice; visibility is a presentation concern and does not gate bonuses or practice awards.
+
+## What it does
+
+The implementation is under `internal.talent`, with consumption helpers under `util.talents`. There is no `TalentAPI` facade and no talent JSON loader. These internal classes are for repository development, not a stable external API. [Talents](/en/wiki/talents/) contains the player-facing bonuses and catalogue.
+
+`isekaiexpansion:talent` and `isekaiexpansion:talent_reveal` are auto-synchronised player components, both registered with `ALWAYS_COPY` for respawn. `IsekaiTalents.init()` registers definitions and the server join hook. Join calls `patchData(0.0F)`; it does not automatically read the player's luck attribute.
+
+## Runtime model
+
+### Registry, initial rolls and families
+
+Ranks E/D/C/B/A/S correspond to 0/1/2/3/4/5; numeric conversion clamps to that range. The current catalogue contains 36 talents: 18 melee weapon types, 4 ranged types, dual wielding, Astral Energy capacity, 6 common elements and 6 extended spell schools.
+
+| Definition group | E / D / C / B / A / S weights | Luck strength |
+| --- | --- | --- |
+| Astral Energy capacity | 15 / 20 / 30 / 25 / 8 / 2 | 0.35 |
+| Dual wielding | 34 / 26 / 22 / 12 / 5 / 1 | 0.25 |
+| Common elements | 10 / 20 / 30 / 25 / 10 / 5 | 0.45 |
+| Extended spell schools | 30 / 25 / 25 / 12 / 5 / 3 | 0.20 |
+| Melee/ranged weapons | 17 / 23 / 30 / 17 / 10 / 3 | 0.30 |
+| Builder fallback for a new definition | 60 / 25 / 10 / 4 / 1 / 0 | 0.30 |
+
+These are weights before rules, not final independent probabilities. For rank index r, adjusted weight is `max(0, round(base × (1 + luck × strength × r / 5)))`; zero base weight stays zero. If the adjusted total is nonpositive, the roller retries raw nonnegative weights, then returns E if still empty.
+
+The random seed XORs both UUID halves, the server-world seed and a fresh `player.getRandom().nextLong()`. A reroll is not reproducible from UUID and world seed alone. All ranks roll first, then per-definition rules, then global rules. Rules repeat until unchanged or 16 passes; reaching the pass limit accepts the current result without proving convergence. The outer loop allows 24 attempts and an all-E fallback, but the supplied rule context has no exposed invalidation operation and current rules do not set its invalid flag.
+
+| Initial rule | Result |
+| --- | --- |
+| Any mapped elemental/extended school is S | Ensure base Astral Energy is at least B. |
+| Any mapped elemental/extended school is A | Ensure base Astral Energy is at least C. |
+| Light/healing or dark/arcane pair has S | Ensure the other is at least A. |
+| Light/healing or dark/arcane pair has A | Ensure the other is at least B. |
+| Melee family has A / S | Ensure all family members at least C / B. |
+| Bow/crossbow family has A / S | Ensure both at least B / A. |
+| Gun/magigun family has A / S | Ensure both at least A / A. |
+
+Melee families are blades (sword, rapier, katana, dagger, greatsword), polearms (spear, halberd, glaive, lance, scythe), impact (axe, mace, hammer, gauntlet), thrown (chakram, boomerang), and magic implements (wand, staff). Spell pairs and weapon families also share a potential roll with per-member variation. Element-to-capacity prerequisites do not create a family. A talent keeps the first affinity group assigned to it. Practice and operator rank changes do not rerun the initial synergy rules.
+
+### Potential and proficiency formula
+
+Potential p is clamped to 0–99. A base roll is uniform over that integer range. Luck creates `lean = clamp(luck × 0.25, −1, 1)`; nonnegative lean moves the roll toward 99, negative lean toward 0, rounded and clamped. Family members add independent integer jitter −12–12 to their shared roll, then clamp. Standalone talents roll separately.
+
+| Potential | Maximum earned tiers | Proficiency ceiling before S headroom |
+| --- | --- | --- |
+| 0–21 | 0 | 0 |
+| 22–65 | 1 | 4 |
+| 66–99 | 2 | 9 |
+
+Let L be proficiency, i the innate rank index, and t the smaller of potential's allowed tiers and the tier reached at L (0 before 4, 1 from 4, 2 from 9). Effective rank is `clamp(i + t, 0, 5)`. Actual earned tiers also cannot exceed `5 − i`. Mastery level is 0, 4 or 9 according to `min(allowed tiers, 5 − i)`.
+
+The step formula is:
+
+```text
+gift = clamp(p, 0, 99) / 99
+grind = 1.35 - (1.35 - 0.65) * gift
+toll = 1 + (1.5 ^ effectiveRankIndex - 1) * grind
+base = 90 * (max(0, L) + 1) ^ 1.55
+stepCost = max(10, round(round(base * toll) / 10) * 10)
+```
+
+`expCap` returns 0 at L ≥ 9. It does not itself return 0 at an earlier personal mastery ceiling; use `canStillGrow()` to determine whether training is legal. `cumulativeExp` sums step costs up to the shared level limit. `TalentProficiencyLeveler` supplies the personal ceiling to IsekaiCore's `LevelingHandler`, which performs carry-over; this adapter clears practice when no growth remains. The handler cache is indexed by innate rank × 100 + potential, with at most 600 entries.
+
+### Practice, consumers and visibility
+
+`TalentProficiencyService.award` accepts only a `ServerPlayerEntity`, a non-null talent ID, positive amount, noncreative/nonspectator mode, an existing progress entry and remaining growth. It credits the raw amount, with no potential multiplier and no reveal check. A proficiency-level change synchronises immediately and refreshes derived energy when relevant; an ordinary counter change uses the throttled sync path.
+
+| Hook | Award and attribution |
+| --- | --- |
+| Melee talent damage modifier | 8 to the tagged melee weapon type; another 8 to dual wielding if both currently held weapons qualify. Direct damage source must be a player. |
+| Ranged talent damage modifier | 11 to the tagged ranged weapon type; uses projectile-owner/ranged-attacker resolution. |
+| Spell `RELEASE` with progress > 0.30 | 10 to the mapped school and 4 to base Astral Energy. |
+| Spell `CHANNEL` alone | No practice from this hook. |
+
+Damage awards occur inside modifier evaluation, without a positive-damage predicate, final-health-loss confirmation or per-swing deduplication. Dual wielding does not require separate successful hits with both hands. Spell awards follow qualifying release regardless of a positive energy charge, including the channelled release path; the school award can be absent when unmapped while the reserve award remains.
+
+Melee/ranged/spell bonuses read effective rank. Attack-speed refresh runs on the server living-entity tick and adds both hands' melee deltas plus one dual-wield delta with `EntityAttributeModifier.Operation.ADDITION`. The current UI percentage formatting does not change that operation. `DualWieldTalentUtil.offHandMultiplier` exists but has no consumer in this checkout; its extra offhand factors are not applied by the current damage integration.
+
+Spell talent checks gate mapped-school binding and casting, with creative bypass. Cast-time scaling applies only to a positive original duration for a non-channelled player spell. Energy cost multiplies the spell's base cost with talent and other cost modifiers before rounding. The capacity modifier replaces UUID `435f53d1-e0fd-4307-bc5d-df7fc035c78b` with `attribute base × (rank multiplier − 1)`; it is refreshed on join/patch, rank set and proficiency changes.
+
+Reveal hooks are separate: melee attack actions with targets reveal the weapon and eligible dual-wield talent; ranged shots at progress ≥ 1 reveal the ranged talent. The crystal-hidden group has a reveal helper and operator command, but no item-use call site. Spell practice does not reveal talents. Reveal-all clears explicit unlocks; disabling reveal-all alone does not otherwise clear explicit entries. `lockAll` only disables that flag, whereas the reset command also calls `clearUnlocked`.
+
+## Contracts
+
+### Registration and mutation
+
+| Entry point | Contract |
+| --- | --- |
+| `TalentDefinition.builder(id)` | Internal builder; weights clamp at 0, luck strength to 0–2. Built definitions copy the weights and rule list. |
+| `TalentRegistry.register(def)` | Replaces a duplicate ID; no duplicate rejection or thread synchronisation. |
+| `registerRule(id, rule)` | Replaces a duplicate global rule in insertion-ordered storage. |
+| `registerAffinityGroup(group, members)` | First family per talent wins. |
+| `TalentRules.minIf/maxIf` | Conditional rank floor/ceiling; custom rules execute synchronously without exception isolation. |
+| `TalentsComponent.get(id)` | Effective rank; absent entry returns E. |
+| `innate(id)` | Innate rank; absent entry returns E. |
+| `progress(id)` | Returns mutable live progress, creating E/potential 0 if missing; rejects null ID. |
+| `set(id, rank)` | Changes innate rank and syncs; keeps potential, proficiency and practice. Does not validate registry membership. |
+| `forceReroll(luck)` | Replaces all talent progress with fresh rolls; does not reset reveal state. |
+| `TalentRevealer.unlock/unlockAll` | Adds visibility, without registry validation or rank changes; batches synchronisation for multiple entries. |
+| `TalentRevealComponent.patchData()` | Removes obsolete explicit unlock IDs; the join hook does not call this method. |
+
+Register consistently during common initialisation, before player join or client catalogue capture. Mutate player progress on the server thread. Internal setters do not enforce side or all cross-field invariants; call the appropriate component refresh after direct proficiency/potential changes. Do not expose these internals as a supported addon facade.
+
+### Saved fields and patching
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `hasGen` | Boolean | false | Whether a first roll exists. False causes a fresh roll on patch, replacing any stored entries. |
+| `talents` | Compound | Empty | Map from talent identifier string to progress compound. |
+| `talents.<id>.rank` | Integer | 0 | Innate rank, clamped to 0–5. |
+| `talents.<id>.potential` | Integer | 0 | Hidden potential, clamped to 0–99. |
+| `talents.<id>.level` | Integer | 0 | Proficiency, clamped to 0–9, not to personal mastery. |
+| `talents.<id>.exp` | Integer | 0 | Practice, clamped nonnegative; not capped against step cost during load. |
+| `revealAll` | Boolean | false | Separate reveal component flag; true ignores the explicit list on read. |
+| `unlocked` | List of strings | Empty | Valid identifier strings become explicit unlocks; duplicates collapse, invalid IDs skip. Written only when not reveal-all and nonempty. |
+
+No payload schema version or legacy integer-rank conversion exists here. A non-compound entry read as a compound receives the getter defaults, not its old numeric rank. Valid but unregistered IDs survive the raw read, then talent patch removes them. Invalid identifier keys skip.
+
+On first generation, patch rolls all entries, syncs and applies capacity. On later joins, it removes obsolete talent IDs and fills missing IDs from a complete fresh roll while leaving existing entries untouched. Consequently, a newly added talent's rolled synergy can be based on discarded rerolled values for existing talents; patch does not reconcile the whole saved character against current rules.
+
+### Synchronisation and presentation
+
+Raw practice calls sync at most once per 40 ticks (2 seconds) of world time. This is checked when another award arrives, not by a scheduled trailing flush. A final award inside the throttle window can remain invisible until another sync or reconnect. Level changes sync immediately.
+
+`isekaiexpansion:player_talent_growth` carries talent identifier, proficiency level and effective rank as identifier/VarInt/VarInt. It announces only an increase in earned rank, not every proficiency level. `isekaiexpansion:player_talent_unlocked` carries only the revealed identifier. Neither packet replaces component state.
+
+The client screen captures a fixed `TalentSnapshot` when opened. Hidden entries mask names, bonuses and mastery but the synced component still contains progress and potential: hiding the number is a UI convention, not secrecy from the client. Revealed statistics use the same bonus helpers as gameplay. The card band uses personal mastery headroom, while the dossier's earned-tier denominator uses potential's maximum tiers; an innate A with deep potential can therefore have a one-tier trainable ladder but a two-tier potential denominator.
+
+Talent labels use `talent.<namespace>.<path>`, descriptions append `.desc`, and textures use `assets/<namespace>/textures/talent/<path>.png`. Missing description translations use the screen fallback; hidden cards use `isekaiexpansion:textures/talent/locked.png`. The screen is nonpausing, with selection on left-click and a modal dossier on right-click; Escape dismisses the dossier before closing the screen.
+
+## Extending it
+
+Add a definition during common initialisation, supply both language entries and an icon, and add any gameplay consumer or practice hook explicitly. Registration alone does not create a new damage category, school mapping or training source. This internal example assumes imports from `internal.talent`, Minecraft `Identifier` and `ServerPlayerEntity`:
+
+```java
+public static void registerExampleTalent() {
+    TalentRegistry.INSTANCE.register(
+            TalentDefinition.builder(new Identifier("example", "craft"))
+                    .weights(60, 25, 10, 4, 1, 0)
+                    .luckStrength(0.30F)
+                    .build());
+}
+
+public static void awardExamplePractice(ServerPlayerEntity player) {
+    TalentProficiencyService.award(
+            player, new Identifier("example", "craft"), 8);
+}
+```
+
+The player must have been patched after registration before an award can succeed. Invoke the award only for the intended server-side action. If that action should reveal the talent, use the reveal helper separately; award does not imply reveal.
+
+## Verifying
+
+All commands below require permission level 2. `<target>` accepts a player selector; explicit talent arguments must name registered definitions.
+
+| Command under `/ise talent` | Effect |
+| --- | --- |
+| `reroll <target> [luck]` | Default luck 0; command accepts nonnegative float only. Resets all ranks/potential/practice, keeps reveal state. |
+| `set <target> <talent> <rank>` | Rank 0–5; changes innate rank only. |
+| `proficiency level <target> <talent> <level>` | Level 0–9; clears practice but does not clamp to personal mastery. |
+| `proficiency potential <target> <talent> <potential>` | Potential 0–99; keeps level and practice, refreshes derived effects. |
+| `proficiency grant <target> <talent> <amount>` | Positive integer; uses normal award guards, so creative/spectator/capped targets can receive no practice even though command feedback counts them. |
+| `proficiency inspect <target> <talent>` | Reports innate/effective rank, level, practice/cap, raw potential, potential tiers and current toll. |
+| `reveal unlock <target> <talent>` | Reveals one entry. |
+| `reveal crystal <target>` | Reveals the 13 capacity/school entries. |
+| `reveal all <target>` | Enables reveal-all and clears explicit unlocks. |
+| `reveal reset <target>` | Disables reveal-all and clears explicit unlocks. |
+
+Test potential boundaries 21/22 and 65/66, rank gains at 4/9, innate A/S headroom, oversized practice grants and stored values beyond personal mastery. Verify a hidden talent still receives practice, reveal changes no rank, and a reroll preserves reveal state. Compare both hands' flat speed additions with screen percentages. Check mapped/unmapped schools, channel versus release, zero-cost spells, join patch of newly added definitions, respawn, and an award just inside the sync window followed by no further awards.
+
+The rank/potential setters are operator tools, not normal gameplay transitions: they can leave above-ceiling levels or old practice totals. Inspect the result rather than assuming all fields were normalised together.
+
+## Related
+
+- [Talents](/en/wiki/talents/) — complete player-facing bonuses and catalogue.
+- [Spell integration](/en/dev/spell-integration/) — casting admission and payment lifecycle.
+- [Persistent state](/en/dev/persistent-state/) — world-scoped stores, distinct from these player components.
+

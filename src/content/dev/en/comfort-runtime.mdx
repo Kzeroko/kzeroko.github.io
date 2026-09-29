@@ -1,0 +1,64 @@
+---
+title: "Comfort runtime"
+description: "Player state, persistence, synchronisation and internal Comfort hooks."
+category: systems
+order: 10
+updated: 2026-09-27
+---
+
+Comfort state belongs to the player component registered as `isekaiexpansion:comfort`. It is server-ticked, automatically synchronised and copied across respawn. This page covers internal state and hooks; the [player guide](/en/wiki/comfort/) and [food format](/en/wiki/comfort-food/) own gameplay values and data-pack authoring.
+
+## What it does
+
+`ComfortSystem.initCommon` registers food-consumption and food-value callbacks and initialises food-map networking. `ComfortSystem.get(player)` exposes the internal component. There is no public Comfort API facade; do not treat these internal classes as a stable integration contract.
+
+The food-value callback scales both hunger restoration and saturation modifier by ×0.7 when vanilla Hunger is active. The hunger restoration result is cast to an integer. This is separate from the Comfort value granted by the meal.
+
+## Runtime model
+
+`ComfortComponent.serverTick` reconciles movement modifiers before checking whether natural decay can advance. `changeComfort` applies fate modifiers, then clamps and synchronises the value. `setComfort` clamps directly. A food-history change synchronises even if Comfort was already at its bound.
+
+These NBT fields are player save data, not a data-pack schema:
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `comfort` | `integer` | `100` | Current value, clamped to 0–100 on read. |
+| `comfortTick` | `integer` | `0` | Elapsed natural-decay ticks; negative values become 0. |
+| `decayIntervalTicks` | `integer` | `1200` | Evaluation interval: 1200 ticks (60 seconds), clamped to at least 1 tick (0.05 seconds). |
+| `recentFood0`…`recentFood5` | `item id` | absent | Most-recent-first food history. Invalid IDs, missing registry items and air become empty slots. Writers remove empty slots. |
+
+Reading NBT invalidates the cached applied band so the next server tick reconciles movement. The movement modifier uses a fixed UUID and replaces the previous modifier when the band changes.
+
+## Contracts
+
+The component key uses `RespawnCopyStrategy.ALWAYS_COPY`. Value/history sync and food-table sync are separate: the former uses the component, the latter sends the resolved table on data-pack content synchronisation.
+
+`ComfortPlayerEntityMixin` invokes damage loss after `applyDamage` returns and wraps block-breaking speed. `ServerWorldComfortMixin` calls recovery at the head of `wakeSleepingPlayers`, while sleeping flags are still present. `ComfortSystem` filters by `isSleeping` and `canResetTimeBySleeping`. Awake players receive no sleep recovery.
+
+### Fate Balance meals
+
+`MealComfort.base` asks `FateBalanceAPI.foodComfort` to adjust the quality-scaled food value. Selected effect hooks add their signed bonus only when the base is positive. `ComfortComponent.previewFoodComfort` then applies `MealComfortRules` repetition and personality. Both the tooltip and server consumption use this function; only consumption pushes food history.
+
+`getFoodGainMultiplier` applies the selected repetition multiplier only when the food is already in history. Sleep restoration multiplies its base recovery by `FateBalanceAPI.sleepComfortMultiplier` before personality scaling. The facade delegates to the registered effects; race or class membership is not consulted.
+
+## Extending it
+
+For internal server-side changes, obtain the component and identify the cause. This call participates in fate modification and the component's normal clamp/sync path:
+
+```java
+void grantComfort(ServerPlayerEntity player, int amount) {
+    ComfortSystem.get(player).changeComfort(amount, ComfortChangeCause.FOOD);
+}
+```
+
+Use `addFoodComfort` for actual meals that must update repetition history. `setDecayIntervalTicks` clamps to at least 1 tick (0.05 seconds) and synchronises when changed; `resetDecayIntervalTicks` restores 1200 ticks (60 seconds). These methods do not marshal threads: call from the owning server gameplay path.
+
+## Verifying
+
+Save and reload the current history; it must remain most-recent-first. The only interval field is `decayIntervalTicks`. Test respawn copying, a band transition, repeated food at maximum Comfort and a changed decay interval. Join a dedicated server and reload food data to check both synchronisation paths.
+
+Verify world wake-up with a sleeping player and a nonsleeping player in the same world. Test Hunger against a food with fractional scaled hunger to confirm integer truncation.
+
+## Related
+
+See [Comfort](/en/wiki/comfort/) for band effects and [Comfort food data](/en/wiki/comfort-food/) for item-ID maps.

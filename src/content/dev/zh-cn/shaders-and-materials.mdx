@@ -1,0 +1,115 @@
+---
+title: "着色器与材质"
+description: "传送门材质生成，以及由状态效果驱动的实体光环渲染。"
+category: client
+order: 50
+updated: 2026-09-26
+---
+
+传送门把生成的纹理绘制到实体上；状态光环则捕获实体轮廓，再合成到场景中。两者都使用Satin管理的效果，但各自维护时钟、渲染目标和生命周期。`ShaderFXAPI`是光环渲染钩子的客户端门面，传送门辅助类仍属于内部渲染实现。
+
+## 它做什么
+
+`PortalTextureManager`管理本地与全局传送门的生成纹理。`PortalEntityRenderer`分别使用普通半透明和半透明自发光实体程序绘制主体与能量层。两层均采用`LEQUAL`，写入颜色和深度，并使用`ITEM_ENTITY_TARGET`参与Fabulous透明合成，不剔除背面。超出吸光主体范围的能量也写入自身深度，避免被更远的水面或天空覆盖；被丢弃的透明像素仍让外部场景透过。传送门绘制与纹理生成都会跳过Iris阴影阶段。
+
+`IShaderFXEffect`让状态效果接入观察者同步和轮廓渲染。`ShaderFXEffectSync`在添加、重新添加、移除效果及开始追踪实体时发送原版效果数据包。广播跳过受影响的玩家自身，其自身状态包由原版另行处理。光环退场不会延长状态效果或属性修饰符的寿命。
+
+## 运行时模型
+
+### 传送门纹理与颜色
+
+| 属性 | 数值 | 约定 |
+| --- | --- | --- |
+| 图集尺寸 | 1536 × 512 | 本地与全局目标各含3个横向区块。 |
+| 区块宽度 | 512 | 主体、能量和高亮波峰依次使用各三分之一。 |
+| 入场 | 12刻（0.60秒） | 生成时按smoothstep缩放。 |
+| 高宽比 | 1.25 | 宽度由实体高度算出。 |
+| 默认颜色 | `0xFF18DFFF` | 保存在实体的追踪颜色中。 |
+
+`PortalAnimationClock`随未暂停的客户端刻推进；暂停时连插值刻也保持不变。世界对象变化会重置时钟。纹理目标尚未初始化时先生成一次；之后若最近2帧没有提交传送门，或采样时间未变，就跳过生成。生成过程保存并恢复读写帧缓冲、视口、深度与混合设置及纹理矩阵。断开连接会释放效果。
+
+在服务端调用`PortalEntity.setPortalColor`，透明度会被强制设为不透明。颜色通过实体追踪数据同步并存档。下列字段属于存档，不是资源包编写字段：
+
+| NBT键 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `PortalColor` | `integer` | `0xFF18DFFF` | 打包颜色。没有版本键时，旧值`0xFFFFFFFF`会改为默认色。 |
+| `PortalPaletteVersion` | `integer` | 不存在 | 只要存在就不执行旧白色转换；保存时写入`1`。新存档明确设置的白色仍是白色。 |
+
+`DungeonGatewayDistortionController`在客户端刻检查与入口的重叠，离开后用4刻（0.20秒）淡出。旁观者不会积累强度。它先初始化着色器再设置uniform，只把`swap`的颜色复制到主目标，保留场景深度。暂停时使用传送门时钟；这个视觉检查不决定能否传送。
+
+`SwordProjectileModel`选择按纹理缓存的`IsekaiRenderLayers.projectileEmissive`材质，保留普通半透明自发光程序与源Alpha混合，使用`LEQUAL`、颜色及深度写入、关闭背面剔除和`ITEM_ENTITY_TARGET`。前方地形与水面保持正常深度顺序。该材质不改变弹射物移动或附着位置。
+
+### 状态光环
+
+`EntityShaderFX`在客户端刻结束时扫描存活实体。`getShaderFXPriority()`最高的效果优先；优先级相同时，注册ID较小的效果优先。配置改变时先退出旧配置，再进入新配置。相同配置的刷新不重播入场；退场时重新添加会从当前进度反向恢复。
+
+| 限制 | 数值 | 作用 |
+| --- | --- | --- |
+| 新状态距离 | 96格 | 从客户端玩家位置计算。 |
+| 保留状态 | 256 | 额外实体等待容量空出。 |
+| 移除距离平方 | 96 × 96 × 1.5 | 超过该阈值立即移除已有状态。 |
+| 捕获批次 | 128 | 世界与第一人称捕获共享。 |
+| 捕获顶点 | 262144 | 超出的几何体正常绘制，但不再额外捕获。 |
+
+只有绘制层提供受影响轮廓的四边形才会被复制。半透明阶段后复制世界深度，世界绘制后的回调再画遮罩并合成。场目标的宽高各为帧缓冲的一半。第一人称手部保留独立的投影和深度空间。切换世界、加入服务器或断开连接会清空光环状态并释放目标；空闲时也会释放遮罩管线。
+
+## 调用约定
+
+`ShaderFXProfile`是`api.fx`下的通用侧数据，不导入客户端渲染器。构造参数全部必填；非法值抛出`IllegalArgumentException`，不会截断到合法范围。
+
+| 参数 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `color` | `integer` | 必填 | RGB颜色，最高字节必须为零。 |
+| `radius` | `number` | 必填 | 以格为单位的有限厚度，大于0且不超过1。世界捕获再乘以渲染高度 / 1.8，倍率限制在0.35–3.0。 |
+| `introTicks` | `integer` | 必填 | 包络进度增长时间，1–200刻（0.05–10秒）。 |
+| `outroTicks` | `integer` | 必填 | 包络进度消退时间，1–200刻（0.05–10秒）。 |
+
+效果默认优先级为`0`。世界捕获排除隐形实体、屏幕空间预览和阴影阶段。`ShaderFXAPI`方法用于客户端生命周期或渲染路径，不会把任意后台线程调用转交到渲染线程。`beginFirstPerson`返回的作用域必须关闭，即使绘制抛出异常也一样，以配对捕获深度和实现压入的兼容管线。
+
+### 灵力缠身
+
+`SpiritMantleEffect`提供配置`new ShaderFXProfile(0x62DFFF, 0.14F, 12, 18)`：入场12刻（0.60秒），退场18刻（0.90秒）。注册效果为`isekaiexpansion:spirit_mantle`。当前属性修饰符不随效果等级变化：
+
+| 属性 | 运算 | 数值 |
+| --- | --- | --- |
+| `AETHER_POWER` | `MULTIPLY_TOTAL` | +20% |
+| `GENERIC_ATTACK_DAMAGE` | `MULTIPLY_TOTAL` | +15% |
+| `GENERIC_ATTACK_SPEED` | `MULTIPLY_TOTAL` | +10% |
+| `GENERIC_MOVEMENT_SPEED` | `MULTIPLY_TOTAL` | +10% |
+| `TENACITY` | `ADDITION` | +20 |
+| `ENERGY_REGEN_SPEED` | `MULTIPLY_TOTAL` | −50% |
+
+`adjustModifierAmount`直接返回修饰符保存的值，不使用效果等级。持续时间由施加效果的一方决定；该类没有定义战斗循环或建议持续时间常量。
+
+## 扩展方式
+
+在已注册的效果上实现通用接口。下面使用与灵力缠身相同的合法表现参数，并沿用默认优先级`0`：
+
+```java
+final class ExampleAuraEffect extends StatusEffect implements IShaderFXEffect {
+    private static final ShaderFXProfile PROFILE =
+            new ShaderFXProfile(0x62DFFF, 0.14F, 12, 18);
+
+    ExampleAuraEffect() {
+        super(StatusEffectCategory.BENEFICIAL, PROFILE.color());
+    }
+
+    @Override
+    public ShaderFXProfile getShaderFXProfile() {
+        return PROFILE;
+    }
+}
+```
+
+只在已有的实体渲染接入点调用`ShaderFXAPI.capture`，注意区分受影响实体与实际渲染的变身实体。自定义第一人称接入应将作用域的`vertexConsumers()`交给绘制调用，并在结束后关闭作用域。模组客户端初始化已调用`initClient`。
+
+## 验证
+
+
+在原版/Fabulous及目标Sodium/Iris环境中检查传送门颜色、重叠、出现与消失、暂停、维度切换、资源重载和窗口缩放。在明亮天空、后方水面、前方水面及水线处观察传送门能量和剑弹射物。确认前景几何体遮挡传送门主体，离开入口后扭曲消退且场景深度保留。具体光影包的兼容性需要在游戏中验证。
+
+添加并清除`isekaiexpansion:spirit_mantle`，对比不同效果等级、刷新、退场中重新添加和晚进入追踪范围的观察者。检查普通实体、变身、护甲、持有物和第一人称手部。用隐形实体、预览和密集场景验证排除条件与容量限制。确认效果移除后属性修饰符立即消失，视觉退场仍可继续。
+
+## 相关页面
+
+表面捕获见[Particlize](/zh-cn/dev/particlize/)，移除与传送表现见[实体特效](/zh-cn/dev/entity-fx/)。

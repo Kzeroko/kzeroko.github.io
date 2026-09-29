@@ -1,0 +1,78 @@
+---
+title: "Emoji playback API"
+description: "Playback options, queue policy, recipients and server/client lifecycle."
+category: api
+order: 10
+updated: 2026-09-18
+---
+
+Emoji playback is a server-triggered request with client-owned queuing and presentation. The public entry point is `net.kzeroko.isekaiexpansion.api.emoji.EmojiAPI`; its option and policy types currently live under `internal.social.emoji`, so those types are an internal coupling rather than a separately stable API.
+
+## Entry point
+
+Call `EmojiAPI.play` for a living entity already in a server world. A missing catalogue ID, removed/dead entity or client-world call is ignored. The API returns no acceptance result; a sent request can still be rejected by a client's priority rules or missing texture.
+
+## Common tasks
+
+### Play or queue a sticker
+
+```java
+void showGreeting(LivingEntity speaker) {
+    EmojiAPI.play(speaker,
+            new Identifier("isekaiexpansion", "evelina/smile"),
+            EmojiPlaybackOptions.DEFAULT.policy(EmojiPlaybackPolicy.QUEUE));
+}
+```
+
+`QUEUE` starts immediately when the client slot is empty; otherwise it joins the queue. The direct API default is independent of the catalogue's picker duration.
+
+### Clear a sticker
+
+`EmojiAPI.clear(speaker)` removes server interruption state and sends a clear request to current tracking viewers and the player itself. Clients discard queued requests and play the active sticker's outro. Additional viewers supplied to an earlier play call are not retained for later clear broadcasts.
+
+## Reference
+
+| Method | Side | Result |
+| --- | --- | --- |
+| `play(LivingEntity, Identifier)` | server | Uses `EmojiPlaybackOptions.DEFAULT`. |
+| `play(LivingEntity, Identifier, EmojiPlaybackOptions)` | server | Null options also select the default. |
+| `play(LivingEntity, Identifier, EmojiPlaybackOptions, Collection<ServerPlayerEntity>)` | server | Adds explicit viewers to current entity trackers and the entity itself when it is a player; de-duplicates recipients. |
+| `clear(LivingEntity)` | server | Null/client entity is ignored; clears current server state and broadcasts. |
+| `onEntityDamaged(LivingEntity, DamageSource, float)` | server hook | Applied positive damage clears the latest tracked request when its damage-interruption flag is set. |
+
+The event layer already registers the damage hook. Do not call it again from an ordinary playback integration.
+
+| Option | Default | Contract |
+| --- | --- | --- |
+| `durationTicks` | `70` | At least 1 tick (0.05 seconds); 70 ticks is 3.5 seconds before outro starts. |
+| `priority` | `50` | Clamped to 0–1000. |
+| `policy` | `REPLACE` | Null also selects REPLACE. |
+| `interruptible` | `true` | Controls whether REPLACE may interrupt this request. |
+| `interruptOnDamage` | `true` | Server interruption flag, separate from replacement. |
+
+Option methods with these names return a new immutable options value. Playback policy is decided independently on each client:
+
+| Policy | Active sticker exists |
+| --- | --- |
+| `REPLACE` | Replaces only if the active sticker is interruptible and new priority is at least the active priority. Successful replacement clears the queue; rejected replacement is dropped. |
+| `QUEUE` | Always queues, regardless of priority or interruptibility. Capacity is 3; overflow drops the oldest queued request. |
+| `FORCE` | Replaces immediately and clears the queue, regardless of priority or interruptibility. |
+
+## Threading and lifecycle
+
+Use these entry points on the server thread with a loaded entity. The maps are unsynchronised and the API does not schedule off-thread work. Recipients with no network handler or in a different world are skipped. Requests are broadcasts to the current recipient set, not persistent entity data or a replay service for players who begin tracking later.
+
+The server stores only the latest accepted request per entity UUID, including dimension, expiry and damage flag. It does not mirror the client queue or know whether a client rejected a replacement. Expiry is request time plus duration and 20 ticks (1 second), rather than the eventual queued start time. Do not rely on damage interruption precisely following queued stickers.
+
+Client intro lasts 8 ticks (0.4 seconds); outro lasts 7 ticks (0.35 seconds). Clear starts the outro rather than removing the image instantly. Client state is cleared on disconnect. Rendering hides dead/removed entities, entities invisible to the viewer, the local player in first person and entities beyond 28 blocks; these visibility filters do not cancel the slot.
+
+### Dialogue and scene bridges
+
+Blabber registers `isekaiexpansion:emoji` through `DialogueActionEmoji`. It sends to the active living dialogue entity in the player's world, the player, or both, and explicitly includes the dialogue player as a viewer. The data fields are documented in [Emoji data](/en/wiki/emoji-data/).
+
+`ScenePuppetController` handles actor cues of type `emoji`: positive cue duration overrides the default, priority is 500, force selects FORCE instead of REPLACE, interruptible is true and damage interruption is false. Scene viewers are explicit additional recipients. NPC body emotes take a separate branch and do not use emoji catalogue entries.
+
+## Related
+
+[Emoji data](/en/wiki/emoji-data/) covers definitions, images and dialogue fields. [Entity FX](/en/dev/entity-fx/) covers entity lifecycle effects.
+

@@ -1,155 +1,83 @@
 ---
 title: "Forgery"
-description: "Anvil-based smithing with no crafting grid — place ingredients, aim at the anvil, and strike until the step completes."
+description: "Bind a blueprint, supply ordered materials and forge equipment or strengthen it with smithing stones."
 category: crafting
 order: 10
-updated: 2026-09-01
-tagline: "Crafting you perform instead of confirm."
-tags: ['crafting', 'gear', 'anvil']
+updated: 2026-09-26
 ---
 
-import idle from '../../../assets/images/ktm2/wiki/forgery/r_forgery_idle.gif';
-import viewBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_view_blueprint.gif';
-import putBlueprint from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_blueprint.gif';
-import putIngredients from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_ingredients.gif';
 import forging from '../../../assets/images/ktm2/wiki/forgery/r_forgery_forging1.gif';
-import clear from '../../../assets/images/ktm2/wiki/forgery/r_forgery_clear.gif';
-import jadeWaiting from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting.webp';
-import jadeBlueprint from '../../../assets/images/ktm2/wiki/forgery/compat/jade_waiting_w_blueprint.webp';
-import jadeIngredient from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_ingredient.webp';
-import jadeProgress from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_w_progress.webp';
-import jadeOrder from '../../../assets/images/ktm2/wiki/forgery/compat/jade_order_matters.webp';
-import jadeNext from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_next_step_1.webp';
-import jadeSuccess from '../../../assets/images/ktm2/wiki/forgery/compat/jade_forging_success.webp';
-import rei1 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_1.webp';
-import rei2 from '../../../assets/images/ktm2/wiki/forgery/compat/rei_compat_2.webp';
+import putIngredients from '../../../assets/images/ktm2/wiki/forgery/r_forgery_put_ingredients.gif';
 
-Forgery is where KTM2-specific weapons, armour, accessories and off-hand items come from. Apart from reading a blueprint, **the entire process has no GUI** — you place real items on a real anvil and hit them.
+The Forgery Anvil holds a blueprint and 9 material slots. It supports both step-by-step recipes and smithing-stone upgrades; the finished item stays on the anvil until you collect it.
 
-<Clip src={idle} alt="A forgery anvil at rest, blueprint slot empty" caption="An idle forgery anvil. Everything you do to it happens in the world." />
+## What a strike does
 
-## Controls
-
-Everything is an interact on the anvil; **which face you click decides the amount**.
-
-| Holding | Top face | Any other face |
-| --- | --- | --- |
-| Materials | Place one | Place everything you are holding |
-| Forging hammer | Take one back from the last filled slot | Take the whole slot back |
-| Valid blueprint | Write the blueprint (item is not consumed) | Same |
-| Dissolving potion | Clear the forging state (potion is consumed) | Same |
-
-<Callout type="caution" title="Main hand only">
-Every interaction reads your main hand. Holding the right item in your off-hand does nothing.
-</Callout>
-
-## The loop
-
-<Steps>
-
-1. **Read the plan.** Hold a valid blueprint and press <kbd>Shift</kbd> + <kbd>Use</kbd> to open its recipe. <kbd>Esc</kbd> closes it.
-
-2. **Write the blueprint to the anvil.** Interact with an anvil that has no blueprint. The item is not consumed — the anvil takes a copy. An empty sheet will tell you it is blank instead.
-
-3. **Place the step's materials.** Order matters. Fill the slots the current step asks for.
-
-4. **Strike.** Stand level with the anvil, within about one and a half blocks, with your crosshair on the **top face**. If you are not aimed at the top, the game will say so. Each hammer blow adds forging progress according to the hammer's rarity.
-
-5. **Repeat** for each step until the result pops out.
-
-</Steps>
-
-<Clip src={putBlueprint} alt="Writing a blueprint onto the anvil" caption="Writing the blueprint copies it; the item is not consumed." />
-
-<Clip src={putIngredients} alt="Placing ingredients on the anvil" caption="Top face places one, any other face places the stack." />
-
-<Clip src={viewBlueprint} alt="Opening a blueprint to read its recipe" caption="Shift + Use on a blueprint opens the plan without touching the anvil." />
-
-<Clip src={forging} alt="Striking the anvil with a forging hammer as progress fills" caption="Progress per strike scales with the hammer's rarity." />
-
-## Clearing a botched attempt
-
-Hold a **dissolving potion** and interact with the anvil. The potion is consumed; the unused materials sitting in the anvil are not.
-
-<Clip src={clear} alt="Pouring a dissolving potion to reset the anvil state" caption="The potion clears the forging state and leaves your materials alone." />
-
-<Callout type="danger" title="Do not drink it">
-Drinking a dissolving potion is a suicide effect. There is a very small chance of dropping **Melted Flesh** if you die that way.
-</Callout>
-
-Breaking the anvil also clears the state, but it is tough and mines at the same speed with every tool, so this is the slow option.
-
-## Mod compatibility
-
-**Jade** shows the anvil's current state on the tooltip — whether it is waiting, which blueprint it holds, which ingredient is next, and how much progress the current step has.
-
-<Gallery
-  items={[
-    { src: jadeWaiting, alt: 'Jade tooltip on an empty anvil', caption: 'Waiting' },
-    { src: jadeBlueprint, alt: 'Jade tooltip showing the written blueprint', caption: 'Blueprint written' },
-    { src: jadeIngredient, alt: 'Jade tooltip showing the required ingredient', caption: 'Next ingredient' },
-    { src: jadeProgress, alt: 'Jade tooltip showing forging progress', caption: 'Progress' },
-    { src: jadeOrder, alt: 'Jade tooltip warning that ingredient order matters', caption: 'Order matters' },
-    { src: jadeNext, alt: 'Jade tooltip advancing to the next step', caption: 'Next step' },
-    { src: jadeSuccess, alt: 'Jade tooltip on a completed forge', caption: 'Complete' },
-  ]}
-  min="13rem"
-/>
-
-**REI** lists forgery recipes with their steps. You can look up what a blueprint needs without owning it.
-
-<Gallery
-  items={[
-    { src: rei1, alt: 'A forgery recipe shown in REI' },
-    { src: rei2, alt: 'A multi-step forgery recipe shown in REI' },
-  ]}
-  min="18rem"
-/>
-
-## Planned
-
-- Dependency on and integration with **alloy-forgery**.
-- More hammer tiers.
-- **Blacksmith profession** compatibility: gear forged by a blacksmith gains extra item rarity, with a guaranteed floor and improved odds above it.
-
-## Recipe format
-
-Recipes live at `data/<namespace>/recipes/ise_forgery/<id>.json` with type `isekaiexpansion:forgery`.
-
-| Field | Meaning |
+| Operation | Progress |
 | --- | --- |
-| `result` | The single output item. |
-| `steps` | Ordered forging steps. Keep it to 10 or fewer — more is untested and may misbehave. |
-| `forgery_progress` | Progress required to finish this step. Each hammer contributes according to its rarity, so budget accordingly. |
-| `ingredients` | Materials for this step. **Maximum 9.** |
-| `count` | Amount of that material. Must fit in one stack (≤ 64). |
-| `item` | Material item id. |
-| `should_render_ingredients` | Whether to render placed material models on the anvil. |
-| `display_item` | Item id rendered as the work-in-progress. Not obtainable; presentation only. Usually omitted on the first step. |
+| Recipe, bundled `isekaiexpansion:forgery_hammer` | 20 strength per accepted strike. |
+| Recipe, Hundredfold Hammering active | Hammer strength × 1.5, rounded down: 30 for the bundled hammer. |
+| Smithing-stone upgrade | 1 strike of progress, regardless of hammer strength. |
+| Upgrade completion | 10 strikes; 5 with Hundredfold Hammering active on the recorded smith. |
 
-```json
-{
-  "type": "isekaiexpansion:forgery",
-  "result": { "item": "minecraft:diamond_sword" },
-  "steps": [
-    {
-      "forgery_progress": 100,
-      "ingredients": [
-        { "count": 2, "item": "minecraft:iron_ingot" },
-        { "count": 1, "item": "minecraft:stick" }
-      ],
-      "should_render_ingredients": true
-    },
-    {
-      "display_item": "minecraft:iron_sword",
-      "forgery_progress": 140,
-      "ingredients": [
-        { "count": 3, "item": "minecraft:diamond" },
-        { "count": 1, "item": "minecraft:iron_ingot" },
-        { "count": 2, "item": "minecraft:slime_ball" }
-      ],
-      "should_render_ingredients": true
-    }
-  ]
-}
-```
+Recipe steps set their own strength requirement. Hammer strength is an item property; rarity separately affects smithing-stone outcome chances.
+
+## Bind, supply and forge
+
+1. Reveal a [blueprint](/en/wiki/blueprints/), then use it on an unlocked anvil. The anvil stores the paper and consumes 1 held blueprint outside creative mode.
+2. Insert exactly the current step's materials, in the listed order. Equal items can merge into an existing stack, so counts matter as much as item types.
+3. Attack with a forging hammer while aiming at the anvil's top face. The attack checks a 1.5-block raycast and a hit at least 0.9 blocks above the anvil base.
+4. When the required progress is reached, the step's inventory is consumed and progress resets. Supply the next step.
+5. Use the completed anvil with an empty main hand to collect the result. The anvil keeps its blueprint for another batch.
+
+<Clip src={putIngredients} alt="Placing materials on the forgery anvil" caption="Place the listed materials in order, with exact counts." />
+<Clip src={forging} alt="Striking the top of a forgery anvil" caption="Aim at the upper face and strike with a forging hammer." />
+
+### Interact controls
+
+These controls read the main hand.
+
+| Holding or condition | Top face | Other face |
+| --- | --- | --- |
+| Materials | Add 1 to the first available or compatible slot. | Add as much as fits in that slot; overflow stays in hand. |
+| Empty hand or forging hammer | Remove 1 from the last occupied slot. | Remove that whole stack. |
+| Valid blueprint on an unlocked anvil | Bind the blueprint. | Same. |
+| Completed result and empty hand | Collect the result. | Same. |
+| Sneaking, empty hand, no materials, no step or progress | Retrieve the stored blueprint. | Same. |
+| Sneaking, empty hand, no materials, after a step has advanced | Open the stored plan's read-only review while unfinished. | Same. |
+| Dissolve Potion·Alpha | Reset the batch while keeping materials and the bound blueprint. | Same. |
+
+A completed result takes priority over blueprint retrieval. Timed inventory items are not accepted as ordinary materials. Outside creative mode, resetting consumes 1 potion and returns its bottle; creative insertion and blueprint binding preserve the held item.
+
+## Smithing-stone upgrades
+
+Place exactly 1 eligible piece of equipment and at least 1 smithing stone on the anvil. No blueprint is required. This combination takes priority over recipe forging, including when a blueprint is already stored.
+
+| Stone | ID | Base experience per item |
+| --- | --- | --- |
+| Smithing Stone Shard | `isekaiexpansion:smithing_stone_shard` | 150 |
+| Smithing Stone | `isekaiexpansion:smithing_stone` | 750 |
+| Smithing Stone Chunk | `isekaiexpansion:smithing_stone_chunk` | 3000 |
+
+Armour, shields, trinkets, bows, crossbows, tridents, tools and guns qualify. Items with sockets or attribute modifiers can qualify too; smithing stones and fusible gems do not. Multiple equipment stacks or unrelated materials invalidate the combination.
+
+| Outcome | Equipment | Stones |
+| --- | --- | --- |
+| Success | Gains the batch's experience; Hundredfold Hammering multiplies it by 1.15, rounded to an integer. | Consumed. |
+| Great success | Gains the same experience and permanent great-success stacks used by equipment stat bonuses. | Consumed. |
+| Failure | Gains no experience; its failure count increases by 1. | Consumed. |
+| Failure count exceeds 10 | The equipment breaks. This is the 11th accumulated failure. | Consumed. |
+
+The warning begins at 9 failures. Success does not clear previous failures. More committed stone material, hammer rarity, luck and Hundredfold Hammering affect outcome chances; no combination guarantees success. Great success yields 1–256 stacks per batch, with a stored cap of 1000000.
+
+Removing the upgrade combination clears its strike progress on the server tick. Changing smiths does not transfer recorded ownership to the latest striker, so finish the batch with the intended smith available.
+
+## Resetting and recovering items
+
+Dissolve Potion·Alpha (`isekaiexpansion:typea_potion_dissolve`) resets step, progress and smith attribution while retaining the blueprint and current materials. Previously completed steps have already consumed their materials. Remove the remaining stacks, then sneak-use the empty reset anvil to recover the blueprint.
+
+Breaking the anvil drops its current inventory and stored blueprint. Drinking the potion instead applies damage equal to 10 times the drinker's maximum health; use it on the anvil to reset crafting.
+
+## Where the data lives
+
+Recipes are standard data-pack recipes with type `isekaiexpansion:forgery`; [forgery recipe data](/en/wiki/forgery-recipes/) documents every field. [Blueprint data](/en/wiki/blueprint-data/) connects a researched plan to a recipe, and [levels and experience](/en/wiki/leveling/) explains equipment progression. Developers can inspect [forgery runtime](/en/dev/forgery-runtime/) for persistence, upgrade formulas and event contracts.

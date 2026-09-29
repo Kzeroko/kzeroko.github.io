@@ -1,0 +1,72 @@
+---
+title: "起源图标资源"
+description: "种族精灵图发现、职业与专业物品图标，以及头像渲染。"
+category: assets
+order: 150
+updated: 2026-09-19
+---
+
+种族图标与职业、专业图标使用不同资源路径。添加图片前先确认起源层：种族精灵图在资源重载时发现，物品图标则需要注册物品，并为物品渲染界面提供模型。
+
+## 你要做的东西
+
+| 起源层 | 资源路径 |
+| --- | --- |
+| `origins:origin` | 种族精灵图：`assets/<namespace>/textures/gui/icon/origins/hdicon_<origin-path>.png`。 |
+| `origins-classes:class` | 展示物品的平面图标：`assets/<item-namespace>/textures/item/icons/<item-path>.png`。 |
+| `isekaiprofessions:profession` | 与职业相同，使用展示物品路径。 |
+
+客户端实现位于 `client.origin.OriginIconAssetRegistry` 与 `OriginIcon`，不是公共 API 门面。通用的分层工厂在起源不存在或为空时返回空描述符；直接查询种族图片时，起源或图片不存在则返回共享后备纹理。
+
+## 前置要求
+
+种族精灵图必须直接放在 origins 图标目录中。文件名必须以 `hdicon_` 开头、以小写 `.png` 结尾，前缀之后的路径非空且不能包含斜杠。因此，带嵌套路径的起源无法通过该索引找到图片。发现阶段只检查名称，不检查图片尺寸或能否解码。
+
+索引仅使用起源路径，不含命名空间。因此 `isekaiorigins:human` 与 `example:human` 使用同一个键。多个资源命名空间竞争该键时，`isekaiexpansion` 优先；其他命名空间之间保留第一个遇到的资源，没有额外排序保证。资源包可通过正常资源选择覆盖同一资源标识符。
+
+物品图标路径保留物品命名空间。`IconItem` 设置史诗稀有度、最大堆叠 1 和防火属性，但不会发现或注册纹理。当前注册项如下：
+
+| 分组 | `isekaiexpansion` 下的路径 |
+| --- | --- |
+| 职业 | `classicon_warrior`、`classicon_ranger`、`classicon_magic_caster`、`classicon_cleric`、`classicon_priest`、`classicon_heavy_warrior`、`classicon_hunter` |
+| 专业 | `professionicon_blacksmith`、`professionicon_cook`、`professionicon_alchemist` |
+
+## 步骤
+
+1. 确认起源层及完整的起源/物品 ID。种族文件名只使用起源路径；物品图标使用物品命名空间与路径。
+2. 将 PNG 放入对应资源目录。现有人类图片为 `assets/isekaiexpansion/textures/gui/icon/origins/hdicon_human.png`；战士物品图片为 `assets/isekaiexpansion/textures/item/icons/classicon_warrior.png`。
+3. 新增职业或专业图标物品时，在 `IsekaiIconItems` 注册并纳入 `SimpleModelProvider`。生成模型使用 `Models.GENERATED`，第 0 层纹理为 `<namespace>:item/icons/<item-path>`。种族精灵图不需要物品模型或图标物品注册。
+4. 重载客户端资源并重新打开相关界面。精灵图注册表在每次重载时替换不可变映射；绘制阶段读取映射，不重新扫描资源。
+5. 检查选择器、状态/名牌展示、技能头像与种族进化图。种族图片还要检查玩家 HUD，因为头像裁剪方式与方形图标不同。
+
+## 声明它
+
+自定义种族精灵图路径不要求在起源定义中提供 icon 字段；内置人类起源省略了该字段。职业与专业定义引用展示物品，例如内置战士使用 `"icon": "isekaiexpansion:classicon_warrior"`。该字段由 Origins 提供，不是异界扩展新增的独立图标 JSON 格式。
+
+### 渲染与缺失资源
+
+| 界面或情况 | 行为 |
+| --- | --- |
+| 种族精灵图缺失 | 使用 `AssetUtil.Icons.DEFAULT_ICON` 指向的 `isekaiexpansion:textures/item/icons/default.png`。 |
+| 平面物品图标 | 直接解析构造出的物品纹理路径。该本地路径不会在图片缺失时替换为种族后备图；图片加载由 ModernUI 负责。 |
+| `OriginIconView` | 平面图片按比例适配。任一源尺寸大于视图时使用线性采样，否则使用最近邻。缓存图片关闭后重新解析。 |
+| Origins 选择器 | 精灵图描述符使用 `OriginIconView`；物品描述符使用实时 `OriginItemStackView`，包括第三方任意展示物品与随机选项。 |
+| `TriggerSkillPortraitView` | 带内边距适配图片，并按源尺寸与视图尺寸选择采样。 |
+| `ProgressionNodePortraitView` 与玩家 HUD 头像 | 使用 `ModernUiRoundImage`，居中裁剪并填满圆形；裁剪缩放比例低于 1 时使用线性采样，否则使用最近邻。 |
+
+圆形图片辅助对象保留图片着色器，直到图片或绘制矩形发生变化。拥有它的视图脱离窗口或图片资源失效时应调用 `release()`。HUD 在资源代际变化与脱离窗口时释放；进化节点在脱离窗口时释放，但图片在构造时捕获，因此资源变化后应重建节点。进化图片缺失或已关闭时，绘制节点自身的占位图。
+
+## 检查清单
+
+- 确认种族文件名对应起源路径，且没有嵌套目录。
+- 明确检查命名空间冲突；相同路径的不同命名空间起源不会获得独立图片槽位。
+- 分别验证物品注册、生成模型和平面 PNG；选择器中的实时物品渲染成功，不代表状态界面的平面图标存在。
+- 分开测试种族图片缺失、空起源与物品 PNG 缺失。
+- 检查大小 UI 尺寸、头像裁剪边缘，以及资源重载后重新打开的界面。
+- 新增圆形图片持有者时，在脱离窗口与资源失效时释放原生着色器。
+
+## 相关页面
+
+- [身份](/zh-cn/wiki/identity/) — 面向玩家的起源层说明。
+- [人形部件](/zh-cn/dev/humanoid-parts/) — 独立的模型资源流程。
+

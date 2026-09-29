@@ -1,0 +1,334 @@
+---
+title: "Quest Objectives"
+description: "All objective payloads, predicates, delivery rules, content triggers and spawn-action fields."
+category: data
+order: 91
+updated: 2026-09-24
+---
+
+An objective turns a qualifying server event into numeric progress or a completion flag. Its own type checks run before its event-filter tree; all objectives in the quest must finish before rewards run. Bounty quests additionally require a confirmed receptionist report; see [Bounty data](/en/wiki/bounty-data/).
+
+## Where the files live
+
+Objectives are entries in `objectives` inside `data/<namespace>/quests/**/*.json`, not separate resources. [Quest Data](/en/wiki/quest-data/) covers the enclosing file, resource priority, identity and atomic catalogue validation. Every built-in objective type below uses the `isekaiexpansion` namespace.
+
+## Minimal example
+
+Insert this entry into a quest's objectives array alongside the required root fields from Quest Data. It uses the visit-location shape from the demonstration fixtures and needs no type-specific fields. With no event filter, the first qualifying player tick completes it.
+
+```json
+{
+  "id": "visit",
+  "progress_type": "boolean",
+  "type": "isekaiexpansion:visit_location",
+  "data": {}
+}
+```
+
+## Fields
+
+### Objective envelope
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | `string` | Required | Nonblank ID unique within the quest. |
+| `progress_type` | `string` | Required | numeric or boolean; boolean uses a flag. |
+| `required` | `integer` | 1 | Positive target; must be 1 for boolean. |
+| `type` | `identifier` | Required | One of the registered objective types below. |
+| `data` | `object` | Required | Type payload and content_triggers; supported types also parse failures. |
+| `conditions` | `object / array<object>` | [] | Objective event-filter tree; missing/empty accepts the event after the objective's own checks. |
+
+Numeric progress adds a non-negative type-specific increment and saturates at 2147483647. Boolean progress becomes true on the first matching event, independently of that type's numeric increment. Completed objectives stop receiving normal progress, manual content and failure checks. The ordinary tracker requires a credited player for progress; a nearby uncredited death does not grant kill progress.
+
+| Objective type | Event and numeric increment |
+| --- | --- |
+| `isekaiexpansion:defeat_entities` | Credited kill, +1 |
+| `isekaiexpansion:interact_block` | Block-use callback, +1 |
+| `isekaiexpansion:interact_entity` | Entity-use callback, +1 |
+| `isekaiexpansion:npc_talk` | Bound NPC quest dialogue starts, +1 |
+| `isekaiexpansion:npc_delivery` | Full delivery batch, +1 |
+| `isekaiexpansion:bounty_delivery` | Confirmed guild receptionist report; consumes up to the remaining item requirement. No paper item is required. Numeric bounty objectives only. |
+| `isekaiexpansion:recipe_crafted` | Matching craft event, adds its non-negative crafted_amount |
+| `isekaiexpansion:advancement` | Matching advancement event, +1 |
+| `isekaiexpansion:visit_location` | Player tick, adds progress_per_tick |
+| `isekaiexpansion:photograph` | Credited Exposure frame, adds progress_per_photo |
+| `isekaiexpansion:complete_dungeon` | Native dungeon completion, +1 |
+
+### Type payloads
+
+These fields are inside the objective's `data`. Fields belonging to another type generally do nothing unless a parser explicitly rejects them.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `target` | `object` | Required | defeat_entities and interact_entity: entity predicate; {} matches any present, unremoved entity. |
+| `credit` | `string` | party | defeat_entities: party, player or picker. player accepts direct/projectile credit only; picker requires the recorded picking player as credited actor. |
+| `weapon` | `object` | Absent | defeat_entities: item predicate checked against the credited player's current held stacks at the kill event. |
+| `weapon_hand` | `string` | either | defeat_entities: either, main_hand, off_hand; this field requires weapon. |
+| `damage_type` / `damage_types` | `string / array<string>` | [] | defeat_entities: allowed damage IDs; both keys merge. |
+| `damage_type_tag` / `damage_type_tags` | `string / array<string>` | [] | defeat_entities: allowed damage tags, without #. IDs and tags are alternatives. |
+| `block` | `object` | Required | interact_block: block predicate described below. |
+| `held_item` | `object` | Absent | Interaction objectives: item predicate for the hand that performed this event; either does not scan both hands. |
+| `hand` | `string` | either | Interaction objectives: either, main_hand or off_hand. |
+| `sneaking` | `boolean` | Absent | Interaction objectives: expected sneaking state. |
+| `npc` | `object` | Required | npc_talk and npc_delivery: NPC identity/location selector below. |
+| `dialogue` | `identifier` | Required | npc_talk: exact dialogue ID. Progress fires when the bound quest dialogue starts, not when its final line closes. |
+| `item` | `object` | Required | npc_delivery: item predicate plus count for one delivery batch. bounty_delivery: item predicate only; the enclosing required field is the total item count. |
+| `delivery` | `object` | Required | npc_delivery: carrier, source and completion rules below. |
+| `recipe_id` | `identifier` | Required | recipe_crafted: nonblank recipe ID; exact payload match, not output-item identity. |
+| `recipe_type` / `recipe_serializer` / `source` | `identifier` | Absent | recipe_crafted: optional additional exact filters; present blank strings reject. Sources include `minecraft:recipe_crafted`, `isekaiexpansion:alchemy` and `isekaiexpansion:forgery`. |
+| `advancement_id` | `identifier` | Required | advancement: nonblank advancement ID. |
+| `criterion` | `string` | Absent | advancement: one criterion name; trimmed, blank rejects. |
+| `criteria` | `array<string>` | [] | advancement: alternatives merged with criterion; trimmed blanks reject; duplicates collapse. |
+| `complete_only` | `boolean` | false | advancement: also require the event to report the whole advancement complete. |
+| `progress_per_tick` | `integer` | 1 | visit_location: positive increment per qualifying player tick. |
+| `progress_per_photo` | `integer` | 1 | photograph: positive increment per credited Exposure frame event. |
+| `dungeon` | `identifier` | Absent | complete_dungeon: optional exact native dungeon ID. |
+| `minimum_difficulty` | `string` | Absent | complete_dungeon: common, uncommon, rare, epic, legendary or unique, in increasing rarity order; trimmed, case-insensitive; unknown/blank rejects. |
+
+Kill credit resolves direct players, player-owned projectiles and following NPCs, including their projectiles, to a responsible player. `party` accepts that credited actor for the shared profile; it does not award every nearby team. `player` excludes companion credit, while `picker` compares the responsible player with the saved picker. Weapon predicates inspect that player's hands at event time, not a saved weapon on a projectile or companion.
+
+Interaction callbacks report use attempts and return control to normal interaction handling; the objective does not wait for the block/entity interaction to succeed. Hand/credit option names are trimmed and case-insensitive; unknown names reject the definition. Recipe and advancement objectives react to events after activation, not a scan of historical crafts or already-held advancements.
+
+### Entity, item and block predicates
+
+Singular and plural selector keys merge. Both accept a string or array, trim values, ignore blanks and collapse duplicates. Entity-type, item, block and damage tag IDs here are **bare IDs without a leading #**; location tags below are the exception.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `entity_type` / `entity_types` | `string / array<string>` | [] | Entity predicate: merged type IDs; unknown registered type rejects. |
+| `entity_type_tag` / `entity_type_tags` | `string / array<string>` | [] | Entity predicate: merged type tags without #; OR with type IDs. |
+| `entity_tag` / `entity_tags` | `string / array<string>` | [] | Entity predicate: command tags, all required; distinct from entity-type tags. |
+| `item` / `items` | `string / array<string>` | [] | Item predicate: merged item IDs; unknown item rejects. |
+| `item_tag` / `item_tags` | `string / array<string>` | [] | Item predicate: merged item tags without #; OR with item IDs. At least one ID or tag is required. |
+| `block` / `blocks` | `string / array<string>` | [] | Block predicate: merged block IDs; unknown block rejects. |
+| `block_tag` / `block_tags` | `string / array<string>` | [] | Block predicate: merged block tags without #; OR with block IDs. At least one ID or tag is required. |
+| `state` | `object` | {} | Block predicate: property-name → string map; every property must exist and match, ignoring value case. |
+| `nbt` | `object` | Absent | Entity/item predicate: partial NBT match with list comparison enabled; wrong container type rejects. |
+| `block_entity_nbt` | `object` | Absent | Block predicate: partial block-entity NBT; a block without a block entity fails this filter. |
+| `count` | `integer` | 1 | Delivery item requirement only: 1–4096 items per batch; rejects outside range. |
+
+Entity identity accepts a matching type ID or type tag, then requires every command tag and any NBT filter. An empty entity predicate still needs a present, unremoved entity when used as a target. An empty item/block predicate rejects at load. Unknown tag membership normally yields no match; unlike explicit item/block/entity IDs, these tag references are not checked for existence by the predicate parser.
+
+NBT filters compare against entity data, the stack's own NBT or block-entity data respectively. They are JSON objects using the typed-NBT rules below, not SNBT strings.
+
+### Locations and NPC identity
+
+A general location predicate applies dimension, spherical coordinates, biome and structure groups together. Alternatives within the biome group or within the structure group use OR. An empty location object still needs a world and event position.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `dimension` | `identifier` | Absent | Exact world ID. |
+| `x` / `y` / `z` | `number` | Absent | All-or-none finite world coordinates in blocks; supplying any requires all and a positive radius. |
+| `radius` | `number` | 0 | With coordinates, finite and greater than 0, inclusive spherical distance. Supplying radius without coordinates rejects, even 0. |
+| `biome` / `biomes` | `string / array<string>` | [] | General location predicate: merged biome IDs. |
+| `biome_tag` / `biome_tags` | `string / array<string>` | [] | General location predicate: merged biome tags; optional leading # accepted. OR with biome IDs. |
+| `in_structure` | `boolean` | false | General location predicate: require a containing structure. |
+| `structure` / `structures` | `string / array<string>` | [] | General location predicate: allowed containing-structure IDs. |
+| `structure_tag` / `structure_tags` | `string / array<string>` | [] | General location predicate: structure tags; optional # accepted. OR with structure IDs; either list implies a structure is required. |
+| `npc.identity` | `string` | Required | NPC selector: trimmed nonblank identity, type ID, type path or NPC type translation key. Normalisation lowercases and collapses non-alphanumeric runs to underscores. |
+| `npc.location` | `object` | {} | NPC selector: dimension and x/y/z/radius only; tests the live NPC's position. It does not accept the general biome/structure filters. |
+
+Location singular/plural selectors merge, trim and ignore blanks like the other predicates. Structure matching uses the containing structure resolved through Isekai Core; a failed lookup means no structure match. NPC selectors test the NPC's position, whereas an objective `location` condition tests the event position: the interacted block centre, NPC position, kill position or photo frame position, as appropriate.
+
+NPC identity aliases can match multiple instances of a generic NPC type. Add location bounds when the quest should bind to a particular area. This selector does not enforce unique identity registration.
+
+### Delivery
+
+The following fields are inside `data.delivery`. Enum strings trim and ignore case; unknown options reject the definition.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `carrier` | `string` | Required | party_member or picker; picker requires the original picking player's UUID. |
+| `source` | `object` | Required | Inventory source object. |
+| `source.type` | `string` | Required | main_hand, inventory or niftycarts_cart. |
+| `source.search_radius` | `number` | Required for niftycarts_cart | Finite distance greater than 0 and at most 32 blocks around the NPC. Rejected for other source types. |
+| `source.allowed_cart_types` | `array<identifier>` | [] | Cart entity-type allowlist; empty accepts any supported cart. Rejected for non-cart source types. |
+| `completion` | `object` | Required | Interaction or proximity completion object. |
+| `completion.type` | `string` | Required | npc_interact or npc_proximity. |
+| `completion.radius` | `number` | Required for npc_proximity | Finite distance greater than 0 and at most 32 blocks between carrier and NPC. Rejected for npc_interact. |
+| `consume_on_complete` | `boolean` | true | Consume one full batch on a successful delivery attempt; false retains the items. |
+
+The main-hand source needs the whole batch in that stack. Inventory and cart sources can aggregate matching stacks within one inventory. Cart selection requires the optional **Nifty Carts** mod at load time, searches around the NPC and chooses the nearest eligible inventory cart; it does not require that cart to be attached to the carrier.
+
+Automatic proximity checks run every 5 ticks (0.25 seconds at 20 ticks per second), staggered by player entity ID. A pass handles the first successful eligible delivery, not every pending batch. The bridge checks the objective's event conditions before consumption, then sends a trigger targeted to that quest and objective.
+
+**Item count and objective progress are different.** A batch of 16 items adds 1 numeric progress; `required: 3` therefore needs 3 successful batches. With `consume_on_complete: false`, a proximity objective can reuse the same held batch on later checks. Delivery consumption and subsequent tracker execution are not a rollback transaction.
+
+The removed `delivery.constraints` field is explicitly rejected. Put supported failure rules in `data.failures`.
+
+### Objective event conditions
+
+This tree lives at `objectives[].conditions`. It filters events using location, entity or payload leaves; player-level/team/sequence leaves belong to the separate general condition tree used by picking and content triggers.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | Required | `isekaiexpansion:all`, `isekaiexpansion:any`, `isekaiexpansion:not`, `isekaiexpansion:location`, `isekaiexpansion:entity` or `isekaiexpansion:payload`. |
+| `data` | `object` | Required | Leaf fields or group children; location uses the general location table, entity includes the entity-predicate fields. |
+| `data.children` | `array<object>` | [] | all/any/not children; arrays also mean all. Empty all passes, empty any fails; not requires exactly 1 child. |
+| `data.role` | `string` | target | entity: target (aliases target_entity, focused, focused_entity), source (source_entity), or player. Blank becomes target; unknown rejects. |
+| `data.require_present` | `boolean` | entity: has filters; payload: true | entity: forced true by any predicate or positive max_distance. payload: a missing key passes when false, even if value filters are present. |
+| `data.max_distance` | `number` | 0 | entity: finite non-negative distance from event player in blocks; 0 disables. Positive distance needs an event player. |
+| `data.key` | `string` | Required | payload: trimmed nonblank top-level payload key; no nested path traversal. |
+| `data.string` / `data.strings` | `string / array<string>` | [] | payload: exact accepted strings, OR within this set; a string-list payload passes when any member matches. Blanks ignored, other whitespace retained. |
+| `data.boolean` | `boolean` | Absent | payload: expected boolean; combined with string and numeric restrictions. |
+| `data.min` / `data.max` | `number` | Absent | payload: inclusive finite numeric bounds; max below min rejects. |
+| `data.value` | `string / number / boolean` | Absent | payload shorthand: string adds an accepted string; boolean overrides boolean; number replaces both min and max. Object/array/null adds no shorthand constraint. |
+
+Groups short-circuit. A location leaf receives its location fields directly in `data`; there is no extra location wrapper. An entity leaf also receives entity-predicate fields directly. Missing/removed entities pass only when presence is not required. Payload comparisons use the stored value's boolean/numeric conversion; there is no strict payload-type validation, so choose a key with the type produced by that event.
+
+Useful non-photo payload keys are `hand` and `sneaking` for interaction; `credit` for kills; `npc_identity`, `dialogue_id`, `delivery_source` and `delivered_count` for the corresponding NPC events; `recipe_id`, `recipe_type`, `recipe_serializer`, `output_item_id`, `crafted_amount` and `source` for crafting; `advancement_id`, `criterion` and `complete` for advancement; and `dungeon`/`difficulty` for dungeon completion. Optional craft metadata can be absent.
+
+### Photography payload
+
+The Exposure bridge chooses the awarded server player, then the executing server player, then a player holder. Without one, no quest photo event is sent. The event source is the camera holder and the target is the nearest unremoved living entity from Exposure's supplied frame list, measured from frame position.
+
+Use these keys with `isekaiexpansion:payload`; they are generated event data, not additional fields in `photograph.data`. “When recorded” means the corresponding metadata is present in the Exposure frame.
+
+| Payload key | Type | Present when | Meaning |
+| --- | --- | --- | --- |
+| `exposure_id` | `string` | Always | Exposure frame identifier. |
+| `exposure_type` | `string` | Always | Exposure frame type string. |
+| `camera_item_id` | `identifier` | Always | Camera item registry ID. |
+| `camera_id` | `string` | Always | Camera stack identity. |
+| `photographer_name` | `string` | Always | Recorded photographer name. |
+| `photographer_uuid` | `string` | When recorded | Recorded photographer UUID. |
+| `photographer_is_player` / `photographer_is_npc` | `boolean` | Always | Photographer metadata flags, not the credited player's identity test. |
+| `holder_entity_type` | `identifier` | Always | Camera-holder entity type. |
+| `holder_entity_id` | `integer` | Always | Holder's runtime entity ID. |
+| `frame_x` / `frame_y` / `frame_z` | `number` | Always | Frame position in blocks; falls back to the holder/player position. |
+| `frame_dimension` / `frame_biome` | `identifier` | When recorded | Frame dimension and biome metadata. |
+| `frame_weather` | `string` | When recorded | Exposure weather string. |
+| `frame_pitch` / `frame_yaw` | `number` | When recorded | Frame pitch and yaw metadata. |
+| `light_level` / `day_time` | `integer` | When recorded | Recorded light and day-time values. |
+| `in_cave` / `underwater` / `flash` / `selfie` / `on_stand` / `chromatic` / `projected` | `boolean` | When recorded | Exposure frame flags. |
+| `color_channel` | `string` | When recorded | Exposure channel name. |
+| `focal_length` | `integer` | When recorded | Recorded focal-length value. |
+| `shutter_speed` | `string` | When recorded | Shutter notation string. |
+| `shutter_ticks` | `integer` | When recorded | Shutter duration in ticks. |
+| `shutter_milliseconds` | `number` | When recorded | Shutter duration in milliseconds. |
+| `has_structure` | `boolean` | Always | Whether the recorded structure list is nonempty. |
+| `structure_ids` | `array<string>` | Only when nonempty | Recorded structure IDs. |
+| `positions_in_frame` | `integer` | Always | Count of positions supplied by Exposure, not a coordinate list. |
+| `entities_in_frame` | `integer` | Always | Count of non-null, unremoved frame entities. |
+| `entity_types_in_frame` | `array<string>` | Only when nonempty | Distinct entity type IDs. |
+| `entity_tags_in_frame` | `array<string>` | Only when nonempty | Distinct command tags of those entities. |
+| `entity_type_tags_in_frame` | `array<string>` | Only when nonempty | Strings combining entity type, # and command tag; not registry entity-type tags. |
+| `nearest_entity_type` / `nearest_entity_name` | `string` | When a nearest entity exists | Type ID and displayed name of the nearest valid frame entity. |
+| `nearest_entity_distance` | `number` | When a nearest entity exists | Distance from frame position in blocks. |
+
+Photo entity lists combine all valid frame subjects; the ordinary entity filter examines only the nearest target. To require a type anywhere in the frame, test `entity_types_in_frame`. Empty string-list payloads are omitted, so a missing list passes only when that payload condition has `require_present: false`.
+
+### Content triggers and sequence state
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `content_triggers` | `array<object>` | [] | Actions attached to this objective's lifecycle; available on all built-in objective types. |
+| `content_triggers[].event` | `string` | Required | quest_picked, objective_progressed, objective_completed or manual. Trimmed, case-insensitive, hyphens become underscores. |
+| `content_triggers[].manual_id` | `string` | Absent | Only for manual; trimmed nonblank exact match ignoring case. Missing means wildcard. |
+| `content_triggers[].conditions` | `object / array<object>` | Always true | General condition tree from Quest Data, including sequence here; not the objective-event filter registry. |
+| `content_triggers[].actions` | `array<object>` | Required | Ordered non-empty action list after disabled actions are removed. |
+| `actions[].type` | `identifier` | Required | Built-in action: `isekaiexpansion:spawn_entities`. |
+| `actions[].data` | `object` | Required | Spawn action fields below. |
+| `sequence.data.id` | `string` | Required in practice | Trimmed nonblank sequence-state key, shared across the active quest; missing becomes blank and rejects. |
+| `sequence.data.children` | `array<object>` | Required non-empty | Ordered general-condition nodes; only the current step is evaluated on each callback. |
+
+On normal progress, `objective_progressed` runs after the value changes; `objective_completed` follows when that change first completes the objective. A manual content event does not itself increment objective progress. Actions run in authored order whenever their trigger's conditions pass; there is no implicit once-only flag. The built-in spawn action can therefore run repeatedly.
+
+Sequence progress is stored by `id` across the entire active quest, so reuse deliberately. A sequence remembers satisfied steps and stays true after the end. It examines only its current child on a callback. With nested stateful children, a child that reports a state change short-circuits the parent state write; the parent can need another callback to record its step. Do not treat nested sequences as an atomic multi-step evaluator.
+
+### Spawn action
+
+The only built-in content action is `isekaiexpansion:spawn_entities`. Its `data` uses the fields below. Distances are blocks, angles are degrees, numeric bounds reject rather than clamp, and all authored floating-point values must be finite.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enabled` | `boolean` | true | false removes this action before reading its other fields. |
+| `entity_type` | `entity id` | Required | Registered entity type to create. |
+| `count` | `integer` | 1 | Requested entities per action, 1–64; execution may spawn fewer. |
+| `mode` | `string` | radius | radius or offset; trimmed/case-insensitive, blank becomes radius. |
+| `offset` | `object` | {} | World-axis offset used only in offset mode. |
+| `offset.x` / `offset.y` / `offset.z` | `number` | 0 | Finite offsets in blocks from the event anchor; no yaw rotation. |
+| `radius` | `number / object` | radius: 4–16; offset: 0–6 | Horizontal search band in blocks. A scalar sets min to 0 and max to that value. |
+| `radius.min` | `number` | radius: 4; offset: 0 | Finite lower bound, 0–128. |
+| `radius.max` | `number` | radius: 16; offset: 6 | Finite upper bound between min and 128; inconsistent bands reject. |
+| `attempts` | `integer` | 96 | Search samples, 1–512. |
+| `vertical_scan_depth` | `integer` | 6 | Scan index limit, 0–64; index 0 is also checked. |
+| `include_anchor` | `boolean` | true for offset; false for radius | Include the anchor in candidate search. |
+| `vertical_search` | `string` | surface_down outdoors; anchor_nearest otherwise | surface_down scans down from the motion-blocking heightmap without leaves; anchor_nearest alternates around anchor height. Unknown rejects; explicit blank becomes surface_down. |
+| `require_outdoors` | `boolean` | true | Require sky visibility. |
+| `strictly_outside` | `boolean` | true | With require_outdoors, also require world-surface height at most feet height + 1. |
+| `avoid_fluids` | `boolean` | true | Reject tested feet/floor/clearance positions containing fluid. |
+| `openness_weight` | `number` | 0.14 | Finite non-negative weight favouring more open neighbouring positions. |
+| `exact_offset_first` | `boolean` | true for offset; false for radius | Offset mode first validates the exact offset point. |
+| `fallback_to_search` | `boolean` | true | After an invalid exact-offset attempt, allow candidate search. |
+| `target_source` | `boolean` | true | Spawned mobs target the triggering player when present. |
+| `persistent` | `boolean` | true | Mark spawned mobs persistent. |
+| `initialize_mob` | `boolean` | true | Initialise mobs for an event spawn before applying authored NBT. |
+| `multi_spawn_layout` | `string` | spread | spread or cluster; case-insensitive but nonblank input is not trimmed. Blank becomes spread. |
+| `cluster_radius` | `number` | 2.5 | Finite 0–32 blocks around the first resolved cluster position. |
+| `cluster_attempts` | `integer` | max(16, attempts / 2) | Integer division; 1–256 search attempts for later clustered entities. |
+| `cluster_include_anchor` | `boolean` | true | Include the cluster base as a candidate. |
+| `cluster_openness_weight` | `number` | openness_weight | Finite non-negative openness preference for cluster searches. |
+| `same_room_as_source` | `boolean` | false | Require bounded walkable connectivity from the source; this is a local search, not a named room. |
+| `same_room_max_distance` | `number` | max(radius.max + 4, 12) | Finite 1–160 horizontal blocks for room search. |
+| `same_room_max_nodes` | `integer` | 320 | Room-search expansion limit, 1–4096 nodes. |
+| `same_land_as_source` | `boolean` | false | Require the same local dry-supported-ground classification as the source; does not compare islands. |
+| `visible_to_source` | `boolean` | false | Require unobstructed collision ray from source eye to candidate body. |
+| `visible_to_source_respect_fov` | `boolean` | false | Also restrict visibility by source look direction when visible_to_source is enabled. |
+| `visible_to_source_fov` | `number` | 120 | Finite cone angle in degrees, 1–179. |
+| `in_structure` | `boolean` | false | Require a containing structure. |
+| `same_structure_as_source` | `boolean` | false | Require the same resolved structure as the source. |
+| `max_vertical_delta` | `number` | 1.7976931348623157E308 | Finite non-negative vertical difference in blocks from search anchor; applied during candidate search, not the exact-offset fast path. |
+| `entity_tags` | `array<string>` | [] | Trimmed command tags; blanks ignored and duplicates collapse. |
+| `encounter_tag` | `string` | Empty | Trimmed command tag also added to spawned entities; required when max_active is positive. |
+| `max_active` | `integer` | 0 | 0–4096; positive caps entities with encounter_tag inside the scan box. |
+| `active_check_radius` | `number` | max(radius.max, cluster_radius) + 8 | Finite 1–256 blocks, axis-aligned box half extent; not a spherical test. |
+| `nbt` | `object` | Absent | Authored entity NBT. UUID, Pos, Motion and Rotation are removed before applying it; transform and velocity are restored. |
+
+A spawn anchor is the picked position for quest_picked, the event position for progress/completion, or the supplied manual position. Radius mode ignores offset. Spread searches independently for each entity; cluster resolves a base and searches nearby for later entities. Search failure logs a warning and may produce a partial group; it does not undo objective progress or rewards.
+
+Candidate search needs supported, collision-free space and applies the authored outdoor, fluid, visibility, structure and local connectivity policies. Same-room search is bounded to the source's vertical neighbourhood of ±4 blocks and its node budget. The exact-offset path checks space and advanced constraints, but does not apply max_vertical_delta. Reference-dependent policies fail without a source in the same world.
+
+The encounter limit counts unremoved entities carrying the tag in the scan box, including entities from other actions that reuse that tag. It is not a global cap or a quest-owned despawn policy. Mob initialisation runs before authored NBT, followed by command tags, persistence and targeting. Disabled actions are removed; a trigger whose entire action list is disabled is invalid.
+
+### Failure rules
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `failures` | `array<object>` | [] | Parsed by npc_delivery and defeat_entities; other built-in types ignore this key. Current built-in rules require npc_delivery. |
+| `failures[].type` | `identifier` | Required | `isekaiexpansion:delivery_item_leaves_hand` or `isekaiexpansion:delivery_damage_while_carrying`; duplicates reject. |
+| `failures[].data` | `object` | Required | No built-in fields; use {}. Both rules require source main_hand and carrier picker. |
+
+`delivery_item_leaves_hand` fails the entire quest on a player tick when the incomplete objective's original picker no longer holds a matching full batch. It has no “picked up once” arming stage or grace period. `delivery_damage_while_carrying` fails on a player-damaged trigger while that picker holds a matching full batch.
+
+Failure checks run before progress checks for the same trigger and do not reuse the objective event-condition tree. A completed objective no longer supplies failure checks. In a multi-batch strict-carry objective, consuming a batch can leave insufficient items for the next tick, so its item requirement must still be satisfied while it remains incomplete.
+
+### Typed NBT
+
+Ordinary JSON objects become compounds, booleans become bytes, integer tokens become int or long, and other finite numeric tokens become double. Arrays must convert to one homogeneous NBT element type; null is rejected. To force a primitive or primitive-array type, use a nested wrapper with exactly these fields:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `$nbt_type` | `string` | Required for typed wrapper | byte, short, int, long, float, double, string, byte_array, int_array or long_array; trimmed/case-insensitive. |
+| `value` | `number / string / array<number>` | Required for typed wrapper | Value of the declared type. Wrapper contains exactly these 2 keys; numeric ranges must fit the declared signed type and floating numbers must be finite. |
+
+Integer tokens must fit the signed 64-bit range before conversion; declared byte/short/int ranges are narrower. A float wrapper also rejects values that overflow finite float representation. Extra keys in a typed wrapper, mixed-type lists and unknown type names reject the quest definition.
+
+## Validation
+
+An unknown type, missing required object, invalid bound, empty item/block predicate, unsupported delivery combination, duplicate failure type or invalid content trigger rejects the quest catalogue reload as described in [Quest Data](/en/wiki/quest-data/). Unknown keys are usually ignored, so placing a valid field under the wrong objective type can silently disable the intended restriction.
+
+Explicit entity/item/block IDs are checked against their registries. Recipe, advancement, dialogue, dimension, dungeon and many tag references primarily undergo identifier parsing and later matching; a syntactically valid missing target can load and never progress. An enabled spawn action requires a registered entity type but may still fail to find a usable position at execution.
+
+## Reloading
+
+Objectives reload with their enclosing quests. Active progress is keyed by quest ID and objective ID; there is no automatic semantic migration when you change types, targets, required counts or sequence IDs. Re-test an active quest as well as a newly accepted one after changing a definition.
+
+The server remains authoritative. Client data is a presentation projection, not the full executable content-trigger tree. Translation/resource changes require their own client resource reload.
+
+## Related
+
+- [Quest Data](/en/wiki/quest-data/) — complete quest files, picking and cooldowns.
+- [Quest rewards](/en/wiki/quest-rewards/) — recipient selection and reward execution.
+- [Quest runtime](/en/dev/quest-system/) — event hooks, saved state and debugging.
+- [NPC dialogue](/en/dev/npc-dialogue/) — dialogue and menu integration.

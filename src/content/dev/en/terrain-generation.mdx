@@ -1,0 +1,181 @@
+---
+title: "Terrain generation"
+description: "Registry ownership, deterministic landforms, world-tree persistence, chunk-local decoration and shader overlays."
+category: systems
+order: 178
+updated: 2026-09-26
+---
+
+The terrain subsystem augments ReTerraForged with deterministic districts, prepared landmarks and volumetric geometry. It owns the default preset's registry bootstrap and a per-generator environment; these are internal implementation contracts, not a public terrain API.
+
+## What it does
+
+The build consumes ReTerraForged `0.0.6-fabric-1.20.1`; the mod dependency requires `0.0.6`. `KtmPreset` reads the packaged `data/isekaiexpansion/terrain/ktm2.json` once through the dependency codec and returns copies. The bundled world properties specify sea level `60` and world height `1024`. Invalid/missing preset data aborts loading rather than selecting a fallback.
+
+`TerrainWorldPreset` registers `WorldPresets.DEFAULT`: a wrapped Overworld biome source, with Nether and End generators constructed from their corresponding registry settings. `TerrainServerPresetMixin` explicitly selects that default during dedicated-server dimension creation. The RTF preset factory mixin redirects its listed factory methods to KTM2; the default customisation screen is read-only.
+
+Player-facing families and commands are in [terrain](/en/wiki/terrain/). Every local configuration field and validation range is in [terrain configuration](/en/wiki/terrain-configuration/).
+
+## Runtime model
+
+### Registry and environment ownership
+
+`TerrainBootstrap.load` makes a Gson copy of server-local options, validates them, installs a thread-local load snapshot and restores the previous snapshot in `finally`. It bootstraps the RTF preset/noise/modifier/structure-rule registries and vanilla features, carvers, biomes, dimension types, densities, generator settings and world presets.
+
+For bound registries, `remainingResources` removes resource entries whose IDs were already registered by bootstrap; unrelated resources remain. Consequently, a data pack cannot override those owned entries by supplying the same ID. The verification pass checks required family biomes, a bound preset environment and the default Overworld source. Missing integration is fatal instead of silently creating vanilla terrain.
+
+`TerrainEnvironment` owns validated parameter records, per-family shapes, resolved block palettes, biome admission and weakly held landmark sets per seed. `RtfPresetSettingsMixin` permits binding the environment once. `RtfHeightmapMixin` creates an engine when the RTF heightmap has an environment, ensures climate is sampled, then applies terrain after climate.
+
+The server-world constructor binds only an Overworld using `TerrainBiomeSource`. It requires the RTF context and engine, binds the source, then attaches the world-tree state before normal generation. Cyanide's replacement registry loader has a separate populate/filter bridge.
+
+### Admission, density and decoration
+
+District cells use a deterministic weighted permutation of enabled families. A failed family can yield to another family without rerolling the district admission chance. Candidate sites are stratified and surveyed against original biomes, terrain height and reservations. Full-shape acceptance precedes publication; maximum shape height must remain below `maxY - 32`.
+
+Great Plains and the World Tree take precedence. Prepared landmark surfaces blend into the original envelope; ordinary grounded shapes update RTF height/terrain and protect their full-strength interior from erosion. Skyreach, Firmament and Riftborne share the `TerrainFamily.elevated()` classification and bypass that ground-height mutation: their upper volumes enter through final density, leaving native aquifer inputs intact. Firmament conforms its foundation to the original ground except at planned receiving pools and waterfall feet. Riftborne retains its shaped valley and pedestal through final density. `LandformColumn.blendDetached` blends attached rock with the ground while detached masses thin at their own altitude, preserving the intervening gap.
+
+`TerrainNoiseConfigMixin` discovers an RTF cell marker even when nested in the temperature function, then wraps final density with `LandformDensity`. The wrapper maps both its original density and height through visitors; it is runtime-only and throws from `getCodecHolder`. `LandformColumn` merges solid intervals, preserves original caves below both grounded surfaces, and adds floating volumes without pulling them down to native ground.
+
+The interval buffer supports at most `16` disjoint intervals and throws on overflow. Engine caches use `16` striped district locks, a shared `128`-entry LRU and thread-local district/column caches; Great Plains and grove plans each cap their shared cache at `64`. District construction uses primitive 64-bit coordinate maps and reuses habitat footprints for matching radius, site attempt and habitat type. These survey caches live only during planning. Sampling original terrain uses a thread-local recursion guard restored in `finally`; column queries do not request neighbouring chunks.
+
+At `generateFeatures` HEAD, exotic decoration applies owned surface weathering, bounded water, crystals, fossils, architecture and vegetation. At TAIL, ordinary weathering/grove generation and world-tree rasterisation run. Writes are clipped to the current chunk; neighbouring geometry is sampled from descriptors. The world tree skips block entities and fluids, and its foliage only replaces air, replaceable blocks or leaves. It is world generation, not runtime tree growth.
+
+Arona's compatibility bridge supplies the suspended top surface for Skyreach, Firmament and Riftborne only during its layer-injection call. A thread-local scope restores in `finally`; it does not replace the ground/hydrology height globally. Firmament's dry exposed caps receive the configured top block over three soil blocks, resolving the actual raster surface near the planned height.
+
+All exotic families share `ExoticOptions.Family`, its immutable `Parameters` snapshot and the `ExoticField` sampling contract. Named constructors preserve family defaults in partial Gson objects. Shape-specific controls extend that common family model; there are no legacy configuration aliases. `FormationField` indexes immutable analytic segments into `48`-block buckets; rotated/tilted arches, fins, monoliths and root braids are clipped into column intervals. Crown boundaries use cached orientation and Cartesian harmonics rather than per-column trigonometric rotations.
+
+Underground columns carry a floor and roof. Their density replacement is bounded to that chamber and its blend shell; the original RTF surface height is retained. Cover is constrained against local ground across the entire chamber. Pool admission checks complete banks against both the chamber ceiling and original RTF cover, with bounded retries for rejected catchments. `ExoticVolumeDecoration` repairs the bounded roof seal and liquid-adjacent beds/banks after carvers, then drains owned aquifer fluid inside the cavity before painting planned liquid intervals. Bridges and roots can cross above pools without suppressing the water underneath.
+
+Cave descriptors combine overlapping rotated vaults, independent floor and ceiling relief, wall buttresses, hanging formations and raised crossings. `ExoticHydrology` caches pool orientation, curved axes, unequal shoreline lobes, eroded bays and depth variation; Skyreach lakes, Aquapolis reservoirs and the frozen tundra catchment use this shared pool shape too. Cave and volcanic catchments separate unequal levels and reject spillways that cut another level. Liquid sampling reuses `LandformColumn` to retain disjoint upper and lower waters. Firmament spillways solve each crown's edge during planning and rasterise full water columns into receiving pools without waiting for fluid ticks. Volcanoes retain a broad district around an asymmetric tapered massif, a small breached summit crater and eroded flanks. The summit fits within protected terrain; optional fins and successive downstream catchments are admitted whole. Stone valleys use varied tilted slab arches; rifts retain a dominant separated upper monolith.
+
+### Biome selection and saved codec
+
+`TerrainBiomeSource` is registered as `isekaiexpansion:terrain`. It first asks the delegate, then checks exotic ownership before vanilla cave preservation. Owned exotic volumes replace Minecraft biomes, including `lush_caves`, `dripstone_caves` and `deep_dark`; this branch preserves nonvanilla biomes. Cavern ownership includes a `24`-block floor/roof buffer inside the complete footprint and requires more than `24` blocks of chamber clearance. Skyreach retains its altitude band. Outside exotic ownership, ordinary grounded replacement still preserves explicit vanilla cave biomes. Prepared woodland ownership precedes the later generic nonvanilla exclusion, while Great Plains explicitly preserves nonvanilla biomes.
+
+Outside those paths, no engine or no eligible ownership returns the delegate biome. Do not claim all third-party biomes are preserved by every branch: the order above matters.
+
+### Saved biome-source fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | Required | isekaiexpansion:terrain selects the registered codec. |
+| `delegate` | `biome-source object` | Required | BiomeSource codec; bootstrap supplies the Overworld multi-noise source. |
+| `terrain_biomes` | `array<biome reference>` | Required | Exactly 20 entries, matching TerrainFamily enum order and each expected key. |
+| `replaceable_biomes` | `array<string>` | Required | Exact original IDs; copied into a set and written in sorted order. |
+| `exotic_biomes` | `array<biome reference>` | Required | No duplicate keys. On bind, every configured exotic palette biome must exist here when exotic weight sum is positive. |
+
+### World-tree reservation lifecycle
+
+`WorldTreeState` directly uses the Overworld persistent-state key `isekaiexpansion_world_tree`, producing `data/isekaiexpansion_world_tree.dat`. It is outside the shared versioned helper directory. The state stores one reservation, not a generated-chunk bitmap or an entire material palette.
+
+When no reservation exists, `LandmarkFrontier` inspects existing `r.<x>.<z>.mca` filenames. If any exist, it chooses an origin beyond their bounds, including search radius, biome radius and a `2048`-block margin. It does not inspect whether individual chunks inside a region are occupied. Invalid region coordinates or no supported frontier cause an I/O failure that aborts safe reservation.
+
+The planner searches bounded seed-stable candidates and local refinements, scoring geography instead of abandoning the unique tree when its preferred habitat is unavailable. It records the selected prepared region and explicitly saves the manager before spawn generation. On reload, saved coordinates, geometry and foundation policy are restored; materials come from the current environment.
+
+The reader records validation failures in an `invalid` state instead of throwing inside the decoder. Attachment then throws, preventing the persistent-state manager from silently replacing a malformed reservation. Restoration also rejects a tree that no longer fits the dimension or a conflicting site already sampled before attachment.
+
+### World-tree payload
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `version` | `int` | 1 | Must equal 1; otherwise records an invalid state that aborts attachment. |
+| `selected` | `byte boolean` | Required | Missing/wrong type is invalid; false leaves an unselected state for later selection. |
+| `prepared` | `byte boolean` | Required when selected | Foundation policy: prepared terrain or legacy habitat mask. |
+| `geometryVersion` | `int` | 1 | Saved design must use version 1; missing reads 0 and rejects. |
+| `branchCount` | `int` | Required when selected | 8–24 main branches; missing 0 is invalid. |
+| `branchDepth` | `int` | Required when selected | 1–3 recursive levels; missing 0 is invalid. |
+| `barkRelief` | `double` | Required double tag | Finite 0–0.4; integer NBT is not accepted for this field. |
+| `x, z` | `int` | 0 | Chunk aligned (multiples of 16), absolute value at most 29000000. |
+| `top` | `int` | 0 | At restore, below dimension maxY and at least base + 338. |
+| `foliageDepth` | `int` | Required when selected | 2–16; missing 0 is invalid. |
+| `base` | `double` | 0 | Finite; restore additionally requires at least sea level. |
+| `biomeRadius` | `double` | Required when selected | Finite 800–2400; missing 0 is invalid. |
+| `crownRadius` | `double` | Required when selected | Finite 192–0.45 × biomeRadius; missing 0 is invalid. |
+
+### Client atmosphere
+
+`ExoticAtmosphere` is a client cache fed by the active config view. It samples a `3 × 3` grid at the camera's Y with `24`-block spacing, using palette-biome prefixes and weighted interpolation. World changes reset blend/timeline state; non-Overworld views zero the weights. It never changes server time or weather.
+
+`StormTimeline` schedules local flashes from configured seconds; thunder follows the flash by `28` ticks (`1.4` seconds). Backward world time or inactive crystal blending resets the schedule. Paused clients skip timeline ticking. The fallback sky is suppressed whenever Iris has an active shader pack, including an unsupported pack, and otherwise skips foggy/submerged views.
+
+## Contracts
+
+| Boundary | Contract |
+| --- | --- |
+| Configuration | Capture before registry/generator construction. Do not mutate a live environment as a terrain reload mechanism. |
+| Persistence | Attach the saved tree before sampling can choose a conflicting reservation. New search options do not migrate saved geometry. |
+| Parallel generation | Keep plans immutable after construction and scratch buffers thread-local/caller-owned. Do not load neighbouring chunks from density or decoration. |
+| Geometry and biome agreement | Admission, density, surface palettes, decoration and locator confirmation must describe the same ownership. |
+| Location | Capture world/generator/border state on the server thread; the returned search callable uses descriptors and checks interruption. Results are horizontal positions, not safe teleports. |
+| Disabled content | Disabled generation still uses the bootstrap/preset. Zero weights do not bypass palette/config validation. |
+| Save compatibility | Preserve family order and palette IDs. Missing configured exotic bindings can reject an older saved biome source on bind. |
+
+The project compiles its optional Iris integration against `1.7.6+1.20.1`. This pins the integration target, not proof that arbitrary current shader-pack versions match the recipe.
+
+## Extending it
+
+Add a family coherently across the enum/shape, settings snapshot, admission weights, geometry, biome/palette registration, surfaces, decoration and localisation. `TerrainBiomeSource` serialises the ordered family list, so inserting/reordering enum members changes its validation contract. Add numerical and chunk-order checks for new geometry rather than relying only on a screenshot.
+
+### Shader overlay and recipe
+
+`ExoticShaderSourceMixin` overlays Iris include reads before include/option discovery. `ExoticShaderBridge` consults the local toggle and the JVM property `isekaiexpansion.exoticShaders`; a case-insensitive value `false` disables preparation. It does not change pack selection or write pack files.
+
+The patcher detects `lib/ROBOBO_sky.glsl` and `lib/scene_controller.glsl`, then distinguishes Eclipse from Bliss using scene-controller markers. Renaming an archive is irrelevant to structural detection. Each input is capped at `4` MiB and CRLF is normalised. Diagnostics include a `16`-hex-character SHA-256 prefix over names and source text.
+
+All edits happen in a temporary source map. Statuses are `PATCHED`, `ALREADY_PATCHED`, `UNSUPPORTED` and `UNRELATED`. Ambiguous family markers, missing/ambiguous anchors, unreadable files or selected parsing errors return no overlay. A detected existing marker is retained only when settings includes the helper and the helper file exists; this is a structural check, not a full semantic audit of a previous patch.
+
+The bundled files are `assets/isekaiexpansion/shaderpatch/exotic-patches.json` and `exotic_environment.glsl`. This is an internal build resource, not a public data-pack loader. Unknown operation types reject; there is no general unknown-key validation, and malformed internal recipes must be caught during development rather than assumed to recover from every exception.
+
+### Shader recipe fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `revision` | `integer` | Required | Included in success diagnostics; current bundled revision is 5. |
+| `files` | `array<string>` | Required | Common source paths relative to the shader root; all must be readable. |
+| `familyFiles` | `object` | Required | Maps detected family to additional source paths. |
+| `familyFiles.eclipse, familyFiles.bliss` | `array<string>` | Required for selected family | Additional files included before patching and final fingerprinting. |
+| `common` | `array<object>` | Required | Ordered operations applied before the family-specific list. |
+| `eclipse, bliss` | `array<object>` | Required for selected family | Ordered family-specific operations. |
+| `operations[].file` | `string` | Required | Key of an already-read source. operations means any of the three operation arrays. |
+| `operations[].type` | `string` | Required | prepend, scaleSun, replace, functionStart, functionEnd or functionReplace. Unknown operation rejects. |
+| `operations[].text` | `string` | "" | Inserted or replacement source; optional for every operation. |
+| `operations[].count` | `integer` | Required for scaleSun | Exact number of matched sunColorBase definitions; mismatch rejects. |
+| `operations[].anchor` | `string` | Required for replace/functionReplace | Unique noncomment literal, globally or inside the selected function. |
+| `operations[].function` | `string` | Required for function operations | Unique signature followed by a balanced brace body. |
+
+### Shader uniforms
+
+| Uniform | Type | Meaning |
+| --- | --- | --- |
+| `isekaiSurfaceWeights` | `vec4` | Volcano, firmament, stone valley and rift weights, multiplied by server atmosphereStrength. |
+| `isekaiCavernWeights` | `vec4` | Infernal, azure, toxic and worldroot weights in that order. |
+| `isekaiCavernFloor` | `float` | Smoothed nearby floor Y for low mist and the firmament cloud shelf; sampled from loaded client blocks. |
+| `isekaiBiomeWeights` | `vec4` | Crystal, sky, aquapolis, tundra blend weights in that order. |
+| `isekaiAuroraPurple`, `isekaiAuroraGreen`, `isekaiAuroraCrimson` | `vec3` | Smoothed palette RGB colours. |
+| `isekaiAnimationTime` | `float` | Monotonic seconds modulo `512`. |
+| `isekaiCrystalPulse` | `float` | Local flash pulse multiplied by configured storm intensity. |
+| `isekaiAuroraStrength` | `float` | Active tundra intensity. |
+| `isekaiCloudSeaHeight` | `float` | Configured island altitude minus cloud-sea depth. |
+
+Uniforms update per frame. The helper normalises combined biome weights, adds local sky/reflection effects and supplies cloud/fog contributions. The recipe's exact GLSL anchors are part of the compatibility contract; a known pack name alone is insufficient.
+
+## Verifying
+
+Run `tools/terrain/check-exotic-volumes.ps1 -Export` for geometry, native cave cover and configuration extremes; `tools/terrain/render-exotic-volumes.py` renders sampled roof cutaways. `checkExoticTerrain` verifies RTF placement, Deep Dark exclusion, fertile Firmament caps, pool beds and water beneath bridges. `checkTerrainLocate` measures cold searches across multiple seeds and confirms the same family with a fresh generation engine; `checkTerrainCoverage` checks discovery distance. Run `checkSkyHydrology` for Skyreach and again with `-PhydrologyFamily=GARDEN_OF_THE_FIRMAMENT` and `-PhydrologyFamily=RIFTBORNE_MONOLITH` for their native-height/aquifer checks. The Riftborne check also requires empty space between the pedestal and suspended rock; `check-math.ps1` checks detached-volume blending against rising native terrain. `checkExoticShaders` accepts actual Eclipse/Bliss paths through `shaderRoots`, and `checkExoticGpu` renders surface skies and cavern mist. These offline checks do not replace an in-game Iris/Arona visual pass.
+
+- Create default single-player and dedicated-server worlds; verify owned registry entries, the RTF environment and Overworld source without opening the customisation screen.
+- Exercise invalid config, palette names/material types and combined geometry limits, including disabled families with invalid settings.
+- Compare positive/negative placement cells and different generation orders for identical seeds. Check full arches, blade separation, basin excavation and sky volumes without altered ground hydrology.
+- Generate adjacent chunks in opposite orders; inspect water sheets, vines, bridges, tree roots and crown seams without neighbouring chunk requests.
+- Restore the tree after config changes; test missing/invalid NBT, incompatible build height, early sampling and new reservation outside existing region files.
+- Test cave biomes, nonvanilla biomes, prepared woodland and sky altitude transitions against the documented branch order.
+- Compare descriptor search with resulting biomes, cancellation, world borders, disabled families and no-match results.
+- Reload supported directory/ZIP shader packs and renamed copies; test existing/partial markers, ambiguous anchors, oversized inputs, disabled overlays and an unsupported active pack.
+- Check sky/reflection consistency, biome-edge blending, pause/backward time, thunder delay and disconnect/world switches. These are acceptance procedures, not claims that a gameplay or visual session was run.
+
+## Related
+
+- [Terrain and landmarks](/en/wiki/terrain/) — player-visible families and commands.
+- [Terrain configuration](/en/wiki/terrain-configuration/) — every setting and palette field.
+- [Persistent state](/en/dev/persistent-state/) — shared storage conventions and the tree exception.
+- [Wayfinding API](/en/dev/wayfinding-api/) — asynchronous location requests.

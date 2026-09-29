@@ -1,0 +1,123 @@
+---
+title: "Emoji data"
+description: "Emoji catalogues, sprite frames, motion parameters and client resource validation."
+category: data
+order: 50
+updated: 2026-09-18
+---
+
+An emoji definition combines an image, translation keys and motion into a sticker. The server owns the catalogue and playback requests; each client resolves the image from its resource packs, so distribute the data and matching image assets together.
+
+## Where the files live
+
+Definitions live at `data/<namespace>/emojis/<path>.json`, giving emoji ID `<namespace>:<path>`. Images live under `assets/<namespace>/textures/...`; texture IDs retain the `textures/` prefix and extension. Resource-pack/data-pack priority selects same-ID resources; fields are not merged.
+
+## Minimal example
+
+This retains the required fields of bundled `isekaiexpansion:evelina/smile` and references its existing texture:
+
+```json
+{
+  "texture": "isekaiexpansion:textures/gui/emoji/evelina/evelinasmile.png",
+  "title_key": "emoji.isekaiexpansion.smile.title",
+  "caption_key": "emoji.isekaiexpansion.smile.caption",
+  "category_key": "emoji.isekaiexpansion.category.positive"
+}
+```
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `texture` | `identifier` | required | Resource-pack texture ID including `textures/` and `.png`. Invalid ID syntax rejects the definition; missing images are handled on the client. |
+| `title_key` | `string` | required | Nonblank title translation key; its translation is not validated by the data loader. |
+| `caption_key` | `string` | required | Nonblank caption translation key. |
+| `category_key` | `string` | required | Nonblank category translation key. |
+| `order` | `integer` | `0` | Display sort order, ascending; ties use the emoji ID string. No explicit bounds. |
+| `duration_ticks` | `integer` | `70` | Picker playback duration: 70 ticks (3.5 seconds). Clamped to 20–200 ticks (1–10 seconds). |
+| `frame_width` | `integer` | `0` | Frame width in pixels. Negative becomes 0; 0 uses texture width. Positive values cap at texture width. |
+| `frame_height` | `integer` | `0` | Frame height in pixels. Negative becomes 0; 0 uses texture height. Positive values cap at texture height. |
+| `frame_count` | `integer` | `1` | At least 1; the client caps it at the complete grid cells available in the texture. |
+| `frame_time_ms` | `integer` | `80` | Milliseconds per frame, clamped to at least 1. |
+| `loop` | `boolean` | `true` | Loops the sprite frames. False holds the last frame. |
+| `animation` | `object` | `sway_wiggle` | Object or type-name string. Missing/null selects the default sway; a string uses that type's defaults. |
+| `animation.type` | `enum(none, sway_wiggle, float_bob, pulse, tremble, bounce, elastic_pop, squash_stretch)` | `sway_wiggle` | Type name, trimmed and case-insensitive. Unknown names reject the catalogue reload. |
+| `animation.period_ticks` | `number` | type default | Period in ticks; clamped to at least 1 tick (0.05 seconds). Defaults below include seconds. |
+| `animation.offset_pixels` | `number` | type default | Movement amplitude in pixels; minimum 0. |
+| `animation.max_scale` | `number` | type default | Upper scale parameter; minimum 0.05, no enforced ordering against min_scale. |
+| `animation.min_scale` | `number` | type default | Lower scale parameter; minimum 0.05. |
+| `animation.rotation_degrees` | `number` | type default | Nonnegative rotation amplitude in degrees. Tremble additionally caps its used amplitude at 4 degrees. |
+| `animation.squash` | `number` | type default | Squash/stretch parameter, clamped to 0–0.45. |
+| `animation.loop` | `boolean` | `true` | Loops icon motion independently of sprite looping. False restores the identity pose after its period. |
+
+### Motion defaults
+
+Every type defaults to motion looping `true`. Columns correspond to the animation fields above; period is ticks with seconds.
+
+| Type | Period | Offset | Max scale | Min scale | Rotation | Squash |
+| --- | --- | --- | --- | --- | --- | --- |
+| `none` | 30 (1.5 s) | 0 | 1 | 1 | 0 | 0 |
+| `sway_wiggle` | 30 (1.5 s) | 0 | 1 | 1 | 15 | 0 |
+| `float_bob` | 60 (3 s) | 4 | 1 | 1 | 0 | 0 |
+| `pulse` | 28 (1.4 s) | 0 | 1.2 | 1 | 0 | 0 |
+| `tremble` | 8 (0.4 s) | 2 | 1 | 1 | 3 | 0 |
+| `bounce` | 24 (1.2 s) | 8 | 1 | 1 | 0 | 0 |
+| `elastic_pop` | 26 (1.3 s) | 0 | 1.3 | 0.82 | 0 | 0 |
+| `squash_stretch` | 24 (1.2 s) | 9 | 1 | 1 | 0 | 0.18 |
+
+
+### Dialogue playback options
+
+The `isekaiexpansion:emoji` dialogue action accepts the following fields inside its action value. These are playback fields, not keys in an emoji definition.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `emoji` | `identifier` | `required` | Catalogue ID. Malformed syntax rejects the action; an unknown ID produces no playback. |
+| `duration_ticks` | `integer` | `70` | At least 1 tick (0.05 seconds) after normalisation; default 70 ticks (3.5 seconds). Independent of definition duration. |
+| `priority` | `integer` | `50` | Clamped to 0–1000 when playback options are built. |
+| `policy` | `string` | `replace` | replace, queue or force; trimmed and case-insensitive. Unknown names become replace. |
+| `target` | `string` | `dialogue_entity` | dialogue_entity, player or both. Unknown names become dialogue_entity. A missing/nonliving dialogue entity is skipped; both still targets the player. |
+| `interruptible` | `boolean` | `true` | Allows ordinary replacement by sufficient priority; force overrides this flag. |
+| `interrupt_on_damage` | `boolean` | `true` | Enables server damage interruption of the latest request. |
+
+Missing optional fields use the listed defaults; missing emoji or wrong field types fail action decoding. Extra fields are ignored. See [Emoji playback API](/en/dev/emoji-api/) for the queue and damage-interruption contract.
+
+## Full example
+
+The bundled smile changes duration to 74 ticks (3.7 seconds), sway period to 48 ticks (2.4 seconds) and rotation amplitude to 2.5 degrees:
+
+```json
+{
+  "texture": "isekaiexpansion:textures/gui/emoji/evelina/evelinasmile.png",
+  "title_key": "emoji.isekaiexpansion.smile.title",
+  "caption_key": "emoji.isekaiexpansion.smile.caption",
+  "category_key": "emoji.isekaiexpansion.category.positive",
+  "order": 20,
+  "duration_ticks": 74,
+  "animation": {
+    "type": "sway_wiggle",
+    "period_ticks": 48,
+    "rotation_degrees": 2.5
+  }
+}
+```
+
+Sprite frames advance left to right, then top to bottom. With frame sizes omitted, the entire image is one grid cell; provide dimensions matching the image layout for multiple frames. Incomplete edge cells do not contribute available frames.
+
+## Validation
+
+Missing required keys, blank translation keys, invalid texture IDs, wrong types in consumed fields or unknown motion types accumulate into a catalogue reload error. The loader throws before replacement, retaining the previous catalogue when this definition-loading stage fails. Unknown fields are ignored; extra keys cannot change playback priority or queue policy. An empty object lacks required fields; empty text is invalid JSON.
+
+Duration, frame dimensions/count/timing and animation parameters are corrected as listed in the field table rather than rejected for finite out-of-range values. Numeric reads do not provide exact-integer or uniform finite-number validation. Use finite JSON numbers of the stated type; do not rely on fraction truncation or oversized-exponent conversion.
+
+The server does not verify image existence, dimensions or translations. A client with a missing or undecodable image logs a warning and creates no usable image definition for that emoji; other emojis remain available.
+
+## Reloading
+
+`/reload` reloads the server catalogue. Players receive it on join and after successful data-pack reload. Receiving a catalogue rebuilds client image definitions, as does client resource reload. Image bytes are not sent in the catalogue packet; supply a resource pack separately.
+
+Picker requests use the definition's duration and have a server cooldown of 30 ticks (1.5 seconds). Other playback entry points can supply their own duration, so `duration_ticks` is not a mandatory lifetime for every playback request.
+
+## Related
+
+For screen-space text rendering, see [Damage numbers](/en/dev/damage-numbers/); for entity lifecycle visuals, see [Entity FX](/en/dev/entity-fx/).

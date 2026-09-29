@@ -1,0 +1,77 @@
+---
+title: "锻造配方数据"
+description: "锻造配方的顺序材料、步骤强度、输出 NBT 与校验边界。"
+category: data
+order: 182
+updated: 2026-09-26
+---
+
+锻造配方将有序材料组转换为一个输出物品堆叠。装备锻造砧通过绑定图纸引用配方；编写配方本身不会自动让玩家解锁图纸。
+
+## 文件放在哪里
+
+使用 `data/<namespace>/recipes/<path>.json`，类型为 `isekaiexpansion:forgery`。路径确定配方 ID；`ise_forgery/` 只是内置内容的目录惯例，不是强制前缀。Minecraft 的配方资源加载负责同 ID 覆盖，优先级较高的数据包取代较低者，不会合并步骤。
+
+内置示例为 `src/main/generated/data/isekaiexpansion/recipes/ise_forgery/minecraft_diamond_sword.json`。下例从其材料结构精简而来，仅展示一个步骤。
+
+## 最小示例
+
+```json
+{
+  "type": "isekaiexpansion:forgery",
+  "result": { "item": "minecraft:diamond_sword" },
+  "steps": [
+    {
+      "ingredients": [
+        { "item": "minecraft:iron_ingot", "count": 2 },
+        { "item": "minecraft:stick" }
+      ]
+    }
+  ]
+}
+```
+
+未指定步骤强度时使用 200。若保存为 `data/example/recipes/demo_blade.json`，图纸应引用 `example:demo_blade`。
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `string` | 必填 | 固定为 `isekaiexpansion:forgery`。 |
+| `group` | `string` | `""` | 配方分组标签，不负责选择或解锁图纸。 |
+| `result` | `object` | 必填 | 所有步骤完成后的输出物品堆叠。 |
+| `result.item` | `string` | 必填 | 已注册的物品标识符。 |
+| `result.count` | `integer` | 1 | 输出数量。此读取器不检查正数或堆叠上限；应使用符合该物品上限的正数。 |
+| `result.set_nbt` | `string or object` | 缺省 | SNBT 复合标签字符串，或按复合标签解析的 JSON 对象，赋给输出物品。无效 SNBT 抛出异常；空输出跳过解析。需明确数字标签类型时使用 SNBT。 |
+| `steps` | `array<object>` | 必填 | 有序步骤。读取器不限制长度；至少提供 1 步。绑定空列表后，砧索引当前步骤会出错。 |
+| `steps[].ingredients` | `array<object>` | 必填 | 有序材料项。砧最多容纳 9 组可用材料。每项必须是对象，不能直接使用备选数组。 |
+| `steps[].ingredients[].item` | `string` | item/tag 二选一 | 已注册物品，由 Minecraft 材料解析器处理。 |
+| `steps[].ingredients[].tag` | `string` | item/tag 二选一 | 替代 `item` 的物品标签，不可同时指定。匹配检查成员关系，不比较 NBT。 |
+| `steps[].ingredients[].count` | `integer` | 1 | 要求的堆叠数量，必须完全一致。本地不校验范围；应处于 1 至所选物品最大堆叠数之间。 |
+| `steps[].display_item` | `string` | 缺省：空 | 首步骤之后显示的已注册物品标识符。显示数量固定为 1，不是材料或产物。 |
+| `steps[].should_render_ingredients` | `boolean` | true | 后续步骤是否渲染材料。首步骤即使为 false 也仍然显示。 |
+| `steps[].forgery_progress` | `integer` | 200 | 所需累计锻造强度，不是刻数。不做范围检查：0 或负值可能在材料匹配后立即完成。 |
+
+
+## 校验
+
+必填对象、数组或字符串缺失，结构类型错误，或输出及显示物品无法解析时，读取会抛出异常。此读取器没有捕获并保留旧配方的分支；外层的 Minecraft 配方加载器处理失败。未知扩展字段不被本地读取器检查，也不会改变锻造流程。
+
+材料对象交给 Minecraft 的材料解析器处理；空材料会被跳过。此层不校验步骤数、材料数、数量或强度的合理性，因此“能被读取”不等于“能够完成”。
+
+- **库存容量**：每步最多使用 9 个实际堆叠，数量必须与配方完全一致，不能多放。
+- **材料顺序**：初步匹配会跳过空槽，但最终完成检查按从首槽开始的连续槽位比较。按顺序放入材料，避免中间留空。
+- **相同材料**：兼容堆叠会自动合并。不要把本应合并的一组材料拆成多个相邻要求；超过物品堆叠上限的要求也无法正常满足。
+- **空步骤列表**：读取时不拒绝，但绑定后索引当前步骤会出错。不存在“最多 10 步”的读取器规则。
+- **非正强度**：匹配材料后可能无需敲击便推进步骤。常规制作应使用正强度。
+- **输出 NBT**：`set_nbt` 接受复合标签；解析失败会拒绝该配方。JSON 数字无法显式表达所有 NBT 数字类型。
+
+## 重载
+
+此类型加入 Minecraft 标准配方系统，随服务端配方重载更新；客户端通过配方同步接收分组、步骤、材料数量、显示物品、强度和完整输出堆叠。砧保存配方 ID 与当前步骤，而不是旧配方快照。
+
+不要在进行中的批次上缩短步骤列表。砧不会在重载后自动重置或迁移当前步骤；先重置批次，再用新配方重试。移除绑定配方会使普通锻造无法匹配，绑定的图纸仍留在砧内。
+
+## 相关页面
+
+[装备锻造](/zh-cn/wiki/forgery/)介绍操作，[图纸数据](/zh-cn/wiki/blueprint-data/)介绍计划与配方的关联。[锻造运行时](/zh-cn/dev/forgery-runtime/)说明保存状态及开发约定。

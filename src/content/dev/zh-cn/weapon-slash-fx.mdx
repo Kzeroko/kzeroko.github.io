@@ -1,0 +1,224 @@
+---
+title: "武器斩击特效"
+description: "Better Combat 攻击轨迹、完整资源包配置档、几何、材质与客户端事件。"
+category: client
+order: 155
+updated: 2026-09-26
+---
+
+武器斩击特效根据实际渲染的武器运动生成双通道轨迹。它观察玩家与生物的 Better Combat 攻击动画，分类后只绘制符合条件的斩击；即使关闭内置轨迹，开始事件仍可供扩展使用。
+
+## 它做什么
+
+实现由 `client.fx.weaponslash` 持有，仅负责客户端呈现，不计算伤害，也不持有服务端游戏状态或存档数据。配置档位于客户端资源 `assets/<namespace>/weapon_slash_fx/<path>.json`，对应 ID 为 `<namespace>:<path>`。纹理是普通资源包资源。
+
+公开事件为 `api.client.fx.WeaponAttackFxEvents.ATTACK_ANIMATION_START`。`WeaponSlashFx`、`WeaponSlashPoseCapture` 与注册表是实现类，不是公共 API 门面。Better Combat 提供玩家攻击动画数据，Better Mob Combat 桥接为生物调用同一路径。当前仓库使用 Better Mob Combat 1.3.1 与 Satin 1.14.0。
+
+## 运行时模型
+
+### 攻击与渲染生命周期
+
+每次动画开始时，先解析攻击手物品、Better Combat 类别、配置档与视觉类型，再触发事件。时长为正有限 tick 值，否则为 0；前摇为有限值时限制到 0–1，否则为 0。事件先于实体启用、时长、排除项和斩击类型检查执行。每次攻击只触发一次，不会为第二只手的轨迹再次触发。监听器异常不会被本地捕获，可能打断后续监听器与轨迹设置。
+
+新攻击会停止该实体旧轨迹的采集，保留已有采样继续淡出。生成轨迹要求有匹配配置档、类型为 `SLASH`、武器不在排除项内、玩家/生物开关启用且时长为正。实际采集终点必须大于起点。若动画同时启用 `leftItem` 与 `rightItem`、攻击不是 `TWO_HANDED`，且双手武器都有非双手型 Better Combat 属性，则每只手独立解析配置档与排除项。
+
+世界渲染开始时捕获逆视图与摄像机，实体之后绘制世界轨迹，渲染结束时关闭采集窗口。第一人称手部轨迹使用独立通道并直接绘制到主目标；Player Animator 的第一人称玩家模型通道与普通第三人称渲染分开处理。Iris 阴影通道忽略。加入、断线与世界切换会清空轨迹；同时关闭两类实体开关也会清空系统。
+
+采集遵守配置档和本地视角开关，距离取两者配置的较小值。人形变身渲染代理会解析回宿主。世界采样相对移动中的实体锚点保存，因此保留的轨迹会跟随实体移动，而不是留在原世界位置。
+
+### 几何与采样
+
+自动锚点优先使用平面生成模型的可见精灵图轮廓，再使用渲染顶点采集。平面模型分析会检查动画各帧的非透明像素并缓存凸轮廓；内置或有深度的模型走顶点路径。顶点采集保留最多 32 个最远且不同的候选点，再对平方距离不低于最远值的 0.98、方向相似度至少 0.9 的候选点取平均。无法探测时使用经变换的模型空间根点/尖端坐标；没有可用物品变换矩阵时不产生采样。
+
+采样间隔为`max(0.0001, min(duration × (end − start), lifetime) / (max_samples − 2))` ticks。每条轨迹都为尾部裁切邻点和可替换的实时头部预留容量。慢速攻击按可见寿命内的运动采样，不再把整个预算分散到攻击全程。同一时间的重复捕获不会增加采样。
+
+采集会保留窗口开始前的最后一个姿态，并允许捕获窗口结束后最多1 tick（0.05秒）的姿态。轨迹用窗口两侧的观测插值出精确起止位置，前摇姿态不参与绘制。如果没有一对可用观测，就无法重建该窗口内的斩击。
+
+普通挥砍把刀身方向按旋转插值，长度单独插值，手部沿对应圆弧移动；沿旋转轴的位移保持线性。因此，即使捕获间隔较大，刀身也不会向手部收缩。无效或零长度姿态会清空历史；时间倒退、间隔超过所选寿命、根点位移或刀身长度变化过大，以及无法由旋转动画解释的超过150度的方向变化，都会重新开始轨迹。`max_segment_distance`限制的是根点位移和刀身长度变化，长武器尖端的正常圆弧行程可以超过该值。
+
+世界空间旋转重建检查已启用且至少有2个关键帧的body/torso偏航通道，选择展开后旋转量较大的通道。旋转要求净转角至少π弧度（180度），且净转角与总角度行程之比至少为0.75。同一tick编写的完整转圈会保留。统一的姿态插值器先移除编写的偏航，再插值剩余运动，最后按偏航缓动重新旋转。旋转引导遵循Better Combat的攻击镜像：副手选择和左惯用手各自反转方向，双武器轨迹使用同一方向。第一人称轨迹使用实测旋转和slash样式；在手部与玩家模型坐标之间切换时，会清空第一人称历史。
+
+网格按时间距离加权邻点来平滑内部姿态，再恢复每个实测刀身长度。曲线以6度或0.12格为细分目标，仅有两个姿态时至少生成8段，整条轨迹最多129个截面。宽轨迹和窄边缘共用网格，每个材质最多128个四边形，每条轨迹最多提交1024个顶点。两端保持在实测或窗口裁切后的姿态上。
+
+两端收窄和纵向UV都按累计扫过距离计算，每段取根点与尖端行程中的较大值。无论攻击时长如何，完整遮罩都会覆盖当前可见轨迹。短轨迹的宽度随行程增长，达到配置的内半径后不再加宽。过期清理会保留寿命边界之前的一个邻点，网格在边界处裁切，因此尾部能连续移动。透明度仍按剩余寿命的smoothstep淡出，停止采集后继续消失。达到轨迹数量上限时优先移除已停止采集的轨迹。
+
+## 约定
+
+### 本地配置
+
+以下 `IsekaiConfig` 字段来自 `IsekaiExpansion.localConfig()`，分类为 `weapon_slash_fx`。它们控制轨迹生成与渲染，不阻止攻击事件。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `weaponSlashFxPlayersEnabled` | `boolean` | true | 启用玩家轨迹。 |
+| `weaponSlashFxMobsEnabled` | `boolean` | true | 启用生物轨迹。 |
+| `weaponSlashFxFirstPerson` | `boolean` | true | 与配置档开关共同控制第一人称采集。 |
+| `weaponSlashFxThirdPerson` | `boolean` | true | 与配置档开关共同控制第三人称采集。 |
+| `weaponSlashFxOpacityPercent` | `integer` | 100 | 限制为 0–100%，乘到材质透明度。 |
+| `weaponSlashFxRenderDistance` | `integer` | 64 | 限制为 8–256 格；采集距离取它与配置档距离的较小值。 |
+| `weaponSlashFxMaxActiveTrails` | `integer` | 64 | 限制为 8–128 条；优先移除旧的已停止轨迹，否则移除最旧活动轨迹。 |
+| `weaponSlashFxExcludedItems` | `array<string>` | ["isekaiexpansion:crescent_rose"] | 精确物品 ID，去除首尾空白；空白/null 项忽略，无效 ID 警告后忽略。查询时检测改动并重建排除快照。 |
+
+### 配置档选择与继承
+
+配置档按优先级降序、具体度降序、ID 升序排序，首个匹配项生效。物品 ID 组增加 1000 具体度，标签 500，精确动画 200，动画正则 100，类别 50。非空选择器组之间为 AND，同组条目之间为 OR；精确动画与正则共同组成一个 OR 组。
+
+继承会深度合并对象。数组、基本值与 null 直接替换父值，不追加数组。`extends` 在解析前移除。子项空对象保留继承的内部键；null 或类型错误的嵌套对象则可能回退到加载器默认值。未覆盖的选择器与优先级也会继承。
+
+最小合法配置档为 `{}`，但它以优先级 0 匹配全部内容，会压过内置后备配置。需要局部修改时应使用有明确目标的子项：
+
+```json
+{
+  "extends": "isekaiexpansion:default_hybrid",
+  "priority": 100,
+  "selector": { "items": ["minecraft:diamond_sword"] },
+  "sheet": { "color": "#5CCBFFE0" }
+}
+```
+
+下表是资源继承前的加载器默认值，不是内置后备配置的最终值。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `extends` | `identifier` | Absent: no parent | 递归继承另一个配置档 ID，不是文件路径；父项缺失或循环继承会拒绝子项。 |
+| `priority` | `integer` | 0 | 数值越高越优先，先于选择器具体度比较。 |
+| `selector` | `object` | {} | 空选择器匹配所有物品、动画和类别；见选择器表。 |
+| `kind` | `enum(auto, slash, stab, slam, other, none)` | auto | 去除首尾空白，不区分大小写；未知值拒绝配置档。只有 slash 生成内置轨迹。 |
+| `root` | `array<number>` | [0.28, 0.18, 0.5] | 模型空间后备根点，3 个有限坐标，不限制数值范围。 |
+| `tip` | `array<number>` | [0.76, 0.92, 0.5] | 模型空间后备尖端，解析规则与 root 相同。 |
+| `anchors` | `object` | {} | 自动探测尖端或使用显式模型坐标。 |
+| `anchors.mode` | `enum(auto, model_space)` | auto | 未知字符串回退到 auto；自动模式在可用时使用手部原点与探测出的可见尖端。 |
+| `anchors.root_inset` | `number` | 0 | 限制为探测手部到尖端长度的 0–0.9，仅自动模式使用。 |
+| `anchors.tip_inset` | `number` | 0 | 限制为 0–0.9；端点至少为根部内缩 + 0.01，再限制到 0.01–1。 |
+| `window` | `object` | {} | 归一化攻击进度采集窗口。 |
+| `window.use_upswing_start` | `boolean` | true | 使用同步的前摇进度，而不是编写的起点。 |
+| `window.start` | `number` | 0.35 | 限制为 0–1；仅在关闭前摇起点时使用。 |
+| `window.start_offset` | `number` | -0.02 | 限制为 −1–1，加到所选起点后再限制为 0–1。 |
+| `window.end` | `number` | 0.96 | 限制为 0–1；终点不大于实际起点时不生成轨迹。 |
+| `max_samples` | `integer` | 28 | 限制为 4–64，包含可替换的实时头部采样。 |
+| `min_sample_distance` | `number` | 0.004 | 正有限距离，单位格；两个端点移动距离都小于它时，才跳过固定采样。 |
+| `max_segment_distance` | `number` | 3 | 正有限距离，单位格；根点位移或刀身长度变化超过此值时重置历史。检查前会先移除编写的旋转偏航。 |
+| `geometry` | `object` | {} | 包含普通斩击与旋转的独立样式。 |
+| `geometry.slash` | `object` | Default slash style | 用于实测旋转轨迹，包括全部第一人称轨迹。 |
+| `geometry.spin` | `object` | Default spin style | 用于符合条件的世界空间身体/躯干旋转轨迹。 |
+| `max_distance` | `number` | 64 | 先要求正有限值，再限制到 4–256 格。 |
+| `first_person` | `boolean` | true | 配置档的第一人称采集许可。 |
+| `third_person` | `boolean` | true | 配置档的第三人称采集许可。 |
+| `sheet` | `object` | Default sheet material | 宽轨迹材质，见材质表。 |
+| `edge` | `object` | Default edge material | 外侧窄轨迹材质，见材质表。 |
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `selector.items` | `string or array<string>` | [] | 精确物品 ID，任一项匹配即可；无效 ID 拒绝配置档。 |
+| `selector.item_tags` | `string or array<string>` | [] | 不带 # 的物品标签 ID，匹配任一标签即可。 |
+| `selector.animations` | `string or array<string>` | [] | 精确且区分大小写的动画 ID。 |
+| `selector.animation_patterns` | `string or array<string>` | [] | Java 正则匹配整个动画 ID；无效表达式拒绝配置档。 |
+| `selector.categories` | `string or array<string>` | [] | 去除首尾空白并转小写的 Better Combat 类别；运行时类别缺失时不能通过非空列表。 |
+
+选择器缺失或为 null 时成为空集合。基本值转换为字符串，数组去重并移除空字符串；只有类别会去除首尾空白并转小写。语法合法但未注册的物品/标签 ID 会接受，不过可能永远不匹配。正则匹配完整字符串，不是子串搜索。
+
+### 几何字段
+
+每一行都可用于 `geometry.slash` 或 `geometry.spin`。非有限值回退到对应样式默认值；非正寿命先回退再限制范围。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `inner_radius` | `number` | slash 0.28; spin 0.42 | 限制为 0–0.98；沿根点到尖端的比例，决定宽轨迹内边缘。 |
+| `edge_inner_radius` | `number` | slash 0.72; spin 0.76 | 限制为 inner_radius–0.995，决定窄轨迹内边缘。 |
+| `tail_taper` | `number` | slash 0.22; spin 0.10 | 限制为 0.01–0.49，控制旧端平滑收窄。 |
+| `head_taper` | `number` | slash 0.10; spin 0.08 | 限制为 0.01–0.49，控制实时端平滑收窄。 |
+| `smoothing` | `number` | slash 0.16; spin 0.08 | 限制为 0–0.45；以2s的比例向按时间加权的邻点混合，再恢复刀身长度，端点保持不变。 |
+| `lifetime_ticks` | `number` | slash 4.5; spin 12 | 正有限值，限制为 0.25–40 ticks（0.0125–2 秒）。默认分别为 0.225 与 0.6 秒；控制过期、淡出、采样密度和允许的最大捕获间隔。 |
+
+### 材质字段与遮罩
+
+每一行都可用于 `sheet` 或 `edge`。两个材质使用相同采样轨迹，但内半径不同。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `texture` | `identifier` | minecraft:textures/misc/white.png | 完整纹理路径；无效标识符回退，配置档加载器不检查资源是否存在。 |
+| `color` | `string or array<number>` | sheet #BDEBFF8F; edge #ECFAFFFF | RGB/RGBA 十六进制或 3–4 分量数组，规则见下文。 |
+| `opacity` | `number` | sheet 1; edge 0.92 | 限制为 0–1，非有限值变为 0。 |
+| `blend` | `enum(translucent, additive)` | sheet translucent; edge additive | 不区分大小写，未知字符串使用该材质默认值。 |
+| `shader` | `enum(auto, vanilla, satin)` | auto | vanilla 强制实体着色器；auto 与 satin 仅在没有活动 Iris 着色器包时使用 Satin。 |
+| `blur` | `boolean` | true | 纹理过滤开关。 |
+| `mipmap` | `boolean` | false | 纹理 mipmap 开关。 |
+| `flip_u` | `boolean` | false | 在缩放与滚动前反转纵向坐标。 |
+| `flip_v` | `boolean` | false | 交换内外横向坐标。 |
+| `depth_test` | `boolean` | true | true 为 LEQUAL，false 为始终通过。 |
+| `depth_write` | `boolean` | false | true 同时写深度与颜色，否则只写颜色。 |
+| `uv` | `object` | {} | 纹理缩放与滚动。 |
+| `uv.u_scale` | `number` | 1 | 纵向正有限缩放，否则回退。 |
+| `uv.v_scale` | `number` | 1 | 横向正有限缩放，否则回退。 |
+| `uv.u_scroll` | `number` | 0 | 沿 U 每游戏 tick 的有限 UV 位移；非有限值回退。 |
+| `uv.v_scroll` | `number` | 0 | 沿 V 每游戏 tick 的有限 UV 位移；非有限值回退。 |
+
+十六进制颜色接受 6 位 RGB 或 8 位 RGBA，可带 `#` 前缀；RGB 默认完全不透明。数组接受 3 或 4 个分量。任一显式分量超过 1 时，全部通道除以 255，否则按归一化值处理。数组省略 alpha 时，两种模式都保持完全不透明。通道限制为 0–1。颜色字符串错误、数组长度错误或转换异常时使用材质默认值。
+
+U从可见尾部的0递增到实时头部的1，按累计扫过距离占可见总距离的比例计算。翻转前，V 在该通道内边界为 0，在武器尖端边界为 1。滚动使用世界时间加 tick delta，对 10000 ticks（500 秒）取模后乘以每 tick 滚动量。需要透明区域时应编写 PNG 的 alpha 通道；RGB 为黑但 alpha 不透明，并不等于透明遮罩。
+
+最终顶点 alpha 由颜色 alpha、材质不透明度、平滑寿命淡出与本地不透明度百分比共同相乘。Satin 将纹理采样 RGBA、顶点颜色与 `ColorModulator` 相乘，并丢弃 alpha 低于 0.003 的片元。宽轨迹与边缘都关闭面剔除。启用 Iris 着色器包后，即便 `shader: satin` 也走实体格式后备路径，使用全亮光照与朝向摄像机的法线。该路径使用物品实体目标，Satin 世界通道使用半透明目标。纹理过滤、深度测试与深度写入遵守各材质设置。
+
+### 内置配置档
+
+`isekaiexpansion:default_hybrid` 没有选择器，优先级为 −10000，根部内缩 0.04，窗口偏移 −0.015，终点 0.98，采样数 32，最小距离 0.003，最大分段距离 2.5。几何样式、距离与视角开关保持默认。宽轨迹使用 `isekaiexpansion:textures/weapon_slash/dcsd_slashtrail_003.png`，颜色 `#5CCBFFE0`，不透明度 0.68；边缘使用 `isekaiexpansion:textures/weapon_slash/dcsd_slashlead_001.png`，颜色 `#E8FBFFFF`，不透明度 0.88。两者都翻转 V。
+
+| 子项 ID | 物品选择器 | 优先级 | 宽轨迹颜色 | 边缘颜色 |
+| --- | --- | --- | --- | --- |
+| `isekaiexpansion:demon_sword` | `isekaiexpansion:demon_sword` | 100 | `#f200b5` | `#b80089` |
+| `isekaiexpansion:demon_spear` | `isekaiexpansion:demon_spear` | 100 | `#1ed4c4` | `#0cb0a2` |
+| `isekaiexpansion:crescent_rose` | `isekaiexpansion:crescent_rose` | 100 | `#ac0000` | `#870303` |
+
+各子项都继承 `isekaiexpansion:default_hybrid`。Crescent Rose 的配置档不会绕过默认本地物品排除项。
+
+### 验证与重载
+
+读取或解析失败会警告并跳过该配置档。父项缺失、循环或无效，选择器 ID 或正则错误，未知 kind，以及严格类型字段错误，都可能导致拒绝。空文件是解析错误，空对象则有效。未知字段通常忽略，但已移除的顶层 `edge_start` 与 `lifetime_ticks` 只要出现就会拒绝，即使值为 null。
+
+嵌套对象缺失或类型错误时使用空对象。root/tip 缺失、不是数组或长度不是 3 时整体回退；非有限坐标按分量回退，无法转换的坐标元素则拒绝配置档。正距离字段为零、负数或非有限值时回退。材质枚举拼写错误会回退，与 kind 拼写错误不同。此处不检查纹理是否存在，也不检查物品/标签是否已注册。
+
+客户端资源重载会重建不可变的排序配置列表，并清空动画元数据、平面模型轮廓和渲染层缓存。它不会清空活动轨迹；每条轨迹继续持有攻击开始时捕获的配置档。服务端数据包 `/reload` 不属于此资源监听器。
+
+## 扩展方式
+
+在客户端初始化期间注册监听器。下例将调用者提供的效果回调限定到刺击开始；导入 `WeaponAttackFxEvents`、`WeaponAttackFxContext` 与 `java.util.function.Consumer`。
+
+```java
+public static void registerStabEffect(
+        Consumer<WeaponAttackFxContext> effect) {
+    WeaponAttackFxEvents.ATTACK_ANIMATION_START.register(context -> {
+        if (context.isStab()) {
+            effect.accept(context);
+        }
+    });
+}
+```
+
+| 上下文成员 | 约定 |
+| --- | --- |
+| `entity()` | 实时实体引用，不是快照。 |
+| `weapon()` | 事件创建时物品快照的防御性副本。 |
+| `animationId()`、`animatedHand()` | 非 null 动画标识符字符串与 Better Combat 手部类型。 |
+| `durationTicks()`、`upswing()` | 由控制器按前文规则清理；公开记录构造器本身不限制它们。 |
+| `kind()` | 非 null 视觉类型；`isStab()` 检查 `STAB`。 |
+| `slashProfileId()` | 可空的选中配置档 ID，包括最终不会绘制的配置档。 |
+| `isLocalPlayer()`、`isMob()` | 是否为本地玩家同一实例，或是否属于 `MobEntity`。 |
+
+自动分类先将动画 ID 转小写，依次检查刺击词（`stab`、`thrust`、`pierce`、`lunge`、`poke`），重击词（`slam`、`smash`、`ground`），斩击词（`slash`、`sweep`、`swing`、`spin`、`uppercut`、`upperslash`、`_lr`、`_rl`、`_lrl`、`_rlr`），否则为 `OTHER`。`NONE` 只能由配置档显式指定。这是视觉分类，不代表命中确认。
+
+回调在客户端动画调用路径上同步执行，不能取消攻击或替换配置档。监听器应自行处理异常并实施效果策略：本地排除或关闭轨迹后，事件仍会触发。注册与渲染代码必须保持客户端专用。自定义物品渲染集成应以会话包围采集，转发其消费者，并在 `finally` 中调用 `end()`；会话结束是幂等的，嵌套上下文使用线程局部存储。
+
+## 验证
+
+运行`./gradlew.bat compileJava`。观测姿态之间按连续旋转重建，无法补回未被观测到的反向运动。
+
+检查本地/远程玩家、生物、双手分别攻击、左主手、双持与双手型动画。比较第一人称手部、Player Animator 第一人称通道、第三人称与人形变身。测试普通斩击、刺击/重击不绘制、身体旋转、移动攻击者、低帧率与分段跳变。
+
+配置档需测试仅覆盖颜色的继承、数组替换、选择器 AND/OR、同优先级排序、错误正则、循环继承、已移除几何键和纹理缺失。在攻击中重载，区分活动轨迹保留配置与新攻击使用新配置的行为。检查 Iris 开关、阴影通道、深度开关、不透明度为零、排除项变化和数量上限淘汰。确认关闭轨迹后事件仍触发，并确认监听器不会向动画路径抛出异常。
+
+## 相关页面
+
+- [Effekseer 粒子](/zh-cn/dev/effekseer-particles/) — 为自定义攻击监听器创建客户端效果。
+- [变身客户端集成](/zh-cn/dev/morph-client/) — 玩家与代理呈现。
+- [着色器与材质](/zh-cn/dev/shaders-and-materials/) — 其他客户端着色器约定。
+

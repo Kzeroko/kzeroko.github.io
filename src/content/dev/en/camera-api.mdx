@@ -1,0 +1,142 @@
+---
+title: "Camera Scene API"
+description: "Play client camera animations, choose anchors and playback options, and understand transition ownership."
+category: client
+order: 72
+updated: 2026-09-24
+---
+
+`CameraSceneAPI` is the client-only facade for camera animations already loaded into the animation registry. It controls one local camera playback; server-authored timelines with actors, world events and subtitles use the separate [cinematic scene format](/en/wiki/cinematic-scene-data/).
+
+## Entry point
+
+The facade is `net.kzeroko.isekaiexpansion.api.client.camera.CameraSceneAPI`, delegating to `client.camera.CameraSceneController`. Keep client imports and calls out of dedicated-server initialisation.
+
+The registry is populated from `assets/<namespace>/camera_animations/*.json` on client resource reload. An animation must contain a bone named `camera` with position or rotation keyframes. Its registry ID derives from the animation name; it is not necessarily the resource filename.
+
+## Common tasks
+
+### Play a loaded animation
+
+This starts the bundled camera animation using its authored loop mode:
+
+```java
+boolean accepted = CameraSceneAPI.play(
+        new Identifier("isekaiexpansion", "boss_intro"),
+        CameraScenePlayOptions.gecko()
+);
+```
+
+`false` means the animation ID was not loaded, and leaves current playback untouched. `true` means the request was accepted; a cinematic entry fade can still be pending, with `activeId()` returning null.
+
+### Fix the shot to a world anchor
+
+```java
+var options = CameraScenePlayOptions.cinematic()
+        .withAnchor(CameraAnchor.world(new Vec3d(100, 70, 200), 180.0F), false)
+        .withYawAlign(YawAlign.ANCHOR);
+boolean accepted = CameraSceneAPI.play(
+        new Identifier("isekaiexpansion", "boss_intro"), options
+);
+```
+
+The position here is an exact world point, and 180 degrees is the north-facing reference yaw. `followAnchor = false` captures the anchor at playback request time. Following an entity updates position, but aligned yaw is still the value captured at the start.
+
+### Stop owned playback
+
+```java
+var expected = new Identifier("isekaiexpansion", "boss_intro");
+if (expected.equals(CameraSceneAPI.activeId())) {
+    CameraSceneAPI.stop();
+}
+```
+
+This ID guard checks an active animation only. It cannot identify pending entry fades, distinguish two owners playing the same ID or provide a session token. A pending cinematic request can be cancelled with `stop()` when the caller knows it owns that request.
+
+## Reference
+
+| Facade method | Side | Result |
+| --- | --- | --- |
+| `play(Identifier, CameraScenePlayOptions)` | Client | Returns whether a registered animation was accepted |
+| `stop()` | Client | Cancels a pending entry, or stops the active playback; cinematic exit can be asynchronous |
+| `activeId()` | Client | Current animation ID, or null when no active instance exists; not a pending-state query |
+
+### Playback options
+
+`CameraScenePlayOptions` is a record. Its preset factories provide the combinations below; construction does not clamp fields or replace null anchors/modes.
+
+| Preset | Mode | Blend in/out ticks | Movement lock | All-input lock | Escape skip | Hide HUD |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cinematic()` | `ONCE` | 10 / 10 | true | true | false | true |
+| `dialogue()` | `HOLD` | 5 / 0 | true | false | false | false |
+| `loop()` | `LOOP` | 10 / 0 | true | true | false | true |
+| `instant()` | `ONCE` | 0 / 0 | true | false | true | false |
+| `gecko()` | `GECKO` | 10 / 10 | true | true | false | true |
+
+All presets use `CameraAnchor.camera()`, `followAnchor = false` and `YawAlign.PLAYER`. At 20 ticks per second, 10 ticks is 0.5 seconds and 5 ticks is 0.25 seconds.
+
+| Record field | Contract |
+| --- | --- |
+| `mode` | `ONCE` stops at the animation length; `LOOP` wraps sample time; `HOLD` clamps to the final frame; `GECKO` resolves the animation's own mode |
+| `blendInTicks` / `blendOutTicks` | Blend durations; values below 0 behave as 0 in blend calculations. Cinematic presets also use positive durations to trigger screen fades. |
+| `lockMovement` | Clears movement/jump/sneak input during camera playback; not a server-side action lock |
+| `lockAllInput` | Uses the shared cinematic input lock and closes open screens during ticking |
+| `allowEscSkip` | Controls Escape handling while that input lock is active; setting this flag without the lock does not install a separate Escape handler |
+| `hideHud` | Hides the HUD at start, preserving the prior setting for restoration |
+| `anchor` | Position/rotation provider; must be non-null |
+| `followAnchor` | Resolve anchor each sampled frame; false uses the captured origin |
+| `yawAlign` | `NONE`, `PLAYER` or `ANCHOR`; alignment is captured at the request |
+
+`withMode`, `withAnchor` and `withYawAlign` return new records. `isCinematic()` means both `lockAllInput` and `hideHud` are true; it is not determined by the factory name or animation type.
+
+### Anchors and orientation
+
+| Anchor factory | Origin |
+| --- | --- |
+| `CameraAnchor.camera()` | Current client camera position and rotation |
+| `CameraAnchor.world(Vec3d, float)` | Exact world position and yaw |
+| `CameraAnchor.block(BlockPos, float)` | Block centre and yaw |
+| `CameraAnchor.entity(int, boolean)` | Interpolated entity position; optionally add eye height. Missing world/entity falls back to the current camera. |
+| `CameraAnchor.fixed(CameraOrigin)` | Supplied constant origin |
+
+For `PLAYER` or `ANCHOR` alignment, position offsets rotate by captured yaw minus 180 degrees. Base pitch becomes 0, base yaw becomes the captured alignment, and animation rotation is added. With `NONE`, offsets do not rotate and the origin contributes its pitch/yaw. Animation roll supplies the final roll; anchor roll is not added.
+
+A following dialogue anchor is an internal specialisation with its own framing rig. Its serialised form is a fixed position/pitch/yaw snapshot, not the live rig.
+
+### Internal server transport
+
+`util.network.CameraSceneSyncUtil` is the repository's internal server helper, not a public facade. `play`/`stop` target a server player; `playToTracking`/`stopToTracking` iterate players tracking an entity; `playToWorld`/`stopToWorld` iterate players in a server world. The server does not validate the client's animation registry or receive a playback-success acknowledgement.
+
+The play packet carries the animation ID, mode ordinal, blend ticks, lock/skip/HUD flags, yaw-alignment ordinal, follow flag and anchor specification. Unknown mode and yaw ordinals fall back to `ONCE` and `NONE`. Anchor tags are 0 camera, 1 entity, 2 world, 3 block and 4 fixed; unknown tags decode as camera. Fixed transport carries pitch/yaw but not roll. Receivers marshal facade calls to the Minecraft client executor.
+
+## Threading and lifecycle
+
+Call the facade on the Minecraft client thread with a usable client camera/world. It does not enqueue itself, validate thread affinity or establish a server session. The supplied animation and options are captured; later registry reloads affect later lookups, not the animation object already held by an active instance.
+
+Starting playback saves perspective/HUD and selects third-person back. Cinematic entry fades defer creation of the active instance; unlike full scene playback, this camera-only path begins the animation at age 0 after the fade. Client end ticks advance age, and `ONCE` requests stop when it reaches the ceiling of animation seconds × 20.
+
+Stopping a pending entry clears the fade and restores state immediately. Stopping an active cinematic with positive exit duration starts an exit fade and retains the active instance until its callback; ordinary stopping restores immediately. Transition sampling freezes partial-tick interpolation and uses the captured anchor.
+
+Full cinematic playback takes precedence when it supplies a camera pose. Its blend weight also takes precedence while its client playback is active. Both systems share camera, HUD, perspective and input state without a general ownership token, so coordinate camera-only requests with full timelines and dialogue sessions.
+
+The camera-only initializer registers resource loading, ticking, networking and a disconnect reset for block fading. It does not itself clear every camera-only playback on disconnect. Integrations must exercise their own teardown path; do not infer the full cinematic manager's disconnect cleanup applies to this separate controller.
+
+## Pitfalls
+
+| Symptom | Cause or required check |
+| --- | --- |
+| `play` returns false | Missing registry animation, absent camera bone, or no position/rotation frames |
+| `activeId()` is null after an accepted play | Entry fade is still pending |
+| Following an entity does not continually align to its turning yaw | Alignment yaw is captured once |
+| `instant()` does not make Escape stop playback | It allows skip but does not acquire the all-input lock that routes Escape |
+| A second request loses its state during a transition | Starts/stops share pending fade callbacks; there is no session-safe replacement contract |
+| Reload fixes later plays but not the current pose | Active playback retains its animation object |
+
+Verify missing-ID playback, each preset, anchor-follow changes, entry/exit cancellation, resource reload and world disconnect. Also test mixed use with server cinematic scenes and dialogue focus; successful client compilation alone does not verify state restoration or visual transitions.
+
+## Related
+
+- [Cinematic scene runtime](/en/dev/cinematic-scenes/) — shared server timelines, triggers and actor ownership.
+- [Camera animation assets](/en/dev/camera-animations/) — rig, units, keyframes and registration checks.
+
+[Cinematic scene data](/en/wiki/cinematic-scene-data/) covers full timelines. [Dialogue runtime](/en/dev/npc-dialogue/) covers NPC conversation ownership, and [Morph client integration](/en/dev/morph-client/) covers the underlying morph camera adjustments.

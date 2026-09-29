@@ -1,0 +1,60 @@
+---
+title: "NPC allegiance"
+description: "Pledge, transfer and release allegiance with contracts, broker stock and auctions."
+category: world
+order: 125
+updated: 2026-09-26
+---
+
+Allegiance gives a player command access to a common NPC independently of favour. It does not raise affection, establish a marriage or grant combat abilities to a civilian.
+
+## Contract terms
+
+| Rule | Value |
+| --- | --- |
+| Ordinary collar | Requires trust |
+| Dark-magic collar | Target health at most 25% |
+| Unique NPCs | Cannot pledge allegiance |
+| Married or already-bound NPCs | Cannot form another allegiance |
+| Collar or contract use | Within 4 blocks of the target |
+| Auction duration | 1200 ticks (60 seconds), while the server ticks |
+| Opening bid / increment / maximum | 8 / 4 / 60 emeralds |
+
+## Establish allegiance
+
+Use an Allegiance Collar on an eligible NPC who trusts you, or a Dark-Magic Allegiance Collar on an eligible weakened NPC. The collar is consumed on success. An NPC following another player cannot be bound. A new retainer waits in place; ask them to follow when there is room in your squad.
+
+The Allegiance Broker sells citizen and combat-adventurer contracts for loaded, choosable base races. Ordinary stock and auction rotation exclude unchoosable evolved races, including `isekaiorigins:raevyx`. The tooltip identifies both race and role. Redeeming one creates that role at a safe nearby location and consumes the contract. Adventurers start with an iron sword and can fight; citizens retain their civilian behaviour. Each race, role and bond type has one purchase per broker per world day.
+
+| Recruitment role | Ordinary contract | Dark-magic contract |
+| --- | --- | --- |
+| Citizen | 32 emeralds | 48 emeralds |
+| Combat adventurer | 48 emeralds | 64 emeralds |
+
+## Commands and transfer
+
+The owner's dialogue menu provides conversation, time together, movement orders, equipment and release. The command wheel uses allegiance-specific responses. Command permissions include every follower order, but squad capacity, pathfinding and the NPC's combat capabilities still apply. Other players cannot take control through dialogue or a transport scroll.
+
+Use an empty contract of the matching bond type on your retainer to prepare a transfer. The NPC leaves the world and the filled contract carries a one-use claim. Redemption preserves the NPC's role, identity, appearance and equipment. Whoever redeems that claim becomes the new owner. A copy of an already-redeemed claim fails. An ordinary transport scroll preserves the existing owner and cannot transfer allegiance.
+
+Choose release and confirm it to end allegiance. Following stops and ordinary relationship permissions return. Favour is preserved. Release returns neither a collar nor a contract; a transferred or lost contract must be recovered to retrieve an NPC held by it.
+
+## Auction and refunds
+
+The broker offers one shared lot, identifying its race and citizen or combat role. The winning contract retains that role. Bidding removes the quoted emeralds from inventory and stores them with the lot. A higher bid credits the previous bidder's refund balance. The same player cannot raise their own leading bid. Stale quotes are rejected and refreshed.
+
+After closing, the winner collects the contract from that broker. A winning lot remains available across reloads and waits for collection before the next lot appears. Outbid players can collect refunds at any broker, up to 64 emeralds per collection. Full inventories drop delivered items nearby. An expired lot without a bidder rotates when viewed again.
+
+## Interaction with relationships
+
+| System | Allegiance behaviour |
+| --- | --- |
+| Favour and gifts | Continue independently; allegiance is not trust |
+| Marriage | A retainer cannot accept a proposal until allegiance is released |
+| Equipment | The owner can access hand equipment and inventory |
+| Follower squad | Uses the ordinary capacity and player-session rules |
+| Dialogue | Both bond types have responses for all 18 current races |
+
+## Dialogue data
+
+Race dialogue resources live under `data/isekaiexpansion/blabber/blabber_dialogues/npc/allegiance/`. Their fields follow [Dialogue data](/en/wiki/dialogue-data/). Developers can extend the rules through the [allegiance runtime](/en/dev/npc-allegiance/).

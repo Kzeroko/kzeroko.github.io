@@ -1,0 +1,83 @@
+---
+title: "Guild Bounties"
+description: "Take a notice, confirm with the guild receptionist, and report your work for payment."
+category: world
+order: 110
+updated: 2026-09-26
+---
+
+The guild board offers work; its receptionist records your signature and pays the reward. Stand within 2 blocks of the board's front and point at a paper to read it. Take the notice, then speak to a guild receptionist. Board interactions never settle commissions.
+
+## The guild's rhythm
+
+| Rule | Default |
+| --- | --- |
+| Notices on one board | 6 |
+| Random restock interval | 1200–2400 ticks (60–120 seconds) |
+| Restock | Up to 2 vacancies filled; 1 posting replaced if full |
+| Unsigned reservations | 2 per player or party, valid for 12000 ticks (600 seconds) |
+| Notice-taking allowance | 6 per guild day; returns do not refund it |
+| Delay between taking notices | 200 ticks (10 seconds) |
+| Signing allowance | 3 per guild day |
+| Guild day and complete board refresh | 24000 ticks (1200 seconds) of elapsed world time |
+| Outstanding contracts | 2 |
+| Delay between signatures | 1200 ticks (60 seconds) |
+| Repeat delay for bundled quests | No additional delay after the previous contract closes |
+
+Taking and signing have separate allowances; each applies to both the player and quest party across every board and dimension. Changing party does not restore your personal allowance. Sleeping and changing the daylight clock do not advance guild days. Time passes while the server world runs, including while you are offline.
+
+## Read, confirm and report
+
+Craft a full-block wooden board from 6 sticks and 3 planks. A newly loaded board refreshes within 20 ticks (1 second). Right-click a paper on its front to remove that posting and reserve it. A second notice occupies its own inventory slot; it does not replace the first. Taking spends a notice allowance, but no signature, and starts no objectives. Stale clicks, duplicate reservations and already active commissions are refused before removing a paper.
+
+Approach a guild receptionist within 4 blocks and open your ledger. Select the unsigned notice, review its objectives and rewards, then confirm. Signing requires a revealed adventurer rank, your own nameplate in the off hand and the quest's prerequisites, conditions and cooldowns. Only the party leader may sign for a party. The deadline and daily signature begin here. The record stays usable even if there is no room to issue a paper copy immediately.
+
+| Commission | Grade | Minimum rank |
+| --- | --- | --- |
+| Beast Writ | 1 | Copper — 1 |
+| Oni Writ | 2 | Silver — 2 |
+| Sovereign Writ | 3 | Diamond — 4 |
+| Imperial Writ | 4 | Adamantite — 6 |
+| Mythic Writ | 5 | Stormyx — 7 |
+
+Carry out the objectives, then return to a receptionist serving the issuing pool and confirm your report. Only the original signer, still in the original quest party, can report. Supply reports consume matching inventory items up to the remaining requirement; partial deliveries stay recorded. Other objectives use ordinary quest rules, including party kill credit. Use a current active writ in the air to toggle its full quest pin.
+
+The deadline includes your return for payment. Completing objectives changes the writ's appearance but pays nothing until reporting. The receptionist grants the ordinary rewards and guild standing once all objectives are complete. A settled copy keeps its seal as a receipt; copies cannot pay twice.
+
+## A lost writ never locks the ledger
+
+Open the receptionist's ledger without holding a writ. Your records remain available, including your own commissions from a former party. You may request a free replacement copy, report without the paper, or confirm withdrawal. Replacement preserves the deadline and progress. A full inventory only prevents receiving a copy; it does not prevent reporting or withdrawal.
+
+Board refreshes and signature cooldowns do not end active contracts. If your personal or party ledger is full, settle or withdraw an entry. Party records signed by someone else are visible but only that signer may manage them. After changing party, you can still withdraw your old commission; rejoin the original party to report it. Any registered guild desk can replace or withdraw a signed writ, while signing and reporting require the issuing pool.
+
+Withdrawing an active contract frees its outstanding slot, but does not refund its daily signature or delivered supplies. Returning an unsigned notice removes its carried copies and releases the reservation. A notice from the current guild day fills a vacancy on its original board or a connected board; if full or unloaded, its return waits. A replaced board or finished guild day cannot receive an old paper. Unsigned expiry follows the same return rule. Signed expiry closes the contract without rewards or a reputation penalty.
+
+## Standing and rewards
+
+Guild standing feeds IsekaiCore's adventurer reputation. Signing fixes the standing award at your current rank: each commission grade below your eligible grade halves it, rounding down. Easy work can grant no standing. IsekaiCore owns the reputation cap and promotion rules; a bounty does not automatically promote you.
+
+Bundled commissions pay emeralds to the signer, experience to online party members and citizen faction reputation to the signer. The preview lists authored reward recipients. Faction reputation is separate from adventurer standing.
+
+## Following commissions
+
+Signed writs in your inventory automatically appear as full quest panels after your chosen pin, using the same header, objective markers and progress formatting. Up to two automatic panels are shown, with a journal hint for any others. Each carried contract shows remaining minutes and seconds; the final 60 seconds use the warning colour. Fulfilled work adds a return-to-guild hint. Signing never replaces your chosen pin, and a manually pinned bounty is not repeated.
+
+Task panels start below the fixed follower display. When a full panel would reach visible chat, it moves to the right of the followers and starts another column from their top. This also follows moved Chat Plus chat windows. If the screen runs out of space, a journal hint appears wherever it fits; all quests remain in the journal.
+
+Open the quest journal with **J** and choose **Bounties** to inspect carried notices and current party commissions in the existing list, objective and detail panels. Unsigned notices await registration; signed contracts show current progress; fulfilled contracts direct you back to the guild. Closed receipts remain readable while carried. Signing and reporting still require the receptionist.
+
+Storing or losing the paper removes automatic tracking, but the current party's signed quest remains in the journal. You can pin it without a paper or ask a receptionist for recovery or withdrawal. A pin remains until you clear it or the native quest ends. Old-cycle papers and expired copies do not attach to a new commission. Party changes update the journal to the current party; the receptionist can still help the signer manage earlier contracts.
+
+## Reading the parchment
+
+The server chooses one of 32 paper arrangements, mixing shapes, positions and gentle tilts. Rendered and interactive bounds match; empty space selects nothing. Adjacent boards in the same plane, facing and pool form a wall, with awareness capped at 64 loaded boards. New postings prefer commissions absent from that wall; when candidates run short, different boards may repeat a quest, but one board does not duplicate its own requests. Each guild day replaces the whole display and chooses another arrangement.
+
+Nearby previews fade participating Isekai HUD panels, lingering for 350 milliseconds when focus ends. The parchment stays offset from the crosshair. Hovering a writ in a standard inventory uses the same preview; other items keep their tooltips. Long bodies turn pages every 10 seconds.
+
+The receptionist's ledger supports search, status filters and a separate confirmation step. Each preview shows only fulfilled requirements and time remaining; an unsigned notice shows its registration window. Selecting a record gives a short spoken prompt. Full terms stay on the parchment and in the quest journal's **Bounties** category.
+
+Confirmations name the commission and explain signature costs, delivery, return or withdrawal. The ledger lists used signatures, outstanding slots, signing delay and time to the next guild day. Dialogue panels animate between catalogue and conversation views. Replacing a board never resets taking or signing limits. Data-pack commissions may specify additional prerequisites, conditions and repeat cooldowns; refusal messages distinguish these from already active work.
+
+## Placing a guild receptionist
+
+Developers can set up a staffed guild with a placement marker or a command. See [Bounty data](/en/wiki/bounty-data/) for setup and commission authoring.

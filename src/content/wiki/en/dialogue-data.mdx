@@ -1,0 +1,168 @@
+---
+title: "NPC dialogue data"
+description: "Blabber dialogue fields, registered actions, NPC route paths, relationship fallback and localisation."
+category: data
+order: 120
+updated: 2026-09-26
+---
+
+Dialogue files define text, choices and actions; the NPC resolver chooses which file to open. File placement and fallback order are part of the format, so a valid file can remain unused when a more specific route wins.
+
+## Where the files live
+
+Use `data/<namespace>/blabber/blabber_dialogues/<path>.json`. The dialogue ID is `<namespace>:<path>`, without the registry folders or extension. Automatic NPC lookup builds IDs in `isekaiexpansion`; another namespace is usable through an explicit dialogue reference, not automatic path fallback.
+
+The pack pins Blabber `0.5.1-build32`. Its base dialogue dialect is dependency-owned; the contract below was checked against the local Blabber source checkout and the mod's shipped data. The upstream schema hint is not a validator for every local extension.
+
+### NPC lookup paths
+
+An NPC type token comes from its full entity ID: lowercase, replace runs of non-alphanumeric characters with underscores, trim outer underscores. For example, `isekaiexpansion:mahoutsukai_evelina` becomes `isekaiexpansion_mahoutsukai_evelina`.
+
+The resolver tries each event's scope paths in this order. `<gender>` is the NPC's actual gender key. `<layer>` is `simple`, `combat` or `base`; unique NPCs use their separate branch.
+
+| Scope | Ordinary base path |
+| --- | --- |
+| Unique, type-specific | `npc/unique/<npcType>/<event>` |
+| Unique, shared | `npc/unique/<event>` |
+| Other, type and gender | `npc/<layer>/<npcType>/<gender>/<event>` |
+| Other, type | `npc/<layer>/<npcType>/<event>` |
+| Other, shared layer | `npc/<layer>/<event>` |
+| Final shared fallback | `npc/common/<gender>/<event>` |
+
+For a menu route, insert `menu/<route>/` immediately before `<event>`. Each base path then probes `relationship/<tier>/<phase>`; there is no bare phase file fallback outside the relationship branch.
+
+Normal event lookup tries the requested event, then `interact` if different. Known menu routes use their canonical event only: `trade` uses `trade`; the other routes below use `interact`. A custom route uses the requested event followed by `interact`.
+
+| Route group | Route keys |
+| --- | --- |
+| Conversation | `talk`, `talk_quest`, `farewell`, `bond`, `married_distance` |
+| Trade | `trade` |
+| Commands | `mode_follow`, `mode_follow_denied`, `mode_stay`, `mode_patrol`, `mode_wander` |
+| Gifts | `gift_confirm`, `gift_confirm_invalid`, `gift_cancel`, `outfit_unlock` |
+| Engagement | `engage_confirm`, `engage_denied_unready`, `engage_denied_already` |
+
+### Relationship, phase and random variants
+
+Relationship fallback is `married → trust → friendly → normal`, beginning at the player's actual tier. `married_distance` is pinned to `normal`; `engage_confirm` is pinned to `trust`. These are lookup policies, not permission grants.
+
+A first meeting or first visit to a menu route uses `initial`. Otherwise, a positive last-talk tick within 300 ticks (15 seconds) selects `rapid_repeat`; other visits use `repeat`. Both `initial` and `rapid_repeat` fall back to `repeat`.
+
+For an NPC married to someone else, `talk`, `trade`, `farewell` and explicitly enabled custom routes first probe `relationship/<tier>/is_married/<phase>`. Within a tier, all married-state phase fallbacks precede ordinary phase fallbacks. Within a base path, all tier fallbacks precede the next, less-specific scope path.
+
+For each candidate, existing `<phase>_scenario_1` through `<phase>_scenario_5` and sibling `scenario_1` through `scenario_5` join the unsuffixed file in one uniform random pool. The base file may be absent. Sibling scenarios can therefore satisfy multiple phases; there is no requirement to find a phase-specific variant first.
+
+### Structured overrides
+
+Routes such as `outfit_unlock_formal` can resolve to `menu/outfit_unlock/override/formal`. The resolver tries underscore splits from right to left, then the same type/gender/layer/common scope order. Underscores inside both route and override names are supported by trying successive splits.
+
+Quest routes and structured overrides precede NPC predicate overrides, menu paths and ordinary paths. Predicate overrides may specify an explicit ID or probe `override/<key>`, first within the current menu branch, then outside it. A missing candidate continues fallback. A gift's exclusive marker does not suppress this fallback.
+
+### Allegiance paths
+
+An owner conversation first tries `npc/allegiance/<race>/<contract|dark_magic>/<route>/<phase>`, after quest overrides. The current phase falls back to `repeat`; missing content resumes ordinary lookup. See [NPC allegiance](/en/wiki/npc-allegiance/).
+
+
+## Minimal example
+
+Place this at `data/isekaiexpansion/blabber/blabber_dialogues/npc/common/female/interact/relationship/normal/repeat.json` to provide a female shared ordinary-interaction fallback. It will not override a more specific existing file.
+
+```json
+{
+  "start_at": "line",
+  "unskippable": true,
+  "states": {
+    "line": {
+      "text": {"translate": "dialogue.isekaiexpansion.example.line"},
+      "choices": [
+        {
+          "text": {"translate": "dialogue.isekaiexpansion.example.leave"},
+          "next": "end"
+        }
+      ]
+    },
+    "end": {"type": "end_dialogue"}
+  }
+}
+```
+
+Add both translation keys to the English and Simplified Chinese dialogue categories under `language_assemble/categories/dialogues`, then assemble language files. The key prefix is a convention, not automatic translation generation. Missing translations can expose raw keys.
+
+## Fields
+
+### Dialogue, state and choice
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `$schema` | string | absent | Editor hint only; the runtime codec does not consume it. |
+| `start_at` | string | required | Exact state key. Missing/wrong type fails decoding; a nonexistent key fails when selecting the start state. |
+| `unskippable` | boolean | false | Requests non-skippable conversation UI; it does not bypass forced session closure. |
+| `states` | object of state objects | required | Keys such as `line` and `end` are authored state names, not fixed schema fields. |
+| `states.<name>.text` | Minecraft text value | empty text | Literal string or valid text component. Present malformed state text fails decoding. |
+| Text `translate` | string | absent | Translation key used by the example's text component; use a valid text component rather than an arbitrary object. |
+| `choices` | array of choice objects | empty | Ordered player responses. A non-end state without choices fails structural validation. |
+| Choice `text` | Minecraft text value | required | Button label; missing/malformed text fails decoding. |
+| Choice `next` | string | required | Exact destination state key; dangling references can fail when chosen. |
+| Choice `requirement` | predicate object | absent: available | Registered predicate with `type` and its codec-specific payload. Present malformed data fails decoding. |
+| Choice `requirement_tip` | Minecraft text value | absent | Explanation for an unavailable choice; does not itself add a condition. |
+| State `actions` | array of action objects | empty | Ordered actions when a choice enters this state. Use plural `actions`; legacy singular `action` is not this field. |
+| State `type` | string | `DEFAULT` | Case-insensitive `DEFAULT`, `END_DIALOGUE`, `ASK_CONFIRMATION`; unknown names fail. Editor-internal `normal` must be omitted on export. |
+| Action/predicate `type` | identifier string | required | Registered codec ID; unknown IDs cannot decode. |
+| Action/predicate `value` | codec-specific value | depends on codec | Primitive codecs use this dispatch payload; record codecs put their named fields beside `type`. It is not a universal object wrapper. |
+
+Actions execute on the state entered by a choice, in list order, before that state's result is handled. Merely selecting the initial state or restoring a state does not execute its actions. Put an effect on a destination reached through a choice, including an end state when appropriate.
+
+### Actions supplied by this mod
+
+| Action ID | Payload | Behaviour |
+| --- | --- | --- |
+| `isekaiexpansion:give_item` | `item`, optional `size`, `nbt`, `update` | Give to the speaking player; inventory overflow drops. |
+| `isekaiexpansion:reveal_energy` | required string `value` | Reveals the player's energy bar; string contents are ignored. |
+| `isekaiexpansion:reveal_rank` | required string `value` | Reveals the player's rank plate; string contents are ignored. |
+| `isekaiexpansion:open_npc_trade` | no payload | Opens trade only for a live conversation NPC within 4 blocks and a player allowed by the NPC merchant policy, inside the dialogue. |
+| `isekaiexpansion:emote` | `emote`, optional `force` | Plays a body emote on the conversation NPC. |
+| `isekaiexpansion:emoji` | emoji playback fields | See the complete [emoji action fields](/en/wiki/emoji-data/). |
+
+`isekaiexpansion:add_rep` is not registered by this module. Blacksmith and wayfinding features register their own actions through their subsystem initialisation; use their owning references.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| Give `item` | identifier string | required | Item registry lookup; this codec validates identifier syntax, not a separate item-existence predicate. |
+| Give `size` | integer | 1 | Passed directly to stack construction; no positive range or item max-stack clamp is added here. |
+| Give `nbt` | string | empty | SNBT compound. Parse failure logs and continues with the item without that authored NBT. |
+| Give `update` | boolean | true | Explicitly synchronises the main inventory after insertion/drop. |
+| Reveal `value` | string | required | Any string, including empty; not an effect parameter. |
+| Emote `emote` | string | required | Must not be blank; playback availability is checked against the NPC's emote catalogue. |
+| Emote `force` | boolean | true | Passed to NPC dialogue-emote playback; see [emotion runtime](/en/dev/npc-emotion/). |
+
+### Dependency actions and requirements
+
+The pack's Blabber dialect supplies `blabber:command` with string `value`, `blabber:redirect` with identifier-string `value`, and payload-free `blabber:open_trade` for vanilla villager trade. Use `isekaiexpansion:open_npc_trade` for this mod's NPC trade.
+
+Command actions execute silently as the player with permission level 2; they are authored server effects. Redirect selects another dialogue ID. The `blabber:player_level` requirement takes integer `value` and checks whether player level is at least that value; no nonnegative constraint is added by its integer codec.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| Command `value` | string | required | Command text; valid JSON is not proof that the command can execute. |
+| Redirect `value` | identifier string | required | Target dialogue ID; it must exist when redirected. |
+| Player-level `value` | integer | required | Inclusive minimum level; negative values are accepted by the codec. |
+
+## Validation
+
+Check every start and destination key, require an end-reachable path, and avoid choice-free non-end states. The dependency validator checks paths toward an end and warns about some unreachable states; it does not replace a complete dangling-edge audit. A branch with one valid path can still carry a bad destination.
+
+Malformed present state/choice optional fields fail rather than silently taking defaults. Unknown object keys are generally not declared fields: a misspelt key can be ignored rather than diagnosed. The editor rejects singular `action`, but runtime decoding alone should not be relied on to catch it.
+
+Test selection separately from parsing. A file with the wrong canonical event, namespace, relationship branch or scope can load successfully and never be selected. Exercise shared scenarios with multiple phases, married-to-other fallback and a missing specific override. Check effects with a different main-hand stack and current session target at execution time.
+
+## Reloading
+
+Dialogue templates belong to Blabber's synchronised data registry and reload with data packs. Start a fresh conversation after reloading to test new content; an existing session retains its captured state map. Resource/language reload handles translated text separately.
+
+Code-built parent menus and registered action codecs do not become new definitions merely by adding dialogue JSON. Use the [runtime extension reference](/en/dev/npc-dialogue/) for those surfaces.
+
+## Related
+
+- [NPC dialogue runtime](/en/dev/npc-dialogue/)
+- [NPC emotions](/en/wiki/npc-emotions/)
+- [Emoji data](/en/wiki/emoji-data/)
+- [Blacksmith commissions](/en/wiki/blacksmith-commissions/)

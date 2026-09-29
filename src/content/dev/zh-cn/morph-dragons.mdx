@@ -1,0 +1,207 @@
+---
+title: "Saints Dragons 变形桥接"
+description: "龙形态的原生种类模拟、骑乘能力绑定、伤害缩放、乘客与表现同步。"
+category: systems
+order: 116
+updated: 2026-09-24
+---
+
+Saints Dragons 桥接在未加入世界的变形实体上运行选定的原生控制器，世界中的实体仍然是玩家。本页依据本仓库与固定依赖 `maven.modrinth:saints-dragons:Zn44yGbo` 描述集成；原生能力时序、座位偏移、变体和飞行配置由 Saints Dragons 提供。
+
+## 它做什么
+
+公共端和客户端引导仅在模组 ID `saintsdragons` 存在时执行，并记录链接或运行异常。注册按顺序进行，后续步骤失败不会回滚此前的注册。
+
+公共桥接注册两个变形能力槽的原生覆盖、显示 ID、形态技能动作、移动、载客、tick 所有权和变体。运行时支持 Raevyx、Stegonaut、Cindervane、Varasuchus、Ignivorus、Volitans、Nulljaw 和 Atroxiia；进阶种类列表不含 Nulljaw。这些是内部兼容实现，不是公共门面。
+
+## 运行时模型
+
+### 宿主与原生 tick 的分工
+
+`SaintsDragonMorphLifecycle` 把原生形态绑定到宿主，清除坐下状态，并仅初始化一次动画。运行状态附着在形态实体上，不会另存一条龙。每个宿主年龄 tick 最多推进一次生命周期，同步宿主状态时保留原生旋转。
+
+战斗和声音控制器在两端运行，世界效果只在服务端运行。服务端与所属客户端推进能力维护、动画、飞行计数、起飞锁和俯冲／入水状态；旁观客户端先应用同步表现，再进行介质相关平滑。带作用域的原生上下文 mixin 让指定的未追踪形态方法能够推进，不会改变世界本身的客户端／服务端属性。
+
+能力产生至少 2 格位移（距离平方 4）时请求服务端传送；较小的有效位移通过玩家碰撞移动处理，原生速度发生变化时复制到宿主。运动误差阈值为距离平方 `1.0E-8`。这与普通移动处理器的位移路径分开。
+
+分离时结束当前原生能力、清空输入与按住绑定、移除附着运行状态并解除宿主绑定。重连不会恢复进行中的原生能力。
+
+### 移动与着地
+
+所有受支持龙种都处理普通移动；只有飞行龙种支持特殊移动激活和客户端预测，激活模式为 `PRESS`。处理器在宿主骑乘上下文中调用原生控制器，再把原生位移和速度转移给真实玩家。地面移动返回速度覆盖：零保持为零，否则取原生骑乘速度与形态移动速度属性中的较大值。
+
+Raevyx、Cindervane 和 Ignivorus 共用飞行／游泳／地面分派。Volitans 分别处理飞行和游泳，并探测自动破水起飞。Nulljaw 调用自己的飞行流程；Varasuchus、Atroxiia 使用专用游泳控制器；Stegonaut 返回地面骑乘速度。具体速度与起飞冲量由原生配置提供。
+
+起飞入口依次检查水面破水、坠落恢复和普通起飞。着地过程或着地恢复期间不能激活。待处理请求重试 30 ticks（1.5 秒）后释放特殊移动。兜底着地检查要求至少经历 2 个空中 ticks，再连续接地 3 ticks。着地恢复采用原生冷却且至少为 1 tick，期间停止水平及向上速度，清除输入并释放特殊移动。入水交接另行清理起飞记录。
+
+原生形态已经处于空中时，即使组件未请求，也能接管为特殊移动。停用会请求原生着地流程，并非直接清零飞行标志。按键激活与双击停用的区别见[客户端输入](/zh-cn/dev/morph-client/)。
+
+### 原生能力绑定
+
+变形主能力读取原生攻击绑定，变形副能力读取原生主绑定；两者都经过 `isekaiexpansion:saints_dragons_native_rider`。显示 ID 保留原生能力已有的命名空间，否则使用 `saintsdragons:`；缺少绑定时显示无能力。
+
+持续按住产生的重复包被拒绝。只有原生回调让目标能力进入活动状态（包括叠加能力），按下才算成功。`HOLD`、无限阶段轨道或 `CANCEL` 再次按下策略都要求释放。
+
+成功原生输入的冷却至少为 4 ticks（0.2 秒）。有限周期累加非负持续阶段时长，其他阶段各计 1 tick，再加恢复时间。恢复取原生冷却、恢复 ticks 和打断恢复 ticks 中的最大值，同时遵守最低值。按住／无限能力启动时使用最低值，释放时使用恢复时间。
+
+再次按下默认采用 `IGNORE`。Raevyx 闪电束、Ignivorus 火焰吐息及 Volitans 吐息使用 `CANCEL`；Volitans 掘地使用 `NATIVE`。取消先尝试原生按住释放，再强制结束仍在运行的能力；原生再次按下会重新调用原生入口。符合策略的再次按下可以绕过变形显示冷却。
+
+形态技能动作使用下表绑定。槽名指原生骑乘槽，不是变形主／副槽；命名绑定通过原生注册表解析指定的 `ModAbilities` 常量。
+
+| 动作 ID（前缀 `isekaiexpansion:`） | 原生来源 |
+| --- | --- |
+| `cindervane_dragon_ultimate` | `SECONDARY` |
+| `cindervane_dragon_ember_body` | `TERTIARY` |
+| `volitans_dragon_ultimate` | `SECONDARY` |
+| `volitans_dragon_breath` | `VOLITANS_BREATH` |
+| `volitans_dragon_venom` | `VOLITANS_POISON_BALL` |
+| `varasuchus_dragon_ultimate` | `SECONDARY` |
+| `ignivorus_dragon_ultimate` | `SECONDARY` |
+| `ignivorus_dragon_breath` | `TERTIARY` |
+| `ignivorus_dragon_fireball` | `IGNIVORUS_FIREBALL` |
+| `atroxiia_dragon_ultimate` | `SECONDARY` |
+| `atroxiia_dragon_gungnir` | `TERTIARY` |
+| `atroxiia_dragon_precise_strike` | `ATROXIIA_PRECISE_STRIKE` |
+| `stegonaut_dragon_ultimate` | `SECONDARY` |
+| `stegonaut_dragon_boulder` | `TERTIARY` |
+| `raevyx_dragon_ultimate` | `SECONDARY` |
+| `raevyx_dragon_beam` | `TERTIARY` |
+| `raevyx_dragon_rend` | `RAEVYX_GROUND_REND` |
+
+声明的进阶能力目录必须与绑定动作集合完全一致，否则启动抛错；重复动作 ID 同样抛错。Nulljaw 在此目录中没有形态技能动作。
+
+按住类形态技能通过 `native_hold_ticks` 安排释放，默认 30 ticks（1.5 秒），最小 1。回调检查活动阶段、变形修订号与形态对象身份。再次按下取消时移除动作绑定；旧的定时回调发现绑定不存在便不再处理。
+
+## 约定
+
+### 伤害与归属
+
+原生直接伤害、生成的投射物和射线伤害都会解析回玩家及来源种类／能力。解析优先采用已记录的射线／投射物来源，再查询当前形态的活动能力。原生移动声音也改用宿主实体 ID 和 UUID，发送给追踪者及宿主。
+
+对正值原始伤害，桥接计算：
+
+```text
+total = nativeAmount × nativeFactor + flatBonus
+      + meleePower × meleeFactor + spellPower × spellFactor
+```
+
+非正结果归零。完全恒等的缩放直接返回原伤害，不额外判定暴击。其他缩放中，法术系数严格大于近战系数时使用宿主归一化后的魔法暴击属性，否则使用近战暴击属性。暴击伤害乘以 `1 + max(0, normalisedBonus)`。
+
+法术强度读取显式缩放学派，否则读取种类学派的非暴击值。近战强度包含实时攻击伤害，以及被模块化装备处理抑制的主手物品正向加算攻击伤害。有此物品贡献时，当前实现将**整个和**再乘以“实时攻击伤害／基础加加算攻击伤害”；分母或倍率非正则回退为 1。因此，实时属性部分可能再次受到比例缩放。
+
+| 种类 | 法术学派 |
+| --- | --- |
+| Nulljaw | `IsekaiSpellSchools.ASTRAL` |
+| Cindervane | `SpellSchools.FIRE` |
+| Volitans | `SpellSchools.SOUL` |
+| Varasuchus | `IsekaiSpellSchools.WATER` |
+| Ignivorus | `SpellSchools.FIRE` |
+| Atroxiia | `IsekaiSpellSchools.DARK` |
+| Stegonaut | `IsekaiSpellSchools.EARTH` |
+| Raevyx | `SpellSchools.LIGHTNING` |
+
+未列出的能力采用原生倍率 1、固定加值 0、近战系数 0.5、法术系数 0。下表是每次原生伤害调用的本地桥接系数，包括连续光束／吐息调用；原生伤害数值与命中频率属于外部依赖。
+
+| 原生能力常量 | 原生倍率 | 固定加值 | 近战系数 | 法术系数 |
+| --- | --- | --- | --- | --- |
+| `NULLJAW_BITE` | 1.0 | 0.0 | 1.1 | 0 |
+| `NULLJAW_FORWARD_TELEPORT` | 1.0 | 0 | 0 | 0 |
+| `CINDERVANE_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `CINDERVANE_SLASH_GRAB` | 1.0 | 0.0 | 1.2 | 0 |
+| `CINDERVANE_DOUBLE_BITE` | 1.0 | 0.0 | 0.6 | 0 |
+| `CINDERVANE_MAGMA_VOLLEY` | 1.0 | 4.0 | 0 | 1.1 |
+| `CINDERVANE_FIRE_BODY` | 1.0 | 0.4 | 0 | 0.1 |
+| `VOLITANS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `VOLITANS_CLAW` | 1.0 | 0.0 | 0.95 | 0 |
+| `VOLITANS_HORN_GORE` | 1.0 | 0.0 | 1.3 | 0 |
+| `VOLITANS_BURROW` | 1.0 | 0.0 | 1.4 | 0 |
+| `VOLITANS_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `VOLITANS_POISON_BALL` | 1.0 | 5.0 | 0 | 1.15 |
+| `VOLITANS_BREATH` | 1.0 | 0.5 | 0 | 0.12 |
+| `VOLITANS_ULTIMATE` | 1.0 | 6.0 | 0.6 | 1.5 |
+| `VARASUCHUS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `VARASUCHUS_BITE2` | 1.0 | 0.0 | 1.3 | 0 |
+| `VARASUCHUS_CLAW` | 1.0 | 0.0 | 0.95 | 0 |
+| `VARASUCHUS_HORN_GORE` | 1.0 | 0.0 | 1.25 | 0 |
+| `VARASUCHUS_TAIL_ATTACK` | 1.0 | 0.0 | 1.1 | 0 |
+| `VARASUCHUS_SLASH_BARRAGE` | 1.0 | 0.0 | 0.55 | 0 |
+| `VARASUCHUS_TAILGUARD` | 1.0 | 0 | 0 | 0 |
+| `VARASUCHUS_PHASE_SHIFT` | 1.0 | 0 | 0 | 0 |
+| `IGNIVORUS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `IGNIVORUS_BODY_SLAM` | 1.0 | 0.0 | 1.5 | 0 |
+| `IGNIVORUS_WING_SWIPE` | 1.0 | 0.0 | 1.1 | 0 |
+| `IGNIVORUS_STOMP` | 1.0 | 0.0 | 1.35 | 0 |
+| `IGNIVORUS_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `IGNIVORUS_FIRE_BREATH` | 1.0 | 0.6 | 0 | 0.12 |
+| `IGNIVORUS_FIREBALL` | 1.0 | 6.0 | 0 | 1.25 |
+| `IGNIVORUS_ULTIMATE` | 1.0 | 14.0 | 0 | 2.6 |
+| `ATROXIIA_SLAM` | 1.0 | 0.0 | 1.4 | 0 |
+| `ATROXIIA_SWIPE` | 1.0 | 0.0 | 1.05 | 0 |
+| `ATROXIIA_UNDERWATER_BITE` | 1.0 | 0.0 | 1.15 | 0 |
+| `ATROXIIA_DEVASTATING_SWEEP` | 1.0 | 0.0 | 1.5 | 0 |
+| `ATROXIIA_PRECISE_STRIKE` | 1.0 | 0.0 | 0.55 | 0 |
+| `ATROXIIA_GUNGNIR_STAB` | 1.0 | 3.0 | 1.2 | 0.5 |
+| `ATROXIIA_HELHEIM_QUAKE` | 1.0 | 5.0 | 0 | 1.6 |
+| `ATROXIIA_SLITHER` | 1.0 | 0 | 0 | 0 |
+| `STEGONAUT_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `STEGONAUT_CHIN_SLAM` | 1.0 | 0.0 | 1.3 | 0 |
+| `STEGONAUT_GROUND_SLAM` | 1.0 | 3.0 | 0.8 | 1.0 |
+| `STEGONAUT_GROUND_EATING` | 1.0 | 2.0 | 0.8 | 0.8 |
+| `RAEVYX_BITE` | 1.0 | 0.0 | 0.9 | 0 |
+| `RAEVYX_HORN_GORE` | 1.0 | 0.0 | 1.35 | 0 |
+| `RAEVYX_GROUND_REND` | 1.0 | 0.0 | 0.9 | 0.45 |
+| `RAEVYX_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `RAEVYX_SUMMON_STORM` | 1.0 | 3.0 | 0 | 1.4 |
+| `RAEVYX_LIGHTNING_BEAM` | 1.0 | 0.5 | 0 | 0.12 |
+
+### 能力维护与发射点
+
+Raevyx 推进光束能量和光束朝向；Ignivorus 推进火焰吐息能量与阶段状态，其吐息流在服务端 tick；Volitans 推进吐息槽能量及服务端吐息流；Varasuchus 推进第二阶段滞留计时。其他配置在此没有额外维护／效果覆盖。
+
+Raevyx 使用 `beamBoneOrigin`，Volitans 使用 `breathBoneOrigin`。Ignivorus 沿用默认的空定位点，因此该桥接不会为它采样或应用客户端发射点偏移。所属客户端采样渲染定位点，把世界偏移转为身体偏航局部坐标，只发送量化后变化的样本，最短间隔 2 ticks。变化检测按每格 256 单位量化，但包内仍传输浮点偏移。
+
+服务端仅接受活动阶段、修订号匹配且形态为龙的样本，再于效果执行前按当前位置和身体偏航重投影。**接收端没有检查有限数值，也没有限制偏移长度**。这是当前的信任边界，不能当作服务端重建的骨骼几何。运行状态不按样本年龄过期；没有样本时沿用原生回退。
+
+### 同步
+
+| 包／状态 | 字段 | 所有权与接收条件 |
+| --- | --- | --- |
+| `saints_dragon_morph_state` | 宿主实体 ID、变形修订号、形态原始类型 ID、表现状态 | 仅追踪旁观者。未来匹配状态可暂存，旧修订丢弃；应用要求修订与类型一致。 |
+| 表现状态 | 地面移动状态、飞行模式、前进／横移输入、上升／下降、加速、飞行、起飞、悬停、着地、飞行俯仰、累计滚转、偏航、俯仰、身体偏航、头部偏航 | 移动状态／模式为字节，输入与角度为浮点数，布尔量打包到标志字节；在原生视觉平滑前重用到旁观形态。 |
+| `saints_dragon_morph_ability_state` | 宿主实体 ID、变形修订号、活动／叠加能力名称；空名称表示无 | 追踪者与宿主均接收。要求活动阶段及修订匹配，不排队等待；纠正不一致的本地能力，并按下述规则保留短暂的收尾窗口；不启动或跳转阶段。 |
+| `saints_dragon_morph_muzzle` | 变形修订号与局部 X/Y/Z 浮点偏移 | 所属客户端发送的 C2S 样本，校验见上文。 |
+
+表现状态变化时发送，并每 20 ticks（1 秒）完整发送一次。能力纠正仅在活动／叠加名称变化时发送。新开始追踪时只发送表现快照，因此中途加入的旁观者不保证获得已有能力的启动动画；通用预览也没有重播历史。
+
+已注册的本地能力若与服务端不一致，且剩余时间超过 40 ticks（2 秒），或剩余阶段中含有无限时长阶段，就立即结束。有限时长且处于该窗口内的能力可自然收尾：在剩余阶段时间上增加 10 ticks（0.5 秒）宽限。倒计时在本地能力 tick 之后推进；槽位清空或能力名称改变时取消等待，否则到期强制结束。名称一致或未注册的能力不受影响。
+
+### 乘客、镜头与变体
+
+成年形态可承载一名真实乘客；宿主与乘客必须存活、不是旁观模式、未骑乘其他实体，且宿主没有乘客。用于操控的虚拟骑手身份与之分开。
+
+客户端可用 `passengerLocator` 提供动画座位，服务端使用原生种类座位偏移；Nulljaw 另走高度路径。下马探测使用半径 2.5、3.5、1.8，角度 0、30、−30、60、−60、90、−90、180，向原生径向辅助方法传入搜索深度 10 和净空参数 2。承载的乘客被视为原生盟友。乘客朝向使用原生缓存骑手矩阵／配置和座位偏移，缺失或过期数据可能使姿态不被应用。
+
+镜头仅在活动变形阶段采样原生骑乘镜头控制器。原生客户端配置可以关闭侧倾横移，缩放、垂直偏移及俯仰仍来自其输出。通用碰撞裁剪和视角规则见[变形客户端表现](/zh-cn/dev/morph-client/)。
+
+变体选项与默认 ID 来自 `SaintsDragonVariantRegistry`，覆盖原生 `Dragons` 目录。应用时设置原生纹理变体 ID。该提供者拥有形态纹理，因此通用变形 PNG 覆盖不会替换它们。选择权限与持久化见[变形生命周期](/zh-cn/dev/morphing/)。
+
+## 扩展方式
+
+种类缩放、形态技能绑定、再次按下策略与能力维护应放在对应的 `SaintsDragonProfile` 中。新增原生动作必须同时登记到声明能力目录与种类配置。仅在原生控制器需要时增加移动分支，并区分模拟所有权与渲染平滑。
+
+升级依赖时需要检查访问器／mixin 目标、阶段与恢复语义、骑乘控制器、定位点名称、声音包、镜头输出及座位缓存。依赖锁定值标识本次集成目标，不代表第三方 API 稳定承诺。
+
+## 验证
+
+使用独立服务端，让所属玩家、已有旁观者和后加入旁观者共同测试。逐种测试地面、水中、起飞、着地及传送后行为，检查恢复锁、动量、原生旋转和重复推进问题。
+
+逐个目录动作比较按下、按住、释放及再次按下，包括切换形态后的释放。检查叠加能力与主能力并行、延迟包。使用已知近战／法术属性，先关闭再开启暴击，按系数表比较原生伤害；还要测试主手武器普通装备贡献被抑制时的情况。
+
+检查转向、报告延迟／缺失时的发射点，并单独检查非法偏移处理；在原能力结束后验证投射物伤害归属。让一名乘客上下龙，检查友方命中拒绝、视线／镜头遮挡、视角切换与资源重载后的原生变体。
+
+## 相关页面
+
+- [变形服务](/zh-cn/dev/morph-api/)
+- [变形生命周期](/zh-cn/dev/morphing/)
+- [变形客户端表现](/zh-cn/dev/morph-client/)
+- [变形数据](/zh-cn/wiki/morph-data/)

@@ -1,0 +1,220 @@
+---
+title: "对话对象与界面"
+description: "Blabber 阻塞对象、单次回复、常驻视觉内容与 ModernUI 展示桥接。"
+category: client
+order: 135
+updated: 2026-09-19
+---
+
+对话对象让服务端交互暂时用目录、提示或仅保留字幕的等待状态替代普通选项。常驻贡献器通过独立绘制列表添加不阻塞对话的视觉内容，在 Minecraft 客户端线程捕获游戏状态，再由 ModernUI 的 UI 线程绘制。
+
+## 入口
+
+服务端 API 属于 Blabber：`io.github.ladysnake.blabber.api.DialogueAPI`、`DialogueScreenObject` 与 `DialogueObjectResult`。客户端约定位于 `io.github.ladysnake.blabber.api.client`：`DialogueClientAPI`、`DialoguePresentation`、`PersistDialogueScreenObject`、`DialogueScreenContext` 与 `DialogueDrawList`。
+
+本仓库使用 Blabber `0.5.1-build32` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
+
+异界扩展在客户端初始化时安装 `IsekaiDialoguePresentation`，并将 `NpcFavorDialogueHud` 注册为 `isekaiexpansion:npc_status`。依赖负责对象状态、选择与输入，宿主提供目录容器、标签及提示控件。
+
+## 常见用法
+
+### 提供服务端持有的选项
+
+玩家已有活动 Blabber 会话与对话 handler 时，在服务端线程调用：
+
+```java
+static void offer(ServerPlayerEntity player) {
+    var entry = new DialogueScreenObject.Entry(
+            new Identifier("example", "accept"), Text.literal("Accept"));
+    var object = new DialogueScreenObject(new Identifier("example", "offer"),
+            Text.literal("Choose a response."), List.of(entry), true, DialoguePanel.conversation());
+    DialogueAPI.showObject(player, object, (speaker, result) -> {
+        if (result.cancelled()) return;
+        speaker.sendMessage(Text.literal(result.selection().orElseThrow().toString()), false);
+    });
+}
+```
+
+示例使用上述服务端 API 包、`java.util.List` 及 Minecraft 的 `ServerPlayerEntity`、`Identifier`、`Text`。需要服务端私有载荷时，使用带 `NbtCompound` 的条目构造器。回复取回保存的载荷，客户端不能提交替代数据。
+
+异步工作应保存 `showObject` 返回的 UUID，继续之前检查 `isCurrentObject(player, token)`，以及自己的维度、实体和会话条件。[问路 API](/zh-cn/dev/wayfinding-api/)说明了为什么 token 本身不足以确认完整玩法上下文。
+
+### 注册不阻塞对话的视觉内容
+
+在客户端初始化期间、打开对话之前注册：
+
+```java
+static void registerDialogueLabel() {
+    DialogueClientAPI.registerPersistent(new Identifier("example", "dialogue_label"),
+            (context, session, draw) -> {
+                if (session == null) return;
+                draw.text("Example", 12, 24, 100, 14, 9, 0xFFFFFFFF);
+            });
+}
+```
+
+使用 Blabber 的 `api.client.DialogueClientAPI` 和 Minecraft 的 `Identifier`。位置采用 Minecraft 缩放后的 GUI 坐标。回调读取游戏状态并填充 builder，不应操作 ModernUI view。移除时用同一 ID 调用 `removePersistent`。
+
+## 方法一览
+
+### 服务端对象
+
+| 入口 | 约定 |
+| --- | --- |
+| `DialogueAPI.showObject(player, object, completion)` | 返回随机 UUID token，取消并替换旧对象；要求活动会话与对话 handler，并同步新对象。 |
+| `DialogueAPI.isHolding(player)` | 对象是否匹配玩家当前 handler 和对话会话。 |
+| `DialogueAPI.isCurrentObject(player, token)` | 同样的活动上下文检查，另要求 token 相等。 |
+| `DialogueAPI.clearObject(player)` | 移除对象并通知取消；不存在对象时无操作。 |
+| `new DialogueScreenObject(type, title, entries, cancellable, panel)` | type/title 不可为空，复制标题与条目列表，检查文字、大小和重复 ID；空条目保留字幕，但隐藏面板。 |
+| `new DialogueScreenObject.Entry(id, label, data, display)` | ID 不可为空，复制标签与 NBT。2 参数重载使用空 NBT，`data()` 再返回副本。 |
+| `new DialogueObjectResult(selection, data, reason)` | 可选的所选 ID 与 NBT 副本；`data()` 再复制，`cancelled()` 表示 selection 为空。 |
+
+标题和标签在构造时复制，但 record 访问器返回保存的 `Text` 对象；构造后应视为不可变。NBT 访问器则明确返回防御性副本。
+
+| 限制 | 数值 |
+| --- | --- |
+| 条目数 | 最多 4096，条目 ID 不可重复。 |
+| 标题长度 | `getString()` 最多 2048 个 Java 字符串单元。 |
+| 条目标签长度 | 每项最多 512 个 Java 字符串单元。 |
+| 编码大小估算 | 最多 524288：序列化标题和标签的 UTF-8 字节，加每个 ID 字符串长度与 16 个开销单元。 |
+| 对象期限 | 真实时间 300 秒（5 分钟），使用 `nanoTime`。 |
+
+编码检查是构造器的估算，不是所有网络字节的精确计数。动作 NBT 载荷留在服务端，因此不参与估算；面板和显示描述的编码字节参与估算。构造无效时抛出 `IllegalArgumentException`，不会截短目录。
+
+### 服务布局与分段台词
+
+`DialoguePanel`包含`layout`、标题、确认与取消`Text`、`searchable`开关、筛选描述和后续台词。布局为`CONVERSATION`、`CATALOGUE`或`TRADE`。`conversation()`生成没有标题和通用页脚的紧凑回复；`catalogue(heading, confirm, cancel, searchable)`生成显式选择列表。`then(Text...)`替换后续台词列表，最多追加32段。筛选描述最多16项，每项包含键、标签和复制的物品图标；空键表示全部类别。
+
+首段字幕取对象标题，之后读取`continuation`。确认键先补全当前台词，再逐段推进；最后一段完整显示后才出现回复。铁匠依次说明价钱、工期和约定。问路只在目的地列表启用搜索，地点类别与指南针使用各自的标题和确认文案。
+
+`DialogueScreenObject.Display`携带复制的物品图标、详情、类别、铜币价格和启用状态；负价格不参与价格范围筛选。类别`action`将条目放入固定服务按钮栏，不受目录筛选影响。`TRADE`增加物品类别图标与含边界的最低、最高铜币价格输入。Minecraft在ModernUI的表面中绘制物品模型，布局、焦点与输入由ModernUI管理。
+
+`Display(icon, detail, category, price, enabled, exchange)`的`exchange`可以为null，普通条目传null。结构化交易行将名称与库存放在标题行，下方分别绘制支付内容和产物，不从翻译后的句子解析报价。
+
+| Exchange字段 | 类型 | 必填 / 范围 | 含义 |
+| --- | --- | --- | --- |
+| `items` | `List<ItemStack>` | 必填，最多2项 | 非货币材料；构造和访问时均复制。 |
+| `money` | `long` | 必填，≥0 | 调价与议价后实际应付的铜币总额。 |
+| `result` | `ItemStack` | 必填 | 复制的产物堆叠。 |
+| `resultMoney` | `long` | 必填，≥0 | 商人支付的货币；为0时绘制产物模型。 |
+| `originalMoney` | `long` | 必填，≥`money` | 议价前已调整的铜币价格；高于成交价时显示划线对照。 |
+| `discount` | `int` | 必填，0–100 | 展示百分比；本宿主传0–15，以物易物时为0。 |
+
+`DialoguePresentation.createExchange(context, exchange)`创建结构化内容。宿主按非零币种调用Isekai Core的`NumismaticClientCompat.createCurrencyTooltipComponent`。`select(control, selected)`将激活状态与ListView的临时选中分开。筛选使用完整指针控件和宿主的原版样式提示层，尚不可用的换货按钮也保留提示。
+
+`DialogueSurfaceAPI.create(context, renderer)`委托内部Minecraft表面桥接。渲染线程回调接收`DrawContext`、GUI单位的宽高以及祖先不透明度。桥接在UI线程捕获祖先裁剪和可见性，立即抑制隐藏或分离内容，并在恢复矩阵前提交Minecraft顶点。调用方必须在回调内完成绘制。
+
+面板真正出现时才开始动画：入场260毫秒，退场150毫秒，使用标准缓动；历史入场180毫秒。替换等待旧面板退场，退场控件不可提交。打开历史会立即隐藏原生物品表面。键盘选择保留宿主强调色，并对高亮进行过渡。
+
+`DialogueObjectResult.Reason`区分`SELECTED`、玩家主动`CANCELLED`与生命周期`DISMISSED`。所有空选择仍满足`cancelled() == true`。替换、超时或关闭不能当成玩家要求返回菜单。服务端也会拒绝禁用条目ID。`DialogueAPI.registerTradePanel`为现有交易动作安装宿主谓词；宿主已经处理该实体时返回true，包括拒绝交互的情况。
+
+### 客户端注册与展示
+
+| 入口 | 约定 |
+| --- | --- |
+| `setPresentation(DialoguePresentation)` | 为后续创建的 fragment 设置非空全局工厂，应在打开前安装。 |
+| `registerPersistent(Identifier, PersistDialogueScreenObject)` | 按插入顺序添加贡献器，重复 ID 抛出异常。 |
+| `removePersistent(Identifier)` | 注销；不存在 ID 时无操作。 |
+| `PersistDialogueScreenObject.compose(context, session, builder)` | Minecraft 客户端线程上的快照回调，session 可能为空。 |
+| `DialogueScreenContext(width, height, handler)` | 缩放 GUI 尺寸与当前 Blabber handler，属于游戏线程上下文。 |
+
+fragment 在构造时捕获展示工厂，修改全局工厂不会替换现有 fragment 的控件。贡献器注册使用未同步映射，应在客户端线程修改，通常放在初始化期间。capture 不隔离贡献器异常，某个贡献器失败可能阻止帧快照更新。
+
+`DialoguePresentation` 工厂在 ModernUI UI 线程运行：
+
+| 方法 | 返回或职责 |
+| --- | --- |
+| `createCatalogueSurface(Context)` | `LinearLayout` 容器，子控件由 Blabber 安排。 |
+| `createCatalogueHeading(Context, title, subtitle)` | 标题 `View`。 |
+| `createCatalogueEntry(Context)` | `Control(view, label)`，列表行可能被复用并重新绑定。 |
+| `createCatalogueAction(Context, primary)` | 确认或取消用的 `Control(view, label)`。 |
+| `createTooltipLayer(Context)` | 在其他子控件之后安装的提示 `View`。 |
+| `bindTooltip(View, List<Text>)` | 将带样式的条件段落绑定到控件。 |
+| `clearTooltips()` | 替换、历史切换或清理时移除活动提示。 |
+
+宿主使用 `AdventurerSurface`、`AdventurerTitleBlock` 与 `AdventurerTooltipLayer`。普通选项仍使用 Blabber 选项控件，工厂接口负责目录控件主题。只有不可用的普通选项会收到未满足条件提示。
+
+### 绘制列表命令
+
+builder 保持命令顺序，`build()` 返回不可变命令列表。支持 `sprite`、`fill`、带或不带可见长度的 `text`，以及 `centeredText`。也可直接构造 record，但不会自动执行 builder 中的校验。
+
+| 命令或字段 | 含义 |
+| --- | --- |
+| `Sprite.texture` | 贴图 ID；渲染打开图片时会去掉开头的 `textures/`。 |
+| `Sprite.x, y, width, height` | 缩放 GUI 坐标中的目标矩形；宽高非正时跳过图片。 |
+| `Sprite.u, v, sourceWidth, sourceHeight` | 图片像素单位的源矩形，不是归一化 UV。 |
+| `Sprite.alpha` | 渲染器截断到 0–1 后转为 0–255，builder 不截断。 |
+| `Fill.x, y, width, height, color` | GUI 矩形与打包 ARGB 颜色，builder 原样记录。 |
+| `Label.text, x, y` | 完整字符串与 GUI 位置。 |
+| `Label.width, height` | 段落边界，builder 各取至少 1。 |
+| `Label.size, color` | 初始字号与打包 ARGB；应提供有效、有限的正字号。 |
+| `Label.visibleCharacters` | UTF-16 结束索引，默认完整字符串长度；渲染器截断并避免拆开代理对。 |
+| `Label.centered` | `text` 使用 false，`centeredText` 使用 true 并完整显示。 |
+
+渲染器将绘制列表坐标空间缩放到 view 尺寸。段落先测量完整字符串，再以透明尾部逐字显示；改变颜色或可见长度不会重新排版。字号每次乘 ×0.94，直到高度适配或降至初始值的至多 ×0.52，然后按边界裁剪。这是有限的适配尝试，不保证任意文字均能容纳。
+
+段落使用选中的 ModernUI 字体，并以文字、边界、字号和居中状态为键缓存最多 128 项。字体变化清除布局；资源刷新和 fragment 销毁清除图片与布局缓存。
+
+## 线程与生命周期
+
+### 阻塞交互与网络所有权
+
+服务端变更要求服务端线程，跨线程调用会抛出异常。查询使用同一个未同步 pending 映射，也应在该线程运行。`showObject` 同时要求活动会话与当前 Blabber 对话 handler。
+
+对象绑定确切的 screen handler、对话会话 UUID 和单次 token。回复须匹配 sync ID、token 与当前会话，并选择已提供的条目，或取消允许取消的对象。运行时先移除 token，再执行完成回调，因此已接受选项的回调可以打开下一对象。对象活动期间，服务端拒绝普通对话选项。
+
+替换时，先执行旧对象的取消回调，再安装新 pending 对象。若调用方正在替换对象，不应在旧对象的取消回调中再次打开对象，否则外层安装可能覆盖回调新建的对象。显式清理会捕获并记录回调异常。
+
+| 事件 | pending 对象结果 |
+| --- | --- |
+| 接受选择或允许的取消 | 移除、同步移除，再执行完成回调。 |
+| 替换或显式清除 | 取消旧对象并执行取消回调。 |
+| 关闭界面、上下文失效、期限扫描、数据重载成功 | 清除并执行取消回调。 |
+| 断线或服务器停止 | 直接丢弃 pending 状态，不执行完成回调。 |
+
+期限在服务端刻末扫描；`isHolding`、`isCurrentObject` 和回复校验不会单独比较期限。因此 300 秒是清理时机，不是网络收包的严格截止点。
+
+`blabber:screen_object` 携带 sync ID、交互版本、存在标记与 token；存在对象时再携带类型、标题、可取消标记、面板设置、数量及 ID/标签/显示描述。动作 NBT 留在服务端；显示物品的 NBT 会发送。`blabber:screen_object_result` 返回 sync ID、token 和可选所选 ID；结果载荷取自服务端匹配条目。
+
+客户端忽略不匹配 handler 或旧交互版本的数据包，移除消息只清除对应 token。每个 token 仅允许一次提交；UI 的已提交标记会跨过期快照保持，只有新 token 才重置。普通选项消息另带 sync ID、交互版本和选项索引，并等待服务端可用性与状态确认。
+
+### 快照与输入生命周期
+
+数据对话和父级对话 handler 都通过 ModernUI 的 `MenuScreenFactory` 创建界面。控制器捕获初始帧，并在客户端刻末、交互及资源刷新时更新。常驻回调在这些捕获时运行，不是每个 UI 渲染帧都调用；UI 读取最新快照并独立播放动画。
+
+对象活动时，字幕板显示对象提示，推进独立提示时钟，暂停普通台词时钟。普通台词仅在状态键与文字组合变化时重置计时；单改版本不会重播相同台词。显示按 Unicode 码点计数，普通选项在完整显示后 200 ms 才可用。捕获的速度限制为 1–100。
+
+| 上下文 | 操作 |
+| --- | --- |
+| 普通对话 | 前进/后退绑定或 Up/Down 选择，Enter 或背包绑定确认；选项支持悬停、点击与滚轮。 |
+| 对象目录 | Up/Down 或前进/后退选择；Page Up/Down 移动 8 项；滚轮选择；点击条目选中，Enter、背包绑定或当前服务的确认按钮提交。 |
+| 搜索框 | 仅在面板启用搜索时显示；点击或按 `/` 聚焦。按空白分词，对翻译后标签、详情与 ID 做不区分大小写的匹配，并叠加类别与含边界的铜币价格范围。前进、后退和背包字母此时用于输入，Enter 仍确认。 |
+| 取消 | Escape 优先关闭历史，再退出正在编辑的输入框，否则取消可取消对象；不会关闭被不可取消对象阻塞的对话。 |
+| 历史 | 普通对话或面板中按 H 或 Shift+滚轮，也可点击提示行；编辑时 H 仍用于输入；fragment 最多保存 128 行。 |
+
+目录保持服务端顺序。对话回复单击提交，不显示通用页脚；禁用条目不能提交。原列表为空时只保留等待字幕，过滤无匹配时显示空结果，二者都不能提交条目。当前 fragment 按布局和标题保存目录过滤与选择，最多保存 16 组；从交易详情返回时仍保留。列表 viewport 明确裁剪动画行，再恢复画布供页脚绘制。
+
+历史仅保存在当前 fragment，打开时隐藏普通和常驻视觉内容，但不会停止底层显示时钟。关闭对话后丢弃该 fragment 的历史。资源重载刷新标签、重建控件并清除渲染缓存。
+
+### NPC 状态贡献器
+
+宿主贡献器仅在会话元数据标记为基础 NPC 时绘制，展示好感或订婚状态、分层心情图标、个性与小队模式；跟随槽位按从 1 开始的序号显示。好感进度限制为 0–1，最高好感判定由 Isekai Core 提供。
+
+元数据键与关系语义见 [NPC 对话](/zh-cn/dev/npc-dialogue/)和 [NPC 情绪](/zh-cn/dev/npc-emotion/)。HUD 按可用宽度均衡分配文字上限并加省略号，连省略号也放不下时输出空文字。绘制不会修改关系状态。
+
+## 验证
+
+在 Blabber 仓库中使用依赖自带的 `tools/dialogue/verify.gradle` 检查入口：`gradlew.bat --no-configure-on-demand -I tools/dialogue/verify.gradle checkDialogueInteraction`。源码属于该依赖，不要复制进本模组。该检查在无 GPU 环境中验证原生焦点、搜索编辑、选中、提交锁，以及交易条目与普通条目之间的复合行复用；游戏画面仍需另行检查。
+
+检查旧或重复 token、无效条目 ID、不可取消的空面板、替换回调、超时、重载、关闭界面与断线。确认载荷 NBT 不进入客户端数据包，并且已接受的回调可以打开下一面板。
+
+游戏内验证首次点击前的导航、用移动和背包字母搜索、连续目录面板、取消搜索、较长翻译文本、代理对、多种 GUI 缩放、不可用选项提示、历史恢复与资源重载。确认贡献器在游戏线程运行，view 工厂在 UI 线程运行。
+
+## 相关页面
+
+- [交易 API](/zh-cn/dev/trading-api/)——报价、议价与货物轮换。
+- [问路 API](/zh-cn/dev/wayfinding-api/)——带上下文检查的异步搜索与指南针写入。
+- [NPC 对话](/zh-cn/dev/npc-dialogue/)——准入、路由与事务。
+- [对话数据](/zh-cn/wiki/dialogue-data/)——文本与动作编写。
+- [对话工具](/zh-cn/dev/dialogue-tools/)——生成器与编辑器流程。
+

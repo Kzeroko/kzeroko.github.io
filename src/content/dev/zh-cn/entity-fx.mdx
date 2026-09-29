@@ -1,0 +1,118 @@
+---
+title: "实体特效"
+description: "死亡、传送与重生如何用 particlize 播放替代原版表现：解析顺序、时序，以及怎么注册自己的策略。"
+category: client
+order: 20
+updated: 2026-09-18
+tagline: "实体死掉、离开、回来时，到底播什么。"
+tags: ['特效', 'particlize', '死亡', '传送']
+---
+
+有三个时刻需要让一个实体明确地消失或出现：它死了、它传送了，或者玩家重生了。这三种都由一个 particlize 配置驱动，而不是原版那团烟，并且全部在服务端决定，所以每个看到的人看到的是同一份效果。这一页讲的是策略和时序。底下的渲染在 [Particlize](/zh-cn/dev/particlize/)，其中几种同时会生成的 Effekseer 发射器在 [Effekseer 粒子](/zh-cn/dev/effekseer-particles/)。
+
+## 它做什么
+
+**死亡**：把生物的原版死亡表现换成一次分解播放，并把尸体保留配置好的刻数，让特效有东西可以溶解。
+
+**传送**：拆成离开和到达两半，因为中间有一段时间实体并不在任何一边。起手时长是对着 Effekseer 资源算出来的，所以溶解正好在转移发生时结束。
+
+**重生**：把玩家重新组合进世界，但只在他真的死过的时候。
+
+它刻意不负责的部分：粒子模拟本身、配置文件本身，以及「哪个配置好看」这类判断。它只负责哪个定义适用于哪个实体，以及播放什么时候开始。
+
+## 运行时模型
+
+### 死亡的解析顺序
+
+`EntityDeathFxRegistry.resolve(LivingEntity)` 取第一个命中的：
+
+<Steps>
+
+1. **精确的实体类型**。`register(EntityType, definition)` 优先级最高。
+
+2. **类规则**。`registerClass(Class, definition)` 用 `isInstance` 匹配，所以挂在父类上的规则会覆盖它的子类。规则按最新的先查——对同一个类再注册一次是替换旧规则，不是再加一条。
+
+3. **兜底定义**。所有没匹配上的共用它，可以用 `setFallback` 换掉。内置的是 `mob_death` 配置、尸体保留 32 刻、原版烟雾关掉。
+
+</Steps>
+
+精确映射用的是 `ConcurrentHashMap`，类规则用的是 `CopyOnWriteArrayList`，所以任何线程注册都安全，解析也不会阻塞。
+
+### 一份定义
+
+`EntityDeathFxDefinition` 是一个 record。它的紧凑构造器会拒绝为空的标识符，并把尸体存留时间夹到范围内——超范围的值会被修正，而不是报错。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `enabled` | boolean | 必填 | 填 `false` 就完全不动原版的死亡表现。 |
+| `profileId` | identifier | 必填 | 要播放的 particlize 配置。为空会在构造时抛异常。 |
+| `mode` | `ParticlizeMode` | 必填 | 死亡用 `DECOMPOSE`。为空会抛异常。 |
+| `removalTicks` | integer | 必填 | 尸体在移除前保留多久，夹在 `1…1200`（60 秒）之间。 |
+| `replaceVanillaSmoke` | boolean | 必填 | 关掉原版死亡烟雾，免得两个效果叠在一起播。 |
+| `priority` | `ParticlizePriority` | `AMBIENT` | 客户端超预算时，哪些效果会被保下来。 |
+
+常见情况有两个工厂方法。`EntityDeathFxDefinition.decompose(profileId, removalTicks, replaceVanillaSmoke)` 生成一个已启用的 `DECOMPOSE` 定义，优先级为 `AMBIENT`，另有一个可以显式传优先级的重载。`EntityDeathFxDefinition.disabled()` 返回一个 `enabled` 为 `false` 的定义。
+
+### 传送的时序
+
+`TeleportFxSequence.beginTransfer` 同时启动三样东西：源点一个静态 Effekseer 发射器、目标点一个，以及挂在实体上的一次分解。如果是玩家，还会额外发一次传送畸变。
+
+起手的长度不是拍脑袋定的。Effekseer 资源在第 65 帧交接实体，`FxSyncUtil.effekFrameToTicks` 按 60 FPS 的资源和 20 TPS 的服务端换算并向上取整，得到 22 刻。`transferDelayTicks()` 把这个值暴露出去，让真正执行转移的调用方等得和美术做的一样长。
+
+到达是刻意分开的。`prepareArrival` 在实体还没到目标点之前就先起目标点的发射器，`completeArrival` 则在追踪交接**之后**才播组合——在目标点的玩家还没开始追踪这个实体时播的组合，等于没人看得到。
+
+`beginDeparture` 只有离开那一半，给收纳、消失，以及其它「把实体拿走但不放到别处」的流程用。
+
+### 重生
+
+`PlayerRespawnFxSystem.playAfterRespawn(player, alive)` 在 `alive` 为真时直接返回。切维度和从末地回来都会走重生路径，而玩家当时是活着的，这两种都不该看起来像复活。它在整套重生落位事务完成之后才运行，绝不在事务过程中。
+
+## 约定
+
+**永远由服务端决定**。这里每个入口收的都是服务端侧的实体或世界，然后广播出去。客户端从不自己挑配置，所以两个玩家看同一次死亡，看到的是同一个效果。
+
+**播放按距离裁剪，半径每个时刻各不相同**。传送到达用 112.0 格，因为真正在意的观众在目标点；重生用 96.0 格。两个都比原版粒子半径大，这是故意的——附近的玩家不该错过这类事件。
+
+**优先级只是预算提示，不是保证**。传送和重生是 `CRITICAL`，因为漏掉它们会让实体像是凭空闪了一下；普通生物死亡是 `AMBIENT`，客户端吃紧时可以丢掉。四个级别是 `AMBIENT`、`NORMAL`、`IMPORTANT`、`CRITICAL`。
+
+**模式之间不能互换**。`DECOMPOSE` 把已有的实体打散，`COMPOSE` 把它拼起来，`PULSE` 两者都不是。离开时用了 `COMPOSE` 就是倒着播，而整条管线不会有任何地方提醒你。
+
+**`removalTicks` 是留给特效的时间下限**。时间一到实体就被移除，所以比尸体活得更久的配置会被从中间截断。做配置的时候把这两个对齐。
+
+## 扩展方式
+
+在模组初始化阶段注册，要赶在任何实体可能死亡之前：
+
+```java
+EntityDeathFxRegistry.register(
+    IsekaiMobEntities.SOME_MOB,
+    EntityDeathFxDefinition.decompose(ParticlizeProfiles.NPC_DEATH, 48, true, ParticlizePriority.IMPORTANT)
+);
+
+// 整个家族，除非有精确类型覆盖它。
+EntityDeathFxRegistry.registerClass(
+    WaterCreatureEntity.class,
+    EntityDeathFxDefinition.decompose(ParticlizeProfiles.MOB_DEATH, 24, true)
+);
+```
+
+想让某一种实体单独不参与，又不动兜底定义，就给它注册 `EntityDeathFxDefinition.disabled()`。
+
+内置的配置 ID 都是 `ParticlizeProfiles` 上的常量：`FIRST_JOIN`、`MOB_DEATH`、`NPC_DEATH`、`EVELINA_DEATH`、`PLAYER_RESPAWN`、`PLAYER_LOGOUT`、`TELEPORT_AWAY`、`TELEPORT_IN`、`ARCANE_PULSE`、`MORPH_TRANSITION` 和 `PROGRESSION_ASCENSION`。新增一个配置属于 [Particlize](/zh-cn/dev/particlize/) 那边的改动，不在这一页。
+
+<Callout type="caution" title="要在世界加载前注册">
+两个注册表都是实时查询，没有快照。等实体已经开始死了才注册，意味着这个类型最早死的那几只用的是上一套策略——这种 bug 只复现一次，之后再也抓不到。
+</Callout>
+
+## 验证
+
+- 杀一只你注册过的实体。设了 `replaceVanillaSmoke` 的话原版烟雾应该没了，尸体应该按配置的刻数停留。
+- 给一个类注册规则，再给这个类里的某个具体类型注册精确规则，然后杀它：精确规则赢。
+- 跨维度传送，盯着源点看：溶解应该在实体离开时正好结束，而不是结束之后。
+- 传送到一个已经有别的玩家在的地方：他能看到组合。传送到没人的地方再走过去：什么都不会补播，这是对的——到达不是持久效果。
+- 死一次再重生：组合会播。走一次下界传送门：不会播。
+
+## 相关页面
+
+- [Particlize](/zh-cn/dev/particlize/)——渲染、配置，以及这些优先级服务的那套预算。
+- [Effekseer 粒子](/zh-cn/dev/effekseer-particles/)——传送流程会生成的那些发射器。

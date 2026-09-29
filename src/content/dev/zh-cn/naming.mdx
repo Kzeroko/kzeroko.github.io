@@ -1,0 +1,140 @@
+---
+title: "命名API"
+description: "不可变姓名目录、NPC上下文解析器与可翻译的玩家身份。"
+category: api
+order: 115
+updated: 2026-09-26
+---
+
+`NamingAPI`委托命名运行时完成服务端选择和NPC命名，`ClientNamingAPI`提供创建界面使用的独立客户端目录。玩家操作见[角色姓名](/zh-cn/wiki/character-names/)，内容格式见[姓名池数据](/zh-cn/wiki/name-pools/)。
+
+## 入口
+
+服务端目录、翻译文本、随机选择和实体上下文统一通过`net.kzeroko.isekaiexpansion.api.naming.NamingAPI`访问。客户端浏览使用`net.kzeroko.isekaiexpansion.api.client.naming.ClientNamingAPI`。
+
+`NameCatalog`、`NamePool`、`NameEntry`、`NameQuery`和`NameGender`是位于`internal.naming`的不可变或值类型，由上述门面公开。`NamingService`及加载器属于内部实现。目录保存标识符和倾向分组，不保存已经渲染的字符串。完整内容只维护在姓名资源与语言组装中；实时数量由本地检查脚本报告，不向文档或站点导出姓名目录及持续变化的数量统计。
+
+## 常见用法
+
+### 按文化选择姓名
+
+下面为狐人选择东煌女性姓名，中性条目也符合条件：
+
+```java
+var query = new NameQuery(new Identifier("isekaiorigins", "kitsune"),
+        "donghuang", NameGender.FEMALE);
+var name = NamingAPI.choose(query, new java.util.SplittableRandom(seed));
+name.ifPresent(entry -> npc.setCustomName(entry.text()));
+```
+
+直接调用`setCustomName`由调用方决定覆盖规则。如需遵守配置、类型资格、独特NPC保护和已有名称保护，调用`NamingAPI.nameIfAbsent(npc, query)`；query传入null时自动解析实体上下文。市民身份应在生成前设置，命名后不会跟随文化编辑自动改名。
+
+### 显示玩家姓名
+
+两端都可通过 `NamingAPI.playerName(player)` 获取不带额外装饰的角色姓名 `Text`。它读取当前人形身份，遵守姓名显示开关，未启用时回退到账号名，并返回独立副本。预设姓名保留翻译键；服务端发送标签前不要调用 `getString()`。通过 `writeText`/`readText` 传输 `Text`，到客户端再按本地语言解析。操作目标、皮肤与 OPAC 成员身份仍单独使用 UUID 和账号名。
+
+状态界面在采集快照时通过此接口按客户端语言解析姓名。世界名称牌每次渲染都通过此门面读取姓名。公会名牌按 UUID 查找已加载的持有人并显示当前姓名；持有人未加载时，使用登记时保存的可翻译快照。名牌存储格式为 `2`，`OwnerAccount` 保存皮肤使用的账号身份，`OwnerDisplayName` 保存文本 JSON。旧格式不再读取，原型阶段的旧名牌需要重新登记。等级等其他字段保持已有的实时与存档显示规则。
+
+`GuildCardPortraitView` 使用独立的 `WardrobePlayerEntityPreview`：按 UUID 查找持有人，已加载时复制其组件和装备，未加载时创建账号身份对应的替身。`WardrobeEntityPortraitView` 截取有界的半身照片，再用图像着色器绘制圆角矩形，使裁切、淡入和卡片透视统一经过 Canvas 管线。每次截取都是静帧：`renderStill` 不推进预览时钟，照片固定在 `isekaiexpansion:idle_stand_neutral` 的第一帧；为等待迟到的皮肤贴图而进行的预热重截，画的也是同一瞬间。静帧渲染范围还会冻结人形部件动画，并保持双眼睁开。旧的平面皮肤头像渲染器已移除。
+
+截取使用临时颜色与深度帧缓冲，并还原调用方的帧缓冲、视口、投影、裁剪与像素传输状态。有限次数的预热刷新用于等待异步纹理，之后缓存图像及着色器。视图移除时取消待处理刷新，并释放图像、着色器和独立实体。该渲染器属于内部界面实现，不是公共门面。
+
+在游戏中检查倾斜时的圆角边缘、不同角色身高下的面部与肩部裁切、延迟加载皮肤、他人名牌，以及截取中关闭界面。
+
+### 解析其他模组的上下文
+
+在通用初始化阶段注册解析器，并把允许命名的类型加入`isekaiexpansion:nameable_npcs`。以下示例为带指定命令标签的NPC提供文化：
+
+```java
+NamingAPI.registerResolver(entity -> {
+    if (!entity.getCommandTags().contains("my_pack.donghuang")) return null;
+    return new NameQuery(null, "donghuang", NameGender.ANY);
+});
+```
+
+解析器按注册顺序调用，第一个非null结果生效。注册解析器本身不会让所有实体获得命名资格。内置上下文读取异界扩展NPC基础外观的种族与性别，市民额外读取`CitizenIdentity.culture()`；其他符合条件的实体使用未知种族、`default`文化和全部姓名倾向。文化查询去除首尾空白，并通过`Locale.ROOT`转为小写；空值或null使用`default`。
+
+## 方法一览
+
+| 方法 | 侧别 | 约定 |
+| --- | --- | --- |
+| `NamingAPI.catalog()` | 服务端 | 当前不可变快照；服务端重载前使用内置快照。 |
+| `NamingAPI.choose(query, random)` | 服务端 | 返回可空结果；按索引解析上下文，再从候选列表常数时间抽取，不预留唯一姓名。 |
+| `NamingAPI.playerName(player)` | 两端 | 返回独立、无额外装饰的角色姓名文本，遵守显示开关与账号名回退。 |
+| `NamingAPI.text(name)` | 两端 | 从完整姓名ID创建可翻译文本，不查目录。 |
+| `NamingAPI.query(entity)` | 服务端 | 返回扩展解析器或内置上下文。 |
+| `NamingAPI.nameIfAbsent(entity, query)` | 服务端 | 返回是否成功命名；客户端世界调用返回false。 |
+| `NamingAPI.dialogueName(entity, viewer)` | 服务端 | 返回当前玩家有权查看的职业或全名，保留可翻译文本。 |
+| `NamingAPI.registerDialogueResolver(resolver)` | 公共初始化 | 首个非 null 的 `DialogueNameProfile` 提供实体与玩家组合的职业及信任判断。 |
+| `NamingAPI.registerResolver(resolver)` | 通用初始化 | 将非null解析器加入有序列表。 |
+| `ClientNamingAPI.catalog()` | 客户端 | 独立的资源包快照，不使用集成服务器的可变选择状态。 |
+| `NameCatalog.pools() / size() / get(id)` | 快照读取 | 有序姓名池、姓名数量及可返回null的查找。 |
+| `NameCatalog.select(query) / inPool(pool, gender)` | 快照读取 | 返回不可变索引候选；未知池返回空列表。 |
+
+姓名倾向为`FEMALE`、`MALE`、`UNISEX`和`ANY`，查询倾向为null时采用`ANY`。候选先按池ID排序，再保持池内声明顺序。重载失败时保留上一份快照。
+
+### 对话中的身份揭示
+
+`DialogueNameProfile(role, trusted)` 保存不含个人姓名的职业 `Text` 与服务端信任判断。构造与访问时复制职业文本；`select(fullName)` 在未信任时返回职业副本，信任后返回全名副本。解析器接收 `(Entity, ServerPlayerEntity)`，按注册顺序运行，返回 null 时交给后续解析器。第三方关系系统或独特角色职业可通过此接口接入；职业文本不可包含尚未揭示的个人姓名。
+
+没有解析器时，唯一的揭示条件是 `BaseNpcEntity.isTrust(viewer)`。普通实体使用实体类型称呼；伊维莉娜使用探求的魔导师，其他独特 NPC 使用旅人。未注册信任解析器的第三方实体始终显示类型称呼。隶属归属、命名牌或友善状态不会绕过信任条件。
+
+`DialogueNaming` 将 `isekaiexpansion:dialogue_name` 注册为 `Text` 会话元数据，以 `writeText`/`readText` 传输。打开普通对话或父对话时，按当前玩家与实体求值。`DialogueNameMixin` 让客户端会话名称访问器在本地解析此文本，因此标题与 `{name}` 一致。判断是打开对话时的快照，重新打开才再次检查信任。没有实体的旁白会话保留 Blabber 的说话者名称。世界名称牌、保存的姓名及 `{player}` 不受影响。
+
+### 配置
+
+`IsekaiConfig.naming`是服务端同步的折叠配置节，加载后校验会将null节恢复为默认值。实体加载或调用`nameIfAbsent`时读取命名设置；浏览器构建「基础」页时读取预设开关，提交时服务端再次检查。
+
+| 选项 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `naming.enabled` | `boolean` | `true` | 控制自动/API NPC命名，不清除已保存姓名，也不关闭玩家预设。 |
+| `naming.nameVillagers` | `boolean` | `true` | 包含`MerchantEntity`及其子类。 |
+| `naming.nameThirdPartyNpcs` | `boolean` | `true` | 包含`isekaiexpansion:nameable_npcs`中的实体类型。 |
+| `naming.showUtilityJobs` | `boolean` | `true` | 新分配的经纪人及接待员姓名通过`name.isekaiexpansion.with_job`附加职业。 |
+| `naming.playerPresets` | `boolean` | `true` | 启用浏览器并接受新的有效预设选择；编辑其他内容时保留已有选择。 |
+
+### 赞助者播报
+
+`internal.supporter.SupporterAnnouncements` 管理加入与离开播报，在公共初始化期间注册一次，属于内部服务。IsekaiCore 通过 `ICSupporterUtil.getTier` 提供赞助资格；异界扩展通过 `NamingAPI.playerName` 读取当前角色姓名，并共用一个 `GameMessageS2CPacket` 发送。头衔与预设姓名保留嵌套翻译，由各接收者本地解析。整合包作者头衔按账号 UUID 判断，与角色姓名无关。
+
+`IsekaiConfig.supporter` 随服务端配置同步，每次连接事件读取；加载后校验会将 null 配置节恢复为默认值。服务不使用逐刻循环、延迟任务或姓名缓存。加入播报读取登录前保存的身份；首次创建且尚未选名的角色使用账号名。离开播报读取当时的身份。IsekaiCore 已移除播报注册、原设置与对应翻译键，不提供兼容适配。
+
+| 选项 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `supporter.joinMessage` | `boolean` | `true` | 播报符合资格的赞助者加入。 |
+| `supporter.leaveMessage` | `boolean` | `true` | 向仍在线的玩家播报符合资格的赞助者离开。 |
+| `supporter.overlay` | `boolean` | `false` | 改用动作栏显示，不放入聊天栏。 |
+| `supporter.informSelf` | `boolean` | `true` | 加入的赞助者本人也收到一次播报；关闭后本人不接收消息与提示音。离开的玩家始终不接收。 |
+| `supporter.playSound` | `boolean` | `true` | 为加入播报的接收者播放提示音；离开播报无声。 |
+
+## 线程与生命周期
+
+NPC在`ServerEntityEvents.ENTITY_LOAD`中命名，此时实体NBT和生成设置已完成。查询前先排除`UniqueNpcEntity`、`isUnique()`返回true的NPC、已有自定义名称的实体，以及`isekaiexpansion:naming_excluded`中的类型。已启用的手写人形姓名会被保留；否则从UUID生成`SplittableRandom`种子，只抽取一次。经纪人与接待员附加实体类型文本作为职业。原版`CustomName` NBT和实体跟踪传输可翻译文本，没有逐刻循环、全实体统计或额外持久化标记。
+
+普通 NPC 的好感与墓地身份使用持久化的 `NpcIdentityId` 标识，不依赖姓名翻译，复活后也保持不变。NBT 字段约定见 [NPC 基础](/zh-cn/dev/npc/)。
+
+实体方法应在服务端线程调用。解析器须快速返回，对不相关实体返回null，且不得修改实体。目录快照不可变，通过volatile引用发布；保留旧快照的调用方在重载后仍读到旧内容。服务端数据和客户端资源分别重载，登录和每次抽取都不会发送完整目录。
+
+`HumanoidIdentity`保存字面`Nickname`或`PresetName`标识符。选择预设会清空字面文本并启用显示，手动输入会清除预设。`UseNickname`可以关闭显示而保留选择。网络标志16在年龄载荷后追加预设ID字符串，上限256字符。字面昵称上限48个UTF-16单位，保留完整码点，并移除控制字符、格式字符与分节符。实现不保留兼容适配器或另一套名称字段。
+
+提交处理器先按作用域合并，再依据服务器目录与配置校验新选择的预设。未改变的已有ID即使被移出目录也会保留。玩家显示文本在本地解析，账号UUID和账号名不变，姓名编辑也不改变外观的visual hash。
+
+创建界面按目录快照和语言实例缓存显示名及搜索字符串，最多创建8个结果控件。修改查询时扫描缓存文本，绘制和随机抽取不扫描目录。每次重置是一次可撤销的会话编辑，分别恢复滑块默认值、性别/种族适用部件、当前颜色通道或空白的账号名显示默认状态。
+
+## 验证
+
+编译 Java 源码并组装语言文件：
+
+```bash
+./gradlew.bat compileJava assembleLanguageFiles
+```
+
+进入游戏后生成市民、冒险者、经纪人、接待员、村民及可选守卫，用两种语言的客户端比较。保存并重新加载实体，使用命名牌，再重载姓名池，确认独特NPC保留原名。测试首次加入时的搜索、翻页、随机选择、手动编辑、语言切换、重置和撤销，并检查支持的UI缩放比例。另用未信任和已信任的两个玩家对同一 NPC 打开普通对话与父对话，检查两种语言、命名牌、功能 NPC 职业后缀、独特角色职业及旁白会话。改变信任后重新打开对话。这些项目需要运行中的客户端与服务器。
+
+游戏内使用两种语言重连，测试本人播报、动作栏及声音开关，再改名并离开；确认每位在线接收者只收到一次播报，重新打开状态界面后显示当前姓名。
+
+## 相关页面
+
+- [姓名池数据](/zh-cn/wiki/name-pools/)
+- [人形运行时](/zh-cn/dev/humanoid-runtime/)
+- [NPC资源](/zh-cn/dev/npc-assets/)

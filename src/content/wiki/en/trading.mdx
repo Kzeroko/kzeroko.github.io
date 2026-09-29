@@ -1,0 +1,53 @@
+---
+title: "Trading"
+description: "Browse goods, negotiate a price and ask villagers to rotate their stock without leaving the conversation."
+category: world
+order: 145
+updated: 2026-09-25
+---
+
+Trading stays inside the conversation with the merchant. Villagers keep their current offers and NPC shops use the same counter, with item categories, text search and a copper-price range.
+
+## Prices and bargaining
+
+Eloquence improves your chance of agreeing a discount. You can make one offer per merchant between restocks; a failed attempt also uses that opportunity. Reopening the conversation or reloading the world does not grant another attempt.
+
+| Offer | Discount on currency you pay | Chance at 0 Eloquence |
+| --- | --- | --- |
+| Small concession | 5% | 65% |
+| Meet halfway | 10% | 45% |
+| Firm offer | 15% | 25% |
+
+The dialogue shows your current chance before you choose. Negative Eloquence counts as 0; the chance gains up to 50 percentage points as Eloquence rises and is capped at 95%. Discounts apply after Numismatic Overhaul's adjusted price, with a minimum payment of 1 copper. They do not increase a merchant's payment for goods you sell or reduce non-currency ingredients.
+
+Rows show the item name once, stock separately, and the payment and result as icons. Coin prices omit empty denominations. A crossed-out prior price and an agreed-discount label show bargaining savings; item-for-item exchanges keep their item quantities. The displayed price is the amount used by the server when you confirm.
+
+## Browse and exchange
+
+Choose a category icon, enter words from an item's name or details, or set inclusive minimum and maximum prices in copper. Empty bounds leave that end unrestricted. For goods a merchant buys from you, the price filter uses the payout. Item exchanges without currency remain visible across price ranges.
+
+Select a row, then take a closer look to review the exchange. Confirm the quoted costs and result to trade once. Sold-out goods cannot be purchased; insufficient payment or no room for the result disables agreement. If currency change fills the last space during payment, overflow is placed at your feet. Bargaining and stock refresh remain available above the list.
+
+W/S or Up/Down moves through the list, E or Enter confirms and the wheel changes selection. Tab reaches the filters and service buttons. Movement and inventory letters type normally while a field has focus. H or Shift+wheel opens conversation history; H remains a letter while editing. Escape leaves an editor first, returns from a trade detail or ends the conversation from the catalogue.
+
+## Ask for another selection
+
+Each villager restock grants one refresh chance, capped at one stored chance. Confirming the request spends it and brings out a new selection. Guaranteed catalogue entries stay; weighted entries favour goods whose offer IDs were absent from the previous selection. Repeats can remain when the pool is small, and different entries can still produce the same item. Catalogues that offer everything keep all eligible entries.
+
+Matching offers retain their current uses and price state when the selection changes. Refreshing does not grant another bargaining attempt. The stored chance, previous selection and negotiation result survive world saves. NPC shops replenish uses and reset bargaining at the next world day; the villager refresh service is not offered there.
+
+## Conversation and other systems
+
+| Condition | Effect |
+| --- | --- |
+| Base NPC | Uses the NPC merchant policy and an available trade route. Ordinary NPCs require trust or allegiance ownership; the contract broker is public. |
+| Merchant moves away | Trade ends beyond 4 blocks or in another world. |
+| Combat, panic or death | Ends the trade interaction. |
+| Numismatic Overhaul | Supplies adjusted currency prices; payment uses inventory currency and wallet funds. |
+| Trade overrides | Own the villager's eligible offer pool and guaranteed entries. |
+
+Merchants face you and stop their conversation movement. Threats can interrupt the conversation. They do not walk towards you to maintain a merchant screen.
+
+## Catalogue data
+
+Villager pools are authored under `data/<namespace>/trade_overrides/`. See [Trade overrides](/en/wiki/trade-overrides/) for selection and price fields, [Blacksmith commissions](/en/wiki/blacksmith-commissions/) for commissioned work and [Wayfinding](/en/wiki/wayfinding/) for asking directions.

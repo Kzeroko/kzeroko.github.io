@@ -1,0 +1,140 @@
+---
+title: "Naming API"
+description: "Immutable name catalogues, NPC context resolvers and translated player identities."
+category: api
+order: 115
+updated: 2026-09-26
+---
+
+`NamingAPI` delegates to the naming runtime for server-side selection and NPC assignment. `ClientNamingAPI` exposes the independent client catalogue used by the creator. See [Character names](/en/wiki/character-names/) for player behaviour and [Name pool data](/en/wiki/name-pools/) for the content schema.
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.naming.NamingAPI` for the server catalogue, translated text, selection and entity context. Client code browses through `net.kzeroko.isekaiexpansion.api.client.naming.ClientNamingAPI`.
+
+`NameCatalog`, `NamePool`, `NameEntry`, `NameQuery` and `NameGender` are immutable/value contracts under `internal.naming`, exposed through these facades. `NamingService` and the loaders are internal implementation entry points. The catalogue stores identifiers and style groups, not rendered strings. Keep its full content in the naming resources and language assembly. Use the local audit for current counts; do not export catalogues or their changing census into documentation or the site.
+
+## Common tasks
+
+### Select a cultural name
+
+This chooses a feminine Donghuang name for a kitsune. Neutral entries are also eligible:
+
+```java
+var query = new NameQuery(new Identifier("isekaiorigins", "kitsune"),
+        "donghuang", NameGender.FEMALE);
+var name = NamingAPI.choose(query, new java.util.SplittableRandom(seed));
+name.ifPresent(entry -> npc.setCustomName(entry.text()));
+```
+
+Direct `setCustomName` is an explicit caller decision. Use `NamingAPI.nameIfAbsent(npc, query)` to honour config, type eligibility, unique-NPC protection and existing custom names. Pass null for the query to resolve entity context automatically. Configure a citizen's identity before spawning it; assigning a name does not subsequently follow culture edits.
+
+### Present a player name
+
+Use `NamingAPI.playerName(player)` on either side for an undecorated character-name `Text`. It reads the current humanoid identity, honours the display-name toggle and falls back to the account name. The returned text is an independent copy. Presets keep their translation key; do not call `getString()` on the server before sending a label. Carry `Text` with `writeText`/`readText`, then resolve it in the client language. Keep UUID/account identity separately for actions, skins and OPAC membership.
+
+The world overlay uses this facade on each render. The status screen resolves it in the client language when capturing its snapshot. Guild cards resolve the loaded owner's current name by UUID; an unloaded owner uses the issued translated snapshot. Card persistence uses schema `2`, with `OwnerAccount` for skin identity and JSON `OwnerDisplayName` for text. Older schemas are rejected; register the prototype card again. Rank and other card fields keep their existing live/archive rules.
+
+`GuildCardPortraitView` uses an isolated `WardrobePlayerEntityPreview`: it resolves the owner by UUID, mirrors a loaded owner's components and equipment, or creates an account-profile stand-in when unloaded. `WardrobeEntityPortraitView` captures a bounded head-and-shoulders photograph and paints it through an image shader in a rounded rectangle. This keeps clipping, fade-in and card perspective in the same Canvas pipeline. Every capture is a still: `renderStill` never advances the preview clock, so the photograph holds the first frame of `isekaiexpansion:idle_stand_neutral`, and the warm-up recaptures that collect late skin textures redraw the same instant. The still render scope also freezes humanoid part animations and keeps the eyes open. The old flat skin-head renderer is removed.
+
+Capture uses a temporary colour/depth framebuffer and restores the caller's framebuffer, viewport, projection, scissor and pixel-transfer state. A bounded warm-up accommodates asynchronous textures; the image and shader are cached afterward. Detaching cancels pending refreshes and releases the image, shader and isolated entity. The renderer is an internal UI implementation, not a public facade.
+
+In game, verify rounded corners while tilting, the face/shoulder crop at different character heights, delayed skin loading, another owner's card and closing during capture.
+
+### Resolve another mod's context
+
+Register a resolver during common initialisation, and add eligible entity types to `isekaiexpansion:nameable_npcs`. This example supplies culture for a tagged NPC family:
+
+```java
+NamingAPI.registerResolver(entity -> {
+    if (!entity.getCommandTags().contains("my_pack.donghuang")) return null;
+    return new NameQuery(null, "donghuang", NameGender.ANY);
+});
+```
+
+Resolvers run in registration order; the first non-null result wins. Registering a resolver does not make every entity eligible. Built-in context uses an IsekaiExpansion NPC's base-profile origin and gender, plus `CitizenIdentity.culture()` for citizens. Other eligible entities use an unknown origin, `default` culture and all styles. Culture queries trim whitespace and lowercase with `Locale.ROOT`; blank/null becomes `default`.
+
+## Reference
+
+| Method | Side | Contract |
+| --- | --- | --- |
+| `NamingAPI.catalog()` | Server | Current immutable snapshot; bundled snapshot before server reload. |
+| `NamingAPI.choose(query, random)` | Server | Optional entry; indexed context resolution and constant-time draw from the resulting list. No uniqueness reservation. |
+| `NamingAPI.playerName(player)` | Both | Independent, undecorated character-name text; respects display toggle and account fallback. |
+| `NamingAPI.text(name)` | Both | Translatable text derived from a complete name ID; no catalogue lookup. |
+| `NamingAPI.query(entity)` | Server | Resolver or built-in context. |
+| `NamingAPI.nameIfAbsent(entity, query)` | Server | Returns whether a name was assigned. A client-world call returns false. |
+| `NamingAPI.registerResolver(resolver)` | Common init | Adds a non-null context provider to the ordered resolver list. |
+| `NamingAPI.dialogueName(entity, viewer)` | Server | Returns the authorised translatable role or full name for this player. |
+| `NamingAPI.registerDialogueResolver(resolver)` | Common init | First non-null `DialogueNameProfile` supplies the role and trust decision for an entity/player pair. |
+| `ClientNamingAPI.catalog()` | Client | Independent resource-pack snapshot; never the integrated server's mutable selection. |
+| `NameCatalog.pools() / size() / get(id)` | Snapshot read | Ordered pools, name count and nullable lookup. |
+| `NameCatalog.select(query) / inPool(pool, gender)` | Snapshot read | Immutable indexed candidates; unknown pool returns an empty list. |
+
+Name styles are `FEMALE`, `MALE`, `UNISEX` and `ANY`. A null query style becomes `ANY`. Pool candidate order is stable by pool ID and then declared name order. Invalid reloads leave the previous snapshot intact.
+
+### Dialogue identity disclosure
+
+`DialogueNameProfile(role, trusted)` carries a role-only `Text` and a server-side trust decision. It copies the role on construction and access; `select(fullName)` returns a copy of the role when untrusted and the full name when trusted. Resolvers receive `(Entity, ServerPlayerEntity)`, run in registration order and return null to defer. Use this extension for third-party relationships or unique-character role labels; a role must not contain a hidden personal name.
+
+Without a resolver, `BaseNpcEntity.isTrust(viewer)` is the sole reveal gate. Ordinary entities use their entity-type label. Evelina uses the Magic Caster role; other unique NPCs use Traveler. Third-party entities without a trust resolver retain their type label. Ownership, a name tag and friendly status do not bypass Trust.
+
+`DialogueNaming` registers the `isekaiexpansion:dialogue_name` session metadata as a `Text` payload through `writeText`/`readText`. It evaluates the current player and entity when either normal or parent dialogue opens. `DialogueNameMixin` makes the client session name accessor resolve this text locally, so both the speaker heading and `{name}` use it. The decision is a conversation-opening snapshot; reopening reevaluates trust. Entityless narrator sessions retain Blabber's speaker name. World nameplates, stored names and `{player}` are unaffected.
+
+### Configuration
+
+`IsekaiConfig.naming` is a server-synchronised collapsible section. A null section restores defaults during post-load validation. Assignment reads these values when an entity loads or `nameIfAbsent` is called; the browser reads preset availability when building the Basics chapter, and submission checks it again on the server.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `naming.enabled` | `boolean` | `true` | Gates automatic/API NPC assignment. Does not clear saved names or disable player presets. |
+| `naming.nameVillagers` | `boolean` | `true` | Includes `MerchantEntity` descendants. |
+| `naming.nameThirdPartyNpcs` | `boolean` | `true` | Includes types in `isekaiexpansion:nameable_npcs`. |
+| `naming.showUtilityJobs` | `boolean` | `true` | Formats newly assigned broker/receptionist names through `name.isekaiexpansion.with_job`. |
+| `naming.playerPresets` | `boolean` | `true` | Enables the browser and accepts new valid preset selections. Existing selections survive unrelated edits. |
+
+### Supporter announcements
+
+`internal.supporter.SupporterAnnouncements` owns arrival and departure broadcasts. This is an internal service, registered once during common initialisation. IsekaiCore supplies eligibility through `ICSupporterUtil.getTier`; Expansion resolves the current character name through `NamingAPI.playerName` and sends a shared `GameMessageS2CPacket`. The title and preset name remain nested translations for each recipient. The modpack owner title uses account UUID, independent of character names.
+
+`IsekaiConfig.supporter` is server-synchronised and read at each connection event. A null section restores defaults during post-load validation. The service has no tick loop, delayed task or name cache. Join announcements use the identity saved before joining; a first-time character without a chosen name uses the account fallback. Leave announcements use the current identity. IsekaiCore no longer registers these messages or exposes their former settings and language keys; there is no compatibility adapter.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `supporter.joinMessage` | `boolean` | `true` | Broadcasts eligible supporter arrivals. |
+| `supporter.leaveMessage` | `boolean` | `true` | Broadcasts eligible supporter departures to remaining connected players. |
+| `supporter.overlay` | `boolean` | `false` | Uses the action bar instead of chat. |
+| `supporter.informSelf` | `boolean` | `true` | Includes the arriving supporter once; disabling it excludes their own message and sound. Departing players are always excluded. |
+| `supporter.playSound` | `boolean` | `true` | Plays the arrival chime for message recipients; departures are silent. |
+
+## Threading and lifecycle
+
+NPC assignment runs on `ServerEntityEvents.ENTITY_LOAD`, after entity NBT and spawn setup. It excludes `UniqueNpcEntity`, NPCs whose `isUnique()` returns true, custom-named entities and `isekaiexpansion:naming_excluded` before querying. It preserves an enabled authored humanoid name. Otherwise it seeds `SplittableRandom` from the UUID and chooses once. Brokers and receptionists append their entity-type text as a job. Vanilla `CustomName` NBT and tracking carry the translated text; the service adds no tick loop, entity census or separate persistence flag.
+
+Ordinary NPC favour/grave identity uses a persisted `NpcIdentityId` token, independent of translated names and preserved across revival. See [NPC foundations](/en/dev/npc/) for its NBT contract.
+
+Call entity methods on the server thread. Resolvers must be fast, return null for unrelated entities and must not mutate the entity. Catalogue snapshots are immutable and published through a volatile reference; retaining a snapshot retains its old contents after reload. Server data and client assets reload independently. No catalogue payload is sent at login or per draw.
+
+`HumanoidIdentity` stores either a literal `Nickname` or a `PresetName` identifier. Preset selection clears the literal and enables display; typing clears the preset. `UseNickname` can disable presentation without deleting the choice. Wire flag 16 adds a preset-ID string after the age payload, with a 256-character limit. The nickname limit is 48 UTF-16 units, with whole code points retained; control/format characters and section signs are removed. No compatibility adapter or alternate name field is used.
+
+The submission handler merges scope permissions before validating a newly selected preset against the server catalogue and config. An unchanged existing ID is retained even when removed from the catalogue. Player display text resolves locally; account UUID/name remain unchanged. Name edits do not affect the profile's visual hash.
+
+The creator caches translated labels/search strings by catalogue snapshot and language instance, and creates at most 8 result controls. Filtering scans those cached strings when the query changes; drawing and random selection do not scan the catalogue. Each reset is one undoable session edit. Slider defaults, gender/race part defaults, active colour channels and the blank account-name default are separate operations.
+
+## Verifying
+
+Compile the Java sources and assemble the language files:
+
+```bash
+./gradlew.bat compileJava assembleLanguageFiles
+```
+
+In game, reconnect with both languages, test self-notification and overlay/sound settings, then rename and disconnect; verify each connected recipient sees one announcement and that reopening the status screen shows the current name.
+
+In game, spawn citizens, adventurers, brokers, receptionists, villagers and optional guards; compare two clients using different languages. Save/reload the entities, apply a name tag, and reload pools. Confirm unique NPCs retain their names. Exercise first-join preset search, paging, random selection, typed editing, language switching, resets and undo at the supported UI scales. Open normal and parent dialogue with an untrusted and a trusted player against the same NPC. Check both languages, a name-tagged NPC, utility job suffixes, unique roles and narrator sessions. Change trust and reopen the conversation. These checks require a running client and server.
+
+## Related
+
+- [Name pool data](/en/wiki/name-pools/)
+- [Humanoid runtime](/en/dev/humanoid-runtime/)
+- [NPC assets](/en/dev/npc-assets/)

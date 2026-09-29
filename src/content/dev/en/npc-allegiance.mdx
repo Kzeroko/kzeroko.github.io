@@ -1,0 +1,82 @@
+---
+title: "NPC relationships and allegiance"
+description: "Internal relationship ownership, command policy, contract escrow and market persistence."
+category: systems
+order: 125
+updated: 2026-09-26
+---
+
+`NpcRelationships` owns marriage, favour operations and allegiance for a base NPC. These are internal implementation types, not an addon facade. Player rules are in [NPC allegiance](/en/wiki/npc-allegiance/).
+
+## What it does
+
+`NpcAccessPolicy` evaluates management, friendly and trusted privileges independently of favour. Ownership grants command access to the owner only. Unique NPCs have final opt-out hooks, and binding also checks `isUnique()` before changing state. Follower sessions remain in the existing squad component.
+
+## Runtime model
+
+Entity data trackers synchronise owner UUID and bond kind. The current entity save uses `NpcRelationships`; the previous marriage field has no reader. Unique marriages use the world's authoritative marriage state, including a cleared binding. Relationship snapshots never infer marriage from maximum favour.
+
+| Field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `NpcRelationships` | `compound` | empty | Sole entity relationship compound |
+| `Spouse` | `compound` | absent | Non-unique marriage; unique state is authoritative |
+| `Spouse.Uuid` | `UUID` | required when present | Missing UUID produces no spouse |
+| `Spouse.Name` | `string` | empty | Saved player display name |
+| `Owner` | `UUID` | absent | Persistent allegiance owner; never the transient follower assignment |
+| `Bond` | `enum(contract, dark_magic)` | no binding | Missing or unknown value rejects the owner binding |
+
+`AllegianceContractLedger` stores dormant entity snapshots in world persistence. Items carry a claim UUID, not a snapshot. Capture releases follower ownership, removes passengers and leash data from the snapshot and removes the live NPC. Redemption preserves its UUID, checks all loaded dimensions for a collision, validates a safe position and the eligible entity, then consumes the claim only after spawning succeeds. This is server-tick ordering, not an atomic disk transaction across chunk, player and persistent-state saves.
+
+| Item field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `Claim` | `UUID` | absent | One-use ledger lookup; consumed or unknown claim rejects redemption |
+| `NpcName` | `string` | empty | Tooltip only |
+| `Recruit` | `compound` | absent | Purchased voucher payload; required for a fresh recruit |
+| `Recruit.Race` | `identifier` | required | Member of the current race list; missing or invalid rejects redemption |
+| `Recruit.Role` | `enum(citizen, combat)` | required | Selects citizen or adventurer entity; missing or unknown rejects redemption |
+
+`AllegianceRecruit` is the shared validated payload for stock, lots and vouchers. `AllegianceRecruitSpawner` selects `CITIZEN` or `ADVENTURER`, applies the race and calls normal spawn initialisation before binding. Dormant claims restore the saved entity type and state without fresh initialisation. Role-less vouchers are not supported. Broker auction text and recruit contract tooltips use `AllegianceRaces.name(race)`, which returns Origins’ `Origin.getName()` as translatable text. This honours the origin’s configured name key in the client’s language; an unloaded origin displays its identifier.
+
+`AllegianceRaces` rebuilds its recruitment pools after each Origins load. The `base()` pool contains supported, loaded origins for which Origins reports `isChoosable()`; unchoosable origins form the evolved pool. Missing origins enter neither pool. Broker stock and ordinary auction rotation use `base()`. Pool membership follows the loaded data, so changing `unchoosable` takes effect on the next reload.
+
+Scripted recruitment can call `AllegianceRaces.random(random)` for a base race or explicitly call `AllegianceRaces.randomEvolved(random)` for an evolved race, then construct `new AllegianceRecruit(race, role)` and use the normal spawner. Empty pools reject a roll instead of falling back to another pool. The supported payload and dialogue race list still includes evolved races.
+
+`AllegianceAuctionState` owns shared lots and refund balances in `npc/allegiance_auctions_v2`. Broker stock uses the existing trade usage ledger. Auctions use server overworld ticks and settle on player interaction, so unloaded brokers need no tick task.
+
+| Persistent field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `Contracts[]` | `array<compound>` | empty | Contract ledger entries |
+| `Claim`, `Entity` | `UUID`, `compound` | required | Claim and dormant entity snapshot |
+| `Lots[]` | `array<compound>` | empty | Auction entries |
+| `Broker`, `Closes`, `Price`, `Bidder` | `UUID`, `long`, `integer`, `UUID` | Bidder absent; other values validated | Broker identity, end tick, emerald bid and leader; prices 8–60 |
+| `Recruit` | `compound` | required | Same `Race` and `Role` fields as voucher payloads above; invalid payload skips the lot |
+| `Refunds[]` | `array<compound>` | empty | Offline refund entries |
+| `Player`, `Amount` | `UUID`, `integer` | required | Positive emerald balance |
+
+## Contracts
+
+Run mutations on the server thread. Ordinary collars require trust; dark magic requires health at or below 25%. Both reject unique NPCs, married NPCs, existing allegiance and another player's active follower assignment. Binding does not change favour. Proposal handling rejects allegiance and performs no repair from favour level.
+
+Every owner menu callback re-resolves the live speaker and validates ownership and range. Equipment screens validate access during use; follower commands and mode changes consult the same policy. The command feedback adapter uses bond-specific keys with a bond-specific fallback. Combat support and squad capacity remain independent checks.
+
+Auction bids reserve emerald inventory immediately, reject stale quotes and credit an outbid leader's persistent refund balance. A leading bid cannot be raised by the same player. The winner's claim survives reload and prevents lot rotation until collected. Refund collection delivers at most 64 emeralds per click.
+
+## Extending it
+
+Extend `BondableNpc` for an eligible simple NPC or `BondableCombatNpc` for an eligible combat NPC. Its hooks are `canPledgeAllegiance()`, `onAllegianceBound(owner, kind)` and `onAllegianceReleased(formerOwner)`. The default binding hook clears combat and waits in place; release resumes wandering. `AdventurerNpcEntity` is the generated combat implementation, with the standard combat brain, item-use capability and an initial iron sword. Unique NPCs remain ineligible. Do not bypass `NpcRelationships` admission when accepting gameplay requests.
+
+The dialogue resolver tries `npc/allegiance/<race>/<contract|dark_magic>/<route>/<phase>` after quest overrides and before normal menu overrides. It tries the current phase then `repeat`. Missing allegiance content falls through to the existing resolver. Race and unknown-origin fallback are in `AllegianceRaces`; current resources cover all 18 race-layer entries.
+
+## Verifying
+
+For prototype testing, place a broker with `/summon isekaiexpansion:allegiance_broker`. The registered broker has no natural-spawn rule; world authors place it in their settlements.
+
+Run `./gradlew.bat compileJava assembleLanguageFiles`. In game, check recruitment, auction rotation, winning-lot retention and save/reload. Observe repeated idle frames and switching between NPCs that share a rig.
+
+In a disposable world, test ordinary and dark-magic admission, a unique NPC, a spouse, another player's follower, full squad capacity, transfer/redeem/reload, repeated copied claims, equipment access after release and simultaneous auction bids. Check every wheel response and a race dialogue in both languages. Redeem both roles from stock and auctions, verify adventurer attacks and citizen fleeing, then transfer and reload each. Observe idle, movement, combat, item use and death with multiple generated bodies: appearance proportions must remain stable. These are in-game acceptance checks, not claims made by the headless suite.
+
+## Related
+
+- [NPC runtime](/en/dev/npc/) — entity behaviour and inventory.
+- [NPC dialogue](/en/dev/npc-dialogue/) — route and gift transactions.
+- [Dialogue Studio](/en/dev/dialogue-tools/) — authoring and validation.

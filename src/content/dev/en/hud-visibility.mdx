@@ -1,0 +1,93 @@
+---
+title: "HUD visibility and layout"
+description: "Fade participating overlays and fit quest cards around followers and visible chat."
+category: client
+order: 180
+updated: 2026-09-26
+---
+
+`HudAPI` gives participating HUD overlays a shared fade and independent, expiring holds. A bounty preview renews its hold while you point at a readable notice. The preview itself stays visible.
+
+## Entry point
+
+Use `net.kzeroko.isekaiexpansion.api.client.HudAPI` on the client. The facade delegates to `internal.client.hud`; it does not change quest progress, input handling or vanilla HUD visibility.
+
+The player HUD, tracked quest panel, dungeon HUD and morph HUD register their ModernUI roots. Comfort and follower status use the immediate drawing wrapper. Other mods' HUDs and vanilla elements are not registered automatically.
+
+## Common tasks
+
+### Hold the HUD out of view
+
+Use a stable owner ID and renew the hold from your client tick while the interaction remains focused:
+
+```java
+private static final Identifier READING = new Identifier("example", "reading");
+
+static void focusedTick() {
+    HudAPI.suppress(READING, 350);
+}
+```
+
+Stop renewing to let the hold expire. `HudAPI.release(READING)` removes only that owner's hold immediately; another owner's request still keeps the HUD faded.
+
+### Register a retained overlay
+
+Register a dedicated root on the ModernUI thread when attaching it. Its alpha belongs to the API; animate child views for the overlay's own transitions.
+
+```java
+static void attachHud(View root) {
+    HudAPI.register(root);
+}
+
+static void detachHud(View root) {
+    HudAPI.unregister(root);
+}
+```
+
+For immediate rendering, call `HudAPI.render(context, () -> drawPanel(context))` on the render thread. The wrapper multiplies the current shader alpha, flushes through `DrawContext` and restores the previous shader colour in `finally`. The callback must preserve that colour while drawing; rendering code that resets it cannot inherit the fade.
+
+## Reference
+
+| Method | Side / thread | Effect |
+| --- | --- | --- |
+| `initClient()` | Client initialisation | Installs tick and disconnect handling once; the mod already calls it. |
+| `suppress(owner, lingerMs)` | Client thread | Adds or extends an owner's expiry; `owner` must be non-null. |
+| `release(owner)` | Client thread | Removes this owner's hold; a missing owner has no effect. |
+| `opacity()` | Client render thread | Returns eased opacity in `0..1` from the monotonic clock. |
+| `render(context, draw)` | Client render thread | Applies opacity only to this callback; skips it at zero opacity. |
+| `register(root)` | ModernUI thread | Takes ownership of root alpha; duplicate registration has no effect. |
+| `unregister(root)` | ModernUI thread | Cancels the root's fade and restores its alpha to `1`. |
+
+| Timing | Value |
+| --- | --- |
+| Fade out | `220` milliseconds |
+| Fade in | `320` milliseconds |
+| Accepted hold duration | `1..60000` milliseconds; otherwise `IllegalArgumentException` |
+| Bounty focus hold | `350` milliseconds, renewed while a world notice is readable |
+
+## Threading and lifecycle
+
+Holds use real elapsed time, independently of world ticks. Call `suppress` only with an active client world; missing world/player state and disconnect clear all holds and restore registered roots. Dimension changes do not clear them, but unrenewed holds expire normally. These are client classes and must not be loaded on a dedicated server.
+
+The client thread owns the hold map. Immutable transition snapshots cross to the ModernUI thread, which owns views and animations. Registering a root during a fade applies the current opacity immediately. Renewing an existing hold does not restart the animation; changing direction starts from the current opacity. No method schedules a caller onto the correct thread.
+
+## Quest placement and chat
+
+Follower plates keep their fixed position. `PlayerHudOverlay` reports the occupied stack, including the width of rendered names. The internal `HudRenderBounds` collector captures chat backgrounds and text only during the HUD's chat render call. It applies the draw matrix and GUI scale to produce physical window bounds; no chat settings file is read.
+
+`HudLayoutSnapshot` crosses to ModernUI through the existing coalesced mailbox only when geometry changes. `TrackedQuestHudLayout` measures each card at its current width and passes natural heights to `QuestHudPlacement`. Cards start below visible followers, stop above visible chat, then wrap to the right at the follower stack's starting height. A wrapped card also avoids earlier cards that extend beyond the follower column. Separate chat windows remain separate obstacles when their drawn bounds do not touch.
+
+The layout keeps whole cards inside the viewport. If another card cannot fit, a journal notice uses the remaining space, replacing the last card if necessary. A fully occupied viewport can leave no space even for this notice; quests remain available in the journal. Fade and scale transitions stay within each card's allocated bounds.
+
+The optional Chat Plus bridge is checked against **Chat Plus 2.8.1 for Fabric 1.20.1**. Its fractional backgrounds bypass vanilla `DrawContext.fill`, so `ChatPlusDrawBoundsMixin` captures that helper separately. Text uses the shared text hook. The outer chat scope also covers Chat Plus's vanilla-when-unfocused mode. Only drawn content reserves space; faded messages release it. This changes quest placement and leaves chat and follower coordinates under their existing owners.
+
+### Verification
+
+Run `./gradlew.bat compileJava` before checking the layout in game.
+
+In a client, check follower arrival and dismissal, long names, several quest cards, chat fade, multiple moved chat windows, transparent chat backgrounds, GUI scaling and window resizing. Check both message directions in Chat Plus and its vanilla-when-unfocused mode. Verify the final on-screen appearance in game.
+
+## Related
+
+- [Quest runtime](/en/dev/quest-system/)
+- [Guild bounties](/en/wiki/bounty-quests/)

@@ -1,0 +1,368 @@
+---
+title: "Terrain configuration"
+description: "Every KTM2 terrain setting, palette field, default, valid range and reload boundary."
+category: data
+order: 178
+updated: 2026-09-26
+---
+
+Terrain configuration controls placement, geometry, materials and local atmosphere for the KTM2 world generator. Generation takes a server-local snapshot, so editing a live object does not rebuild an existing world or move its saved World Tree.
+
+## Where the files live
+
+Edit the `terrain` object in `config/isekaiexpansion.json`. `autoPatchExoticShaders` is a separate top-level client preference in the same file. These are configuration settings, not namespaced data-pack files; resource-pack priority does not select their values.
+
+The packaged `data/isekaiexpansion/terrain/ktm2.json` is the bundled ReTerraForged preset, read from the mod's classpath. It is not this configuration format or a normal reloadable data-pack override. See the [terrain runtime](/en/dev/terrain-generation/) for that integration.
+
+## Minimal example
+
+This is a fragment to merge into the existing configuration; retain other settings. Missing fields use the declared initial defaults. Avoid explicit null objects.
+
+```json
+{
+  "terrain": {
+    "enabled": true
+  },
+  "autoPatchExoticShaders": true
+}
+```
+
+## Fields
+
+All paths below are relative to `terrain` except the first table. Numeric geometry distances are blocks unless another unit is stated. Finite range checks reject invalid values; they do not clamp them.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `terrain` | `object` | Defaults below | Server-owned world-generation settings; also sent to clients for presentation. |
+| `autoPatchExoticShaders` | `boolean` | true | Local client preference: allows compatible shader-source overlays when a pack loads. |
+| `terrain.enabled` | `boolean` | true | Enables custom landforms, landmark placement and decoration. Does not remove the bundled preset or its registered biomes. |
+
+The following object fields use the nested tables. Explicit null values can fail snapshot or palette construction, even when the corresponding family is disabled.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `landforms` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `haloCrown` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `sentinelIsles` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `verdantKnives` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `amberBasin` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `crystalLand` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `giantSkyLand` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `aquapolis` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `evernightTundra` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `abyssalVolcano` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `gardenOfTheFirmament` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `giantStoneValley` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `riftborneMonolith` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `infernalDeepCavern` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `sunkenAzureGrotto` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `viridianToxicDepths` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `worldrootHollow` | `object` | Family defaults below | Server-owned shape, palette and atmosphere settings. |
+| `greatPlains` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `surfaces` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `decoration` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `worldTree` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `worldTree.placement` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `worldTree.geometry` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `worldTree.woodland` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+| `worldTree.materials` | `object` | Defaults below | Settings group; preserve the object structure and do not use null. |
+
+### Placement and shared geometry
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement.districtSpacing` | `integer` | 2304 | 1024–16384 blocks between district cells. |
+| `placement.districtChance` | `number` | 1 | 0–1; one admission roll per cell, not a guaranteed generated district. |
+| `placement.siteAttempts` | `integer` | 64 | 1–128 stratified candidate sites per family in a cell. |
+| `placement.biomeBlendWidth` | `number` | 0.05 | 0.005–0.25; controls the transition budget; terrain relief can widen it. |
+| `placement.replaceableBiomes` | `array` | 33 IDs listed below | Exact original biome IDs allowed for admission; an empty list admits no ordinary districts. Unknown strings do not match; null is invalid. |
+
+### Shared landforms
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `landforms.radius` | `number` | 680 | 128–min(2048, districtSpacing × 0.32) blocks before family scaling. |
+| `landforms.relief` | `number` | 210 | 32–512 blocks of base vertical relief. |
+| `landforms.rockRoughness` | `number` | 0.18 | 0–0.4; fractures in ordinary rock formations. |
+
+### Halo Crown
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `haloCrown.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `haloCrown.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `haloCrown.ringRadius` | `number` | 125 | 32–256 blocks before vertical scaling. |
+| `haloCrown.ringThickness` | `number` | 22 | 8–48 blocks; must be less than half ringRadius, with ringRadius + ringThickness below 0.6 × district radius. |
+| `haloCrown.ringChance` | `number` | 1 | 0–1; additional admission roll for this family. |
+| `haloCrown.haloCrownWeight` | `number` | 1 | 0–100 relative family weight; 0 disables selection. |
+
+### Sentinel Isles
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `sentinelIsles.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `sentinelIsles.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `sentinelIsles.islandChance` | `number` | 0.55 | 0–1; used as relative selection weight for ocean districts; 0 disables selection. |
+| `sentinelIsles.pillarHeight` | `number` | 260 | 48–512 blocks before vertical scaling. |
+
+### Verdant Knives
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `verdantKnives.sizeMultiplier` | `number` | 1.15 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `verdantKnives.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `verdantKnives.verdantKnivesWeight` | `number` | 1 | 0–100 relative weight. |
+| `verdantKnives.formationCount` | `integer` | 24 | 8–48 target blade formations; completeness requires at least 8, so the target is not guaranteed. |
+
+### Amber Basin
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `amberBasin.sizeMultiplier` | `number` | 1.1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `amberBasin.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `amberBasin.amberBasinWeight` | `number` | 1 | 0–100 relative weight. |
+| `amberBasin.terraceHeight` | `number` | 22 | 8–48 blocks before vertical scaling. |
+
+### Great Plains
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `greatPlains.greatPlainsEnabled` | `boolean` | true | Enables the separate settlement-plain planner. |
+| `greatPlains.greatPlainsRadius` | `number` | 2200 | 1024–3072 blocks; placement cell spacing is radius × 3.5. |
+| `greatPlains.greatPlainsBuildRadius` | `number` | 768 | 512–0.55 × greatPlainsRadius blocks; preferred buildable core. |
+| `greatPlains.greatPlainsMinimumBuildRadius` | `number` | 512 | 256–greatPlainsBuildRadius blocks; search may reduce the core toward this value. |
+| `greatPlains.greatPlainsChance` | `number` | 0.65 | 0–1 roll per plains placement cell. |
+
+### Prismatic Barrens
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `crystalLand.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `crystalLand.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `crystalLand.weight` | `number` | 1 | 0–100 relative weight. |
+| `crystalLand.crystalHeight` | `number` | 190 | 24–240 blocks before vertical scaling. |
+| `crystalLand.stormMinimumSeconds` | `number` | 6 | 3–180 seconds between client atmospheric flashes. |
+| `crystalLand.stormMaximumSeconds` | `number` | 12 | stormMinimumSeconds–180 seconds; not global weather. |
+| `crystalLand.stormIntensity` | `number` | 0.55 | 0–1 flash intensity. |
+| `crystalLand.thunderVolume` | `number` | 0.25 | 0–1, further multiplied by biome blend weight. |
+| `crystalLand.palettes` | `array` | Family defaults below | 1–16 named palette objects; fields below. IDs must be unique within this family. |
+
+### Skyreach Archipelago
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `giantSkyLand.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `giantSkyLand.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `giantSkyLand.weight` | `number` | 1 | 0–100 relative weight. |
+| `giantSkyLand.islandAltitude` | `number` | 744 | Y 700–840; not changed by scale. |
+| `giantSkyLand.tierHeight` | `number` | 42 | 24–64 blocks before vertical scaling; island layout also bounds tier separation by radius. |
+| `giantSkyLand.vegetation` | `number` | 0.65 | 0–1; tree/ground-vegetation density control, not a fixed percentage of covered area. |
+| `giantSkyLand.cloudSeaDepth` | `number` | 112 | 48–240 blocks below islandAltitude for the shader cloud-sea height; does not alter terrain or waterfall length. |
+| `giantSkyLand.palettes` | `array` | Family defaults below | 1–16 named palette objects; fields below. IDs must be unique within this family. |
+
+### Aquapolis Cataracts
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `aquapolis.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `aquapolis.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `aquapolis.weight` | `number` | 1 | 0–100 relative weight. |
+| `aquapolis.terraceHeight` | `number` | 38 | 12–48 blocks before vertical scaling. |
+| `aquapolis.vegetation` | `number` | 0.65 | 0–1; tree and ground-vegetation density control. |
+| `aquapolis.palettes` | `array` | Family defaults below | 1–16 named palette objects; fields below. IDs must be unique within this family. |
+
+### Evernight Aurora Tundra
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `evernightTundra.sizeMultiplier` | `number` | 1 | 0.6–2; multiplies shared horizontal radius. Scaled radius + 32 must be less than half the district spacing. |
+| `evernightTundra.scale` | `number` | 1 | 0.5–1.5; scales relief, ring dimensions, pillar/terrace heights and exotic vertical features; island altitude stays fixed. |
+| `evernightTundra.weight` | `number` | 1 | 0–100 relative weight. |
+| `evernightTundra.chasmDepth` | `number` | 80 | 16–120 blocks before vertical scaling. |
+| `evernightTundra.fossilScale` | `number` | 2 | 0.5–2.25 before multiplication by scale. |
+| `evernightTundra.auroraIntensity` | `number` | 0.8 | 0–2 client aurora strength. |
+| `evernightTundra.crystalHeight` | `number` | 57 | 7.2–72 blocks before vertical scaling. |
+| `evernightTundra.palettes` | `array` | Family defaults below | 1–16 named palette objects; fields below. IDs must be unique within this family. |
+
+### Volcanic, highland and cavern families
+
+The following fields are relative to each of `abyssalVolcano`, `gardenOfTheFirmament`, `giantStoneValley`, `riftborneMonolith`, `infernalDeepCavern`, `sunkenAzureGrotto`, `viridianToxicDepths`, `worldrootHollow`. Missing members retain that family’s defaults, including a partial object containing only a weight. Explicit null palettes reject.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `sizeMultiplier` | `number` | 1 / 0.8 / 1.25 | 0.6–2; horizontal radius multiplier, default 0.8 for underground families and 1.25 for Abyssal Volcano. |
+| `scale` | `number` | 1 | 0.5–1.5; multiplies formation, terrace and chamber heights. |
+| `weight` | `number` | 1 | 0–100; relative placement weight; 0 disables selection. |
+| `formationHeight` | `number` | 240 | 80–520 blocks before scale; surface formation height control. Family overrides below. |
+| `terraceHeight` | `number` | 18 / 28 | 8–48 blocks before scale; terrace separation control; underground default 28. |
+| `chamberHeight` | `number` | 160 / 210 | 80–240 blocks before scale; underground default 210; chamber depth, shortened when the dimension floor requires it. |
+| `roofThickness` | `number` | 36 | 24–96 blocks; minimum underground rock cover; no surface entrance is carved. |
+| `vegetation` | `number` | 0.08 | 0–1; sparse vegetation control; overrides below. |
+| `poolCoverage` | `number` | 0.28 | 0–0.6; pool/channel size control, not a fixed percentage of the floor. Stone Valley and Riftborne Monolith have no reservoirs. |
+| `formationCount` | `integer` | 12 | 4–32; formation count control; each formation may contain multiple segments. |
+| `atmosphereStrength` | `number` | 0.8 | 0–1; shader atmosphere blend strength; does not change global weather. |
+| `viridianToxicDepths.toxicWater` | `boolean` | true | Present only on Viridian Toxic Depths; controls water-contact Poison. |
+| `palettes` | `array` | 1 | 1–16 named palette objects using the shared fields below; IDs must be unique within the family. |
+
+| Family | formationHeight | terraceHeight | vegetation | poolCoverage | formationCount |
+| --- | --- | --- | --- | --- | --- |
+| `abyssalVolcano` | 310 | 18 | 0 | 0.28 | 12 |
+| `gardenOfTheFirmament` | 460 | 36 | 0.65 | 0.34 | 12 |
+| `giantStoneValley` | 260 | 18 | 0.08 | 0 | 12 |
+| `riftborneMonolith` | 430 | 18 | 0 | 0 | 9 |
+| `infernalDeepCavern` | 310 | 28 | 0 | 0.28 | 12 |
+| `sunkenAzureGrotto` | 240 | 28 | 0.4 | 0.42 | 12 |
+| `viridianToxicDepths` | 240 | 28 | 0.18 | 0.48 | 12 |
+| `worldrootHollow` | 240 | 28 | 0.5 | 0.12 | 18 |
+
+### Ordinary surface materials
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `surfaces.surfaceDepth` | `integer` | 4 | Integer 1–12 blocks of soil below the top. |
+| `surfaces.mountainRock` | `string` | `minecraft:stone` | Solid dry full-cube block state; shared by Halo Crown, Verdant Knives and Great Plains. |
+| `surfaces.mountainTop` | `string` | `minecraft:grass_block` | Top block for those families; exposed steep slopes use rock. |
+| `surfaces.mountainSoil` | `string` | `minecraft:dirt` | Soil beneath their top; also the woodland surface-rule soil. |
+| `surfaces.islandRock` | `string` | `minecraft:andesite` | Solid dry full-cube rock for Sentinel Isles. |
+| `surfaces.islandTop` | `string` | `minecraft:moss_block` | Sentinel Isles top material. |
+| `surfaces.islandSoil` | `string` | `minecraft:dirt` | Sentinel Isles soil. |
+| `surfaces.basinRock` | `string` | `minecraft:calcite` | Amber Basin rock. |
+| `surfaces.basinTop` | `string` | `minecraft:grass_block` | Amber Basin top. |
+| `surfaces.basinSoil` | `string` | `minecraft:dirt` | Amber Basin soil. |
+
+### Weathering and woodland
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `decoration.enabled` | `boolean` | true | Controls ordinary weathering and woodland trees; does not disable exotic decoration or the world tree itself. |
+| `decoration.mossCoverage` | `number` | 0.28 | 0–1 threshold controlling moss placement. |
+| `decoration.vineChance` | `number` | 0.055 | 0–1; participates in a further dampness/probability test. |
+| `decoration.vineLength` | `integer` | 24 | Integer 1–64 length control; support checks can end strands early. |
+| `decoration.weatheredRock` | `string` | `minecraft:tuff` | Solid dry full-cube weathered stone. |
+| `decoration.moss` | `string` | `minecraft:moss_block` | Solid dry full-cube moss material. |
+| `decoration.vines` | `string` | `minecraft:vine` | Dry block state without a block entity, exposing north/south/east/west attachment properties. |
+| `decoration.groveTreeChance` | `number` | 0.72 | 0–1 tree-plan probability in Luminous Grove. |
+| `decoration.gladeTreeChance` | `number` | 0.16 | 0–1 tree-plan probability in Starlit Glade. |
+| `decoration.woodlandTreeHeight` | `integer` | 42 | Integer 18–64 baseline tree height. |
+
+### World-tree placement
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `worldTree.placement.enabled` | `boolean` | true | Enables the unique reservation and tree. |
+| `worldTree.placement.searchRadius` | `integer` | 24000 | Integer 4096–100000 blocks around the selected search origin. Existing region files can shift that origin beyond explored terrain. |
+| `worldTree.placement.searchAttempts` | `integer` | 256 | Integer 16–2048 global probes, followed by bounded local refinement. |
+
+### World-tree geometry
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `worldTree.geometry.biomeRadius` | `number` | 1600 | 800–2400 blocks for the woodland reservation. |
+| `worldTree.geometry.crownRadius` | `number` | 560 | 192–0.45 × biomeRadius blocks. |
+| `worldTree.geometry.ceilingClearance` | `integer` | 8 | Integer 2–64 blocks below the dimension ceiling. |
+| `worldTree.geometry.foliageDepth` | `integer` | 6 | Integer 2–16 blocks of leaf shell around each hollow canopy cluster. |
+| `worldTree.geometry.branchCount` | `integer` | 14 | Integer 8–24 main branches. |
+| `worldTree.geometry.branchDepth` | `integer` | 3 | Integer 1–3 recursive branching depth. |
+| `worldTree.geometry.barkRelief` | `number` | 0.18 | 0–0.4 bark-rib relief. |
+
+### World-tree woodland
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `worldTree.woodland.decorationAttempts` | `integer` | 3 | Integer 0–16 luminous shrub attempts per eligible chunk. Independent of decoration.enabled. |
+
+### World-tree materials
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `worldTree.materials.trunk` | `string` | `minecraft:dark_oak_log[axis=y]` | Main trunk state. |
+| `worldTree.materials.branches` | `string` | `minecraft:dark_oak_wood` | Branch state. |
+| `worldTree.materials.roots` | `string` | `minecraft:mangrove_roots` | Root state. |
+| `worldTree.materials.leaves` | `string` | `minecraft:azalea_leaves[persistent=true]` | Leaf state; persistent is forced true when that property exists. |
+| `worldTree.materials.floweringLeaves` | `string` | `minecraft:flowering_azalea_leaves[persistent=true]` | Flowering leaf state, with the same persistence rule; painted in blossom patches on canopy tops. |
+| `worldTree.materials.glow` | `string` | `minecraft:shroomlight` | Must emit nonzero block light; used for woodland shrubs and for lantern fruit at the tips of some leaf strands under the canopy. |
+| `worldTree.materials.ground` | `string` | `minecraft:moss_block` | Woodland ground and surface-rule top; therefore must also pass solid full-cube validation. |
+| `worldTree.materials.weatheredBark` | `string` | `minecraft:spruce_wood` | Weathered bark strips and knots. |
+| `worldTree.materials.mossyBark` | `string` | `minecraft:moss_block` | Mossy bark on low roots and ledges. |
+
+### Named exotic palette fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `palettes[].id` | `string` | `default` | Unique within the family; matches [a-z0-9_]+. Forms persistent biome IDs. |
+| `palettes[].rock` | `string` | `minecraft:stone` | Solid dry full-cube base rock. |
+| `palettes[].top` | `string` | `minecraft:grass_block` | Solid dry full-cube top surface. |
+| `palettes[].soil` | `string` | `minecraft:dirt` | Solid dry full-cube soil. |
+| `palettes[].crystal` | `string` | `minecraft:amethyst_block` | Solid dry full-cube crystal and roof material. |
+| `palettes[].weathered` | `string` | `minecraft:andesite` | Solid dry full-cube weathered material. |
+| `palettes[].moss` | `string` | `minecraft:moss_block` | Solid dry full-cube moss. |
+| `palettes[].ice` | `string` | `minecraft:blue_ice` | Solid dry full-cube frozen material. |
+| `palettes[].bone` | `string` | `minecraft:bone_block` | Solid dry full-cube fossil material. |
+| `palettes[].skeletalVariant` | `string` | `leviathan` | leviathan or serpent; all family palettes are validated. |
+| `palettes[].structure` | `string` | `minecraft:quartz_block` | Solid dry full-cube architecture material. |
+| `palettes[].fluid` | `string` | `minecraft:water` | Source fluid block state, no block entity; flowing states reject. |
+| `palettes[].wood` | `string` | `minecraft:oak_log` | Solid dry full-cube wood for exotic vegetation. |
+| `palettes[].leaves` | `string` | `minecraft:oak_leaves[persistent=true]` | Dry leaf block without a block entity; persistent is forced true. |
+| `palettes[].flower` | `string` | `minecraft:azure_bluet` | Dry single-block flower without a block entity; underground families also accept mushrooms and fungi. |
+| `palettes[].vines` | `string` | `minecraft:vine` | Dry wall-attached vine block without a block entity. |
+| `palettes[].waterColor` | `integer` | 0x35B8BE | Integer RGB 0–16777215. |
+| `palettes[].fogColor` | `integer` | 0xB5C9DA | Integer RGB 0–16777215. |
+| `palettes[].auroraPurple` | `integer` | 0xA96DE8 | Integer RGB 0–16777215; tundra aurora colour. |
+| `palettes[].auroraGreen` | `integer` | 0x51D6AE | Integer RGB 0–16777215; tundra aurora colour. |
+| `palettes[].auroraCrimson` | `integer` | 0xD64C78 | Integer RGB 0–16777215; tundra aurora colour. |
+
+### Default whitelist and palettes
+
+The default `placement.replaceableBiomes` list contains these `33` exact IDs:
+
+`minecraft:plains`, `minecraft:forest`, `minecraft:birch_forest`, `minecraft:flower_forest`, `minecraft:meadow`, `minecraft:windswept_hills`, `minecraft:windswept_forest`, `minecraft:stony_peaks`, `minecraft:jagged_peaks`, `minecraft:stony_shore`, `minecraft:frozen_peaks`, `minecraft:snowy_slopes`, `minecraft:grove`, `minecraft:windswept_gravelly_hills`, `minecraft:ocean`, `minecraft:deep_ocean`, `minecraft:lukewarm_ocean`, `minecraft:deep_lukewarm_ocean`, `minecraft:cold_ocean`, `minecraft:deep_cold_ocean`, `minecraft:frozen_ocean`, `minecraft:deep_frozen_ocean`, `minecraft:taiga`, `minecraft:old_growth_pine_taiga`, `minecraft:old_growth_spruce_taiga`, `minecraft:old_growth_birch_forest`, `minecraft:dark_forest`, `minecraft:cherry_grove`, `minecraft:sunflower_plains`, `minecraft:snowy_plains`, `minecraft:snowy_taiga`, `minecraft:river`, `minecraft:frozen_river`
+
+The original four exotic families each start with one palette, with the overrides below. Every other member uses the generic `palettes[]` defaults above; `crystal` is `minecraft:amethyst_block` in all four. Hexadecimal RGB is shown for readability; JSON values must be decimal integers.
+
+| Family | id | rock | top | soil | waterColor | fogColor |
+| --- | --- | --- | --- | --- | --- | --- |
+| `crystalLand` | `amethyst` | `minecraft:deepslate` | `minecraft:andesite` | `minecraft:deepslate` | `0x35B8BE` | `0xB5C9DA` |
+| `giantSkyLand` | `verdant` | `minecraft:stone` | `minecraft:grass_block` | `minecraft:dirt` | `0x35B8BE` | `0xB5C9DA` |
+| `aquapolis` | `calcite` | `minecraft:calcite` | `minecraft:grass_block` | `minecraft:dirt` | `0x35B8BE` | `0xB5C9DA` |
+| `evernightTundra` | `boreal` | `minecraft:deepslate` | `minecraft:snow_block` | `minecraft:packed_ice` | `0x596899` | `0x141E38` |
+
+A palette ID produces `isekaiexpansion:<family>_<id>`. Sky palettes additionally create `_grove` and `_wetland` biomes. The default sky IDs are `isekaiexpansion:giant_sky_land_verdant`, `isekaiexpansion:giant_sky_land_verdant_grove` and `isekaiexpansion:giant_sky_land_verdant_wetland`. These IDs become part of saved biome-source bindings; renaming or removing palettes is a world-format change.
+
+### Additional palette defaults
+
+All unspecified fields use the shared palette defaults. Each row starts with soil `minecraft:deepslate`, weathered `minecraft:basalt`, crystal `minecraft:glowstone` and fluid `minecraft:water`, then applies the overrides shown. Underground palettes also set flower to `minecraft:brown_mushroom`.
+
+| Family | id | rock | top | Other overrides |
+| --- | --- | --- | --- | --- |
+| `abyssalVolcano` | `basalt` | `minecraft:blackstone` | `minecraft:basalt` | `soil=minecraft:blackstone`, `weathered=minecraft:red_nether_bricks`, `crystal=minecraft:magma_block`, `fluid=minecraft:lava`, `fogColor=0x563444` |
+| `gardenOfTheFirmament` | `verdant` | `minecraft:stone` | `minecraft:grass_block` | `soil=minecraft:dirt`, `weathered=minecraft:andesite`, `fogColor=0xB6D6DD` |
+| `giantStoneValley` | `weathered` | `minecraft:andesite` | `minecraft:tuff` | `weathered=minecraft:stone`, `fogColor=0x939F9E` |
+| `riftborneMonolith` | `riftstone` | `minecraft:deepslate` | `minecraft:polished_basalt` | `crystal=minecraft:shroomlight`, `fogColor=0x487182` |
+| `infernalDeepCavern` | `basalt` | `minecraft:blackstone` | `minecraft:basalt` | `soil=minecraft:blackstone`, `weathered=minecraft:red_nether_bricks`, `crystal=minecraft:magma_block`, `fluid=minecraft:lava`, `fogColor=0x563444` |
+| `sunkenAzureGrotto` | `azure` | `minecraft:deepslate` | `minecraft:moss_block` | `weathered=minecraft:tuff`, `structure=minecraft:mossy_stone_bricks`, `crystal=minecraft:sea_lantern`, `waterColor=0x27C6CF`, `fogColor=0x254F65` |
+| `viridianToxicDepths` | `viridian` | `minecraft:blackstone` | `minecraft:tuff` | `crystal=minecraft:ochre_froglight`, `waterColor=0x39D65B`, `fogColor=0x245E43` |
+| `worldrootHollow` | `ancient` | `minecraft:deepslate` | `minecraft:moss_block` | `wood=minecraft:dark_oak_wood`, `crystal=minecraft:shroomlight`, `fogColor=0x365653` |
+
+## Validation
+
+Block strings accept block-state syntax such as `minecraft:oak_leaves[persistent=true]`. Ordinary surface fields and the exotic rock/top/soil/crystal/weathered/moss/ice/bone/structure/wood fields require non-air, dry, full-cube blocks without block entities. World-tree materials use the less restrictive dry/non-air/no-block-entity rule, except ground also participates in solid surface validation and glow must emit light. Exotic leaves, flowers, vines and fluid have the additional type requirements in their rows.
+
+All numbers checked by the geometry validators must be finite and within range. Family size and vertical scale are checked independently, then combined geometry must still satisfy ring fit and the placement-cell margin. Passing field validation does not guarantee an admitted district: habitat, available height, reserved landmarks and whole-shape checks can reject a candidate.
+
+Palette lists require `1–16` entries with unique IDs per family. Colours are integers `0–16777215`. Setting a family weight or `enabled` to zero/false does not exempt its settings from construction-time validation. Null groups, malformed block states, unsupported skeleton variants or invalid geometry can abort registry/world setup; there is no per-field fallback to silently repair them.
+
+The mod's validators do not report arbitrary unknown JSON keys. A misspelt setting is not a reliable way to detect configuration mistakes. Empty palette lists reject; an empty replacement whitelist is accepted but stops normal district admission.
+
+## Reloading
+
+Set generation options before creating/loading the world, then restart to obtain a fresh registry/generator snapshot. `/reload` is not a terrain regeneration command. Already generated chunks are not rewritten by these paths, and the saved World Tree reservation keeps its coordinates and geometry.
+
+IsekaiCore `0.4.0-build61` supplies login-time synchronisation of the `terrain` object. Generation deliberately reads server-local values; atmosphere reads the active server-synchronised view. This bridge does not live-push edits to connected clients. The separate shader toggle remains local, and shader overlays are prepared when Iris loads a pack; disabling it takes effect on a subsequent pack load.
+
+## Related
+
+- [Terrain and landmarks](/en/wiki/terrain/) — what the families look like and how to find them.
+- [Terrain generation](/en/dev/terrain-generation/) — registry, density, persistence and shader extension contracts.
+- [Wayfinding](/en/wiki/wayfinding/) — bounded searches and result limits.
+

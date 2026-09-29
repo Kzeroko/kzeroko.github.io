@@ -1,0 +1,155 @@
+---
+title: "Magic circles"
+description: "Layered magic seals, cast sequences and independent rendering."
+category: client
+order: 55
+updated: 2026-09-25
+---
+
+Magic circles compose independently selected seal layers, plain stroke rings, luminous lines and cylindrical casting auras from immutable sequences. `MagicCircleAPI` is the client facade; the animation graphs and server circle builders remain internal project machinery.
+
+## What it does
+
+The world FX pass draws casting circles after entities. It follows the actual player or NPC without drawing through their model renderer, so a morph does not become the owner of the circle geometry. Punchy supplies an animated hand anchor only while it owns first-person rendering. When Player Animator supplies Spell Engine casting animations, Punchy forces vanilla display, or Punchy is disabled, face circles use the same caster-relative world pose as third person: the origin is at 60% of the caster's current height, followed by the caster's interpolated yaw/pitch and the sequence's forward/vertical offsets. Changing perspective changes the camera, not the circle placement. Ground sequences stay in world space.
+
+Circle materials use the ordinary translucent-emissive entity program, with `LEQUAL` depth testing, colour and depth writes, source-alpha blending and disabled culling. Both world and hand layers write depth so later sky or water behind a stroke cannot overwrite it. Transparent texels discarded by the program leave the gaps open. Opaque foreground terrain still occludes the circles; water physically in front retains its normal transparency and shader-pack effects. The world layer uses `ITEM_ENTITY_TARGET` for Fabulous composition; hands use `MAIN_TARGET`.
+
+Circles have no affected entity outline: the status-aura capture provider excludes them, including first-person Spirit Mantle capture. The player disintegration provider also passes circle geometry through unchanged. Shadow passes skip circle drawing.
+
+Circle glyphs use the same atlas with shaders enabled or disabled. Lines and auras are collected into `CircleEffectPass` and use the same Satin core shaders in both modes. They draw after world composition, adding RGB light while preserving scene alpha and depth. They never enter the shader pack's emissive-eye material. The aura has an open, tapered side surface with a periodic wisp field; the field has no constant haze and both height ends fade to zero. There are no end caps or coverage cutouts.
+
+The pass snapshots world depth after translucent rendering and samples that copy for soft foreground intersections. Hand effects retain their own captured projection and depth copy. Scene depth is read only: the aura cannot replace the depth used to render sky, water or objects behind it. Per-node colour and animation stay in vertices; projection and depth uniforms are set per batch. The pass allows 32 batches, reuses buffers during active frames and releases its captures when idle or disconnected. A newly allocated or resized world-depth capture is used from the next frame.
+
+Only circle glyphs use the precomputed 256-entry sRGB emission table with Iris. Lines and auras use their authored RGB and vertex alpha directly, including low-opacity fades. Line cores account for pixel footprint to soften distant diagonals. Their emission is added after the pack's world bloom and exposure; check final appearance and depth alignment with the intended packs in game.
+
+## Runtime model
+
+`MagicCircleSystem` resolves casting intent on end-client-tick. It interpolates progress and rotates nodes from a local elapsed clock. Sequence definitions, their registry and render-data serialization live under `internal.magiccircle` and load on either side; `CircleSequenceRenderer` and GPU resources stay client-only.
+
+Attached ground sequences finish with an authored world-space fade, freezing their position, facing, height and formation progress when the live cast stops. The aura lifts slightly as it fades. The hand pass always checks the live source. A new cast source or decreasing progress restarts the session. Removal, death, excessive distance, world changes, join and disconnect discard the state.
+
+| Bound | Value | Effect |
+| --- | --- | --- |
+| Attached casters | 128 | Additional casters wait for capacity. |
+| Draw distance | 96 blocks | Applies to attached and standalone circles. |
+| Attached outro | 0–40 ticks (0–2 seconds) | Authored per sequence by `outroTicks`. |
+| World frame budget | 8192 quads | Shared by world attachments and standalone circles. |
+| Hand frame budget | 1024 quads | Separate first-person allowance. |
+| Visible layer | 1 quad | The complete guide grows and fades, including during arrival. |
+| Seal | 1 quad per visible layer | An outer/inner pair uses 2; any nonempty ordered layer list is supported. |
+| Stroke | 1 quad | Dedicated stroke tile. |
+| Line | 48 quads | 24 longitudinal segments across 2 intersecting ribbons. |
+| Aura | 576 quads | 48 sides and 12 height rows on a tapered cylindrical shell. |
+
+Budgets reserve each whole layer, line or aura before submitting vertices. An object exceeding the remaining budget is skipped. Sequence bounds include child placement and size; culling has no special case for a named sequence. Resource reload replaces the material atlas; it does not reconstruct a graph each frame. Server `MagicCircleEntity` action logic, casting duration, active duration and ending duration remain independent of the client choreography.
+
+## Contracts
+
+### Guide assets
+
+A design such as `isekaiexpansion:fire` requires `assets/isekaiexpansion/textures/magic_circles/v2/fire_outer.png`, `assets/isekaiexpansion/textures/magic_circles/v2/fire_inner.png` and `assets/isekaiexpansion/textures/magic_circles/v2/fire_stroke.png`. Other namespaces use the same directory. Resource discovery queries `textures/magic_circles/v2` without a trailing slash. A layer selects `Glyph.OUTER`, `Glyph.INNER` or `Glyph.STROKE`. Outer contains the perimeter inscription without the inner motif; inner contains the centre motif; stroke contains only a plain circle. Each can be drawn independently or repeated in one seal.
+
+| Property | Value | Contract |
+| --- | --- | --- |
+| Source dimensions | Square, 8–256 pixels | Invalid or empty guides reject the design with a logged error. |
+| Source coverage | Alpha at least 128 | Selected pixels guide the reconstructed linework. |
+| Material tile | 256 × 256 pixels | Rounded contours and fitted circular outlines preserve holes. |
+| Tile gutter | 8 pixels | Transparent padding separates atlas entries. |
+| Mip levels | 4 | Alpha-weighted colours reduce dark fringes. |
+| Atlas designs | At most 32 | Valid designs load in identifier order. Excess designs log a warning. |
+
+The compiler uses average source ink colour, a pale core and a restrained local halo. It runs during resource preparation, then uploads the shared atlas on reload application. A missing or invalid layer or unknown design has no rendered material. The old sprite/model paths and glow shader are removed; there is no legacy asset lookup.
+
+### Sequences and layers
+
+`MagicCircleSequences` constructs and registers the built-in graphs once. `SpellClientData.registerCircleSequence(Identifier, CircleSequence)` takes the sequence directly. Without a registration, beaming chooses `PULSE_SINGLE`, tier below 3 chooses `FACE_SINGLE` and other tiers choose `FACE_TRIPLE`.
+
+The current built-in graphs and their IDs live in `MagicCircleSequences`. Register additional sequences during common initialisation on both sides. Duplicate IDs and unknown lookup IDs throw; render data must reference the registered object.
+
+`CircleReveal` contains `BLOOM` (the complete layer grows from its centre while fading in), `ASSEMBLE` (the same growth and fade with explicitly authored depth and rotational settling) and `FADE` (opacity arrival at full size). The removed directional-wipe modes have no aliases or NBT conversion.
+
+Each layer evaluates its own delayed progress through the quintic curve `t³(10 − 15t + 6t²)`. Scale and opacity ease from zero to their authored values with zero velocity and acceleration at both ends. `FADE` applies the curve only to opacity. The whole guide stays visible through the fade; there is no angular or radial clipping edge. Parent orbits and continuous layer rotation remain independent of arrival.
+
+| Node | Parameters | Contract |
+| --- | --- | --- |
+| `Group` | `children` | Immutable ordered list of child nodes. |
+| `Anchor` | `plane`, `distance`, `height`, `heightRatio`, `child` | `FACE`, `GROUND` or `LOCAL`; ground elevation adds caster height multiplied by `heightRatio`. Distances are blocks. |
+| `Transform` | `x`, `y`, `z`, `yaw`, `pitch`, `roll`, `child` | Local translation in blocks, followed by Y/X/Z rotation in degrees. Applies to every child node. |
+| `Orbit` | `radius`, `speed`, `phase`, `facing`, `tilt`, `child` | Radius in blocks, speed in degrees per tick, phase and tilt in degrees. Facing is `PARALLEL`, `INWARD` or `OUTWARD`. Each child retains its own animation. |
+| `Seal` | `start`, `end`, `scale`, `spin`, `pulseDepth`, `pulseTicks`, `layers` | Nonempty immutable ordered list of independently selected layers. Cast interval is within 0–1 with end greater than start. Scale is positive. Spin is degrees per tick; pulse depth is 0 inclusive to 1 exclusive and period is positive ticks. |
+| `Layer` (seal data) | `glyph`, `delay`, `duration`, `spin`, `phase`, `scale`, `depth`, `opacity`, `arrivalDepth`, `arrivalSpin` | Glyph is `OUTER`, `INNER` or `STROKE`. Timing is local seal progress; delay is nonnegative, duration positive and their sum at most 1. Spin is degrees per tick, phase degrees, scale positive and depth local blocks. Opacity is 0–1; zero suppresses the layer. Signed arrival depth and rotation offsets apply only to `ASSEMBLE`, easing to zero; 0 disables each offset. |
+| `Line` | `start`, `end`, `length`, `width`, `color`, `opacity`, `startFade`, `endFade`, `pulseDepth`, `pulseTicks` | Positive length and half-width in blocks along local +Z. Colour is 24-bit RGB or `CircleColorRef.AUTO`; opacity and each spatial fade fraction are 0–1. Overlapping fades multiply. 0 fade disables that end's fade. Timing and pulse ranges match a seal. |
+| `Aura` | `start`, `end`, `radius`, `height`, `color`, `opacity`, `flow`, `pulseDepth`, `pulseTicks` | Positive radius and height in blocks, rising along local +Z. Colour is 24-bit RGB or `CircleColorRef.AUTO`, opacity 0–1 and flow is signed texture periods per 80 ticks (4 seconds). Timing and pulse ranges match a seal. |
+
+Numeric node parameters must be finite. Orbit radius cannot be negative. Layer order and depth are authored independently; there is no required outer/inner pair. Give overlapping glyphs distinct depths to avoid coplanar artifacts. Ground anchors orient local positive depth upward; face depth follows the seal's local normal. Parent orbit motion and child self-rotation are composed. `INWARD` points local +Z towards the orbit centre; `OUTWARD` points away. Put a seal and a line in the same orbital group to share their centre and normal; use `Transform` or `LOCAL` placement to move the shaft start. Line formation extends its length, while aura formation raises its height. Pulse depth 0 disables breathing. Lines pulse intensity; auras pulse intensity and seals pulse the size of their selected layers.
+
+Depth is applied before the layer's XY growth. There is no implicit arrival translation. A layer with `arrivalDepth = 0` appears at its final plane from its first visible frame. This allows ground layers to stay at their final height throughout formation. A nonzero offset is in seal-local blocks and is multiplied by the parent seal scale.
+
+### Colour references
+
+`CircleColorRef` provides static final RGB fields sampled from the bundled V2 source ink. Explicit colours stay fixed. `AUTO = 0x01000000` reserves a bit outside the 24-bit RGB mask, so it cannot collide with any literal RGB colour. Only the exact sentinel is accepted; other values outside `0x000000`–`0xFFFFFF` throw during node construction.
+
+`CircleColorRef.resolve(int reference, int automaticRgb)` returns the explicit colour or substitutes `automaticRgb` for `AUTO`. The resolved result must be 24-bit RGB; an invalid result throws. Alpha remains a separate node parameter.
+
+The renderer supplies the active material's average outer-guide ink colour. It is collected from source pixels with alpha at least 128 while compiling the guide and cached with the material on resource reload. Spell casts and elemental bow circles resolve school IDs through a shared design mapping: `magic_water`, `magic_wind`, `magic_earth`, `magic_light` and `magic_dark` select `water`, `wind`, `earth`, `light` and `dark`; `magic_astral` selects `astra`. Other schools use their ID path as the design name. Standalone circles use their explicit `Design`. Thus `AUTO` follows the spell's circle colour and resource-pack recolouring, including custom designs. Each visible line or aura resolves once before emitting vertices; the immutable sequence is shared safely across simultaneous casts.
+
+| Reference | RGB |
+| --- | --- |
+| `ARCANE` | `0xA560C9` |
+| `ASTRA` | `0x7AE9CC` |
+| `DARK` | `0x321798` |
+| `EARTH` | `0x906636` |
+| `FIRE` | `0xD81414` |
+| `FROST` | `0x64ACD6` |
+| `HEALING` | `0x24E849` |
+| `LIGHT` | `0xFFFB76` |
+| `LIGHTNING` | `0xF7C759` |
+| `SOUL` | `0x2DD4DA` |
+| `WATER` | `0x0047A2` |
+| `WIND` | `0xBCEF5E` |
+
+### Standalone render data
+
+A standalone sequence pivots around the entity bounding-box centre. `YOffset` is added before scale and rotation, so resizing or aiming cannot move that centre. Its first face anchor defines the local origin; later face anchors keep their authored relative distances.
+
+`MagicCircleRenderData` is common-side data tracked and saved by the circle entity. Its constructor fields correspond to these NBT keys. Empty tracker data uses `isekaiexpansion:arcane`, `isekaiexpansion:face_single`, `BLOOM`, scale ×1, speed ×1 and offset 0. A nonempty compound requires all fields with the correct type; invalid identifiers, unknown sequence IDs or reveal enums, non-finite values and out-of-range values throw. Unknown extra keys are ignored. Enum-name sequence values and old sprite fields are not translated.
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `Design` | `identifier` | required | Three-layer guide design, without texture directory or suffix. |
+| `Sequence` | `identifier` | required | Registered sequence ID, for example `isekaiexpansion:super_tier`. |
+| `Reveal` | `enum` | required | A `CircleReveal` value listed above. |
+| `Scale` | `number` | required | Positive multiplier up to ×16. |
+| `Speed` | `number` | required | Signed rotation multiplier, −16–16. Zero stops rotation. |
+| `YOffset` | `number` | required | World-space vertical offset, −64–64 blocks. |
+
+## Extending it
+
+Compose reusable `Group`, `Anchor`, `Transform`, `Orbit`, `Seal`, `Line` and `Aura` nodes when editing the internal sequence catalogue. Construct these graphs once. Child seals can have different cast intervals, layer motion and pulse settings inside the same orbit. Use `List.of(MagicCircleSequences.OUTER)` for an outer-only seal, `List.of(MagicCircleSequences.INNER)` for an inner-only seal, or author repeated `Layer` records with any glyph selection. There is no separate stroke node or fixed-pair constructor.
+
+A server-side caller can configure a standalone spell circle through the existing internal builder:
+
+```java
+MagicCircleBuilder.create(caster)
+        .render(new MagicCircleRenderData(
+                new Identifier("isekaiexpansion", "fire"),
+                MagicCircleSequences.FACE_TRIAD, CircleReveal.ASSEMBLE,
+                1.5F, 1.0F, 0.0F))
+        .castDuration(20)
+        .activeDuration(60)
+        .endDuration(8)
+        .spawn();
+```
+
+The example casts for 20 ticks (1 second), stays active for 60 ticks (3 seconds) and ends over 8 ticks (0.40 seconds). Gameplay actions remain on `MagicCircleBuilder` and `MagicCircleSequenceLogic`; client visuals do not execute spell effects.
+
+`MagicCircleAPI.initClient` registers client lifecycle hooks before the first resource reload. `renderEntity`, `renderHand` and `applyFacePose` belong on the client render thread with the current matrix stack and provider. `renderHand` uses the supplied pose callback and requires a tracked cast. The `circleInFirstPerson` option controls local first-person drawing; when Punchy does not own the hands, face circles retain the third-person world pose.
+
+## Verifying
+
+Run `./gradlew.bat compileJava` after code changes. Inspect the edited effects in game with shaders disabled and with the intended Iris pack, including casting, interruption and resource reload.
+
+## Related
+
+- [Shaders and materials](/en/dev/shaders-and-materials/)
+- [Spell integration](/en/dev/spell-integration/)

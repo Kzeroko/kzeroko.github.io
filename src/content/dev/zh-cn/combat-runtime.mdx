@@ -1,0 +1,232 @@
+---
+title: "战斗属性与状态运行时"
+description: "属性元数据、伤害阶段、星能与盾势存储，以及状态施加和生命周期约定。"
+category: systems
+order: 35
+updated: 2026-09-26
+---
+
+本系统连接属性注册、Data Attributes 映射、PlayerEx 伤害函数和状态生命周期钩子。相关辅助类属于内部实现；[玩家属性指南](/zh-cn/wiki/attributes-and-effects/)与[效果目录](/zh-cn/wiki/status-effects/)说明玩法结果。
+
+## 它做什么
+
+`IsekaiAttributes` 注册可同步的原生属性。附带的 Data Attributes 资源声明下游映射、实体默认值和元数据覆写。`CombatAttributeUtil`、星能与盾势组件以及状态钩子消费这些数值；仅注册属性并不会产生战斗效果。
+
+`IsekaiDamageCondition` 通过 `ExAPI.registerDamageModification` 注册函数。`IsekaiEffects` 与 `IsekaiMagicEffects` 注册效果目录。Spell Power 负责学派结算与易伤，PlayerEx 负责下游基础和暴击属性。
+
+## 运行时模型
+
+### 原生属性与附带元数据
+
+下表列出应用 Data Attributes 覆写和实体专属默认值之前的 Java 声明。所有条目均启用同步追踪。
+
+| ID | Java 默认值 | Java 范围 |
+| --- | --- | --- |
+| `isekaiexpansion:max_energy` | 30 | 0–10000 |
+| `isekaiexpansion:energy_regen_speed` | 0.5 | 0.2–200 |
+| `isekaiexpansion:max_shield_gauge` | 75 | 0–1000 |
+| `isekaiexpansion:shield_gauge_regen_speed` | 2 | 0.5–10 |
+| `isekaiexpansion:melee_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:melee_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:magic_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:magic_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:range_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:range_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:elemental_power` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:dys_aether` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:aether_power` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:ability_haste` | 0 | -99–500 |
+| `isekaiexpansion:armor_penetration` | 0 | 0–100 |
+| `isekaiexpansion:magic_penetration` | 0 | 0–100 |
+| `isekaiexpansion:tenacity` | 0 | 0–100 |
+| `isekaiexpansion:enmity` | 0 | 0–100 |
+| `isekaiexpansion:stamina` | 0 | 0–100 |
+| `isekaiexpansion:omnivamp` | 0 | 0–100 |
+| `isekaiexpansion:shield_power` | 0 | 0–100 |
+| `isekaiexpansion:aggro_generation` | 0 | -100–500 |
+| `isekaiexpansion:burst_damage` | 0 | 0–1000 |
+| `isekaiexpansion:energy_leech` | 0 | 0–100 |
+| `isekaiexpansion:shield_break` | 0 | 0–100 |
+| `isekaiexpansion:evasion_counter` | 0 | 0–1000 |
+| `isekaiexpansion:debuff_accuracy` | 0 | 0–1000 |
+| `isekaiexpansion:guts_chance` | 0 | 0–100 |
+| `isekaiexpansion:stealth_efficiency` | 0 | 0–100 |
+| `isekaiexpansion:environmental_resistance` | 0 | 0–100 |
+| `isekaiexpansion:heal_amplification` | 0 | 0–500 |
+| `isekaiexpansion:eloquence` | 0 | -100–1000 |
+| `isekaiexpansion:charm` | 0 | -100–1000 |
+| `isekaiexpansion:tenju_affinity` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:bonus_damage_level` | 0 | 0–9 |
+| `isekaiexpansion:magic_sword_sense` | 0 | 0–30 |
+| `isekaiexpansion:constitution` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:strength` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:dexterity` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:intelligence` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:technique` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:perception` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:belief` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:evasion` | 0 | 0–`Double.MAX_VALUE` |
+
+`data/isekaiexpansion/attributes/overrides/` 下的文件另行声明以下元数据。原生最大星能上限为 10000，数据上限却为 5000；原生闪避上限为 `Double.MAX_VALUE`，数据上限则为 0.5。排查状态界面时必须区分这些层次。
+
+| 属性 | 回退值 | 范围 | 增量 | 叠加 |
+| --- | --- | --- | --- | --- |
+| `isekaiexpansion:aether_power` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:belief` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:constitution` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:dexterity` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:dys_aether` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:elemental_power` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:energy_regen_speed` | 0.5 | 0.2–200 | 0.1 | `FLAT` |
+| `isekaiexpansion:evasion` | 0 | 0–0.5 | 0.01 | `DIMINISHING` |
+| `isekaiexpansion:intelligence` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:magic_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:magic_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:max_energy` | 0 | 0–5000 | 10 | `FLAT` |
+| `isekaiexpansion:melee_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:melee_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:perception` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:range_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:range_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:strength` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:technique` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:tenju_affinity` | 0 | 0–50 | 1 | `FLAT` |
+
+每个覆写文件都明确提供以下字段。本表说明附带声明；解析、重载与缺字段行为由依赖负责。
+
+| 字段 | 类型 | 默认值 | 附带文件中的含义 |
+| --- | --- | --- | --- |
+| `fallbackValue` | number | 明确填写 | 上表所列回退值。 |
+| `minValue` | number | 明确填写 | 元数据下限。 |
+| `maxValue` | number | 明确填写 | 元数据上限。 |
+| `incrementValue` | number | 明确填写 | 元数据增量。 |
+| `translationKey` | string | 明确填写 | 显示键；基础属性和闪避沿用 PlayerEx 键。 |
+| `stackingBehaviour` | string | 明确填写 | 通常为 `FLAT`，闪避为 `DIMINISHING`。 |
+
+`entity_types.json` 提供玩家与简单分身的默认值。两者最大星能为 30、星能回复为 0.5、最大盾势为 75、盾势回复为 2；其中列出的战斗和包装属性增益从 0 开始。玩家条目还列出社交属性。此 JSON 未列生命增幅，但玩家属性构建钩子会添加它，原生默认值为 0。
+
+`functions.json` 以 `ADDITION` 声明以下转交系数：
+
+| 来源属性 | 下游目标及系数 |
+| --- | --- |
+| `isekaiexpansion:melee_crit_chance` | `playerex:melee_crit_chance` × 1 |
+| `isekaiexpansion:melee_crit_damage` | `playerex:melee_crit_damage` × 0.5 |
+| `isekaiexpansion:range_crit_chance` | `playerex:ranged_crit_chance` × 1 |
+| `isekaiexpansion:range_crit_damage` | `playerex:ranged_crit_damage` × 0.5 |
+| `isekaiexpansion:magic_crit_chance` | `spell_power:critical_chance` × 100 |
+| `isekaiexpansion:magic_crit_damage` | `spell_power:critical_damage` × 100 |
+| `isekaiexpansion:elemental_power` | `spell_power:fire` × 1; `spell_power:magic_water` × 1; `spell_power:frost` × 1; `spell_power:magic_wind` × 1; `spell_power:magic_earth` × 1; `spell_power:lightning` × 1 |
+| `isekaiexpansion:dys_aether` | `isekaiexpansion:elemental_power` × 1; `spell_power:arcane` × 1; `spell_power:soul` × 1; `spell_power:magic_dark` × 1 |
+| `isekaiexpansion:aether_power` | `isekaiexpansion:dys_aether` × 1; `spell_power:healing` × 1; `spell_power:magic_light` × 1; `spell_power:magic_astral` × 1 |
+| `isekaiexpansion:constitution` | `playerex:constitution` × 1 |
+| `isekaiexpansion:strength` | `playerex:strength` × 1 |
+| `isekaiexpansion:dexterity` | `playerex:dexterity` × 1 |
+| `isekaiexpansion:evasion` | `playerex:evasion` × 1 |
+| `isekaiexpansion:intelligence` | `playerex:intelligence` × 1 |
+| `isekaiexpansion:technique` | `playerex:technique` × 1 |
+| `isekaiexpansion:perception` | `playerex:perception` × 1 |
+| `isekaiexpansion:belief` | `playerex:belief` × 1 |
+
+JSON 层次为 `values → source attribute → target attribute`；每个目标对象包含字符串 `behaviour` 和数值 `value`。`properties.json` 使用 `values → attribute → display-property string`：`percentage`、`float` 和 `integer` 是展示声明，并非另一套战斗归一化函数。包装暴击与闪避百分比使用 `100.0`，Spell Power 暴击率使用 `1.0`。
+
+### 星能与盾势状态
+
+两个组件均在服务端 tick，并经 CCA 同步。NBT 读取使用基础类型的零值或 false 回退，不会校验每个中间计时状态。
+
+| 组件 / 键 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| 星能 · `energy` | int | 0 | 当前储量；服务端 tick 修复负值及超上限值。 |
+| 星能 · `energyTickTimer` | int | 0 | 恢复脉冲计时器。 |
+| 星能 · `energyRevealed` | boolean | false | 能量条显示标记。 |
+| 星能 · `lockEnergy` | boolean | false | 暂停恢复。 |
+| 星能 · `lockEnergyTimer` | int | 0 | 已经过的锁定 ticks。 |
+| 盾势 · `shieldGauge` | int | 0 | 当前防御储量。 |
+| 盾势 · `gaugeTickTimer` | int | 0 | 恢复脉冲计时器。 |
+| 盾势 · `coolingDown` | boolean | false | 破防冷却状态。 |
+| 盾势 · `cooldownTimer` | int | 0 | 剩余冷却 ticks。 |
+| 盾势 · `lockGauge` | boolean | false | 消耗后的恢复暂停。 |
+| 盾势 · `lockGaugeTimer` | int | 0 | 已经过的锁定 ticks。 |
+
+星能每 `(int)(20 / regen)` ticks 恢复 1 点，每 tick 至多一次。移除能量会将当前值限制到至少 0，启动 20-tick 锁定并同步。直接 `setEnergy` 不限制数值；`addEnergy` 只限制结果上限，不拒绝调用者传入负值。锁定计时器只在低于上限时推进，因此储量已满时锁定可能继续保留。
+
+盾势上限为 `max(0, round(baseGauge × shieldPowerMultiplier))`，每次恢复量为 `max(1, round(5 × shieldPowerMultiplier))`，间隔为 `max(1, round(20 / regen))`，回复非正时为 20。格挡后暂停恢复 40 ticks。恢复可能暂时超出上限，直到下一 tick 修正。冷却分支提前返回，不恢复盾势。
+
+格挡伤害超过普通阈值但不超过最大阈值时，按比例额外增加最多一份基础消耗，再除以护盾强效、四舍五入，并保证至少消耗 1。严格超过最大阈值会立即破防，盾势耗尽同样破防。盾牌参数和回退常量由 IsekaiCore 提供，本组件不硬编码通用盾牌方案。
+
+## 约定
+
+### 伤害阶段与百分比
+
+异界扩展按以下顺序注册伤害函数：职业限制减半、职业战斗规则、元素弱点、元素抗性、星脉枯竭、饥饿与溺水替换、环境抗性、法术天赋、近战天赋、远程天赋、攻击方战斗属性。这只说明本模组的注册顺序，不代表相对于所有其他模组的全局顺序。
+
+元素分类优先解析已注册法术学派；其他伤害采用本地伤害键分类。只有拥有非空 Core 元素数据的生物受影响。弱点与抗性分别计数，并同时应用各自倍率；[元素表](/zh-cn/wiki/elements/)列出全部注册内容。重复的水元素/近战注册只是在集合中重复，不构成风元素/近战抗性。
+
+`normalizePercent(v)` 仅在 `abs(v) > 1` 时返回 `v / 100`，否则返回 `v`。边界不连续：1 表示完整比例，略大于 1 的值却按百分点解释。不要仅因界面显示百分号，就将此方法用于暴击转交或急速。
+
+| 消费端 | 公式或约定 |
+| --- | --- |
+| 技能冷却 | 基础值非正 → 0；否则 `max(0, round(baseTicks × 100 / max(1, 100 + haste)))`。 |
+| 生命加权伤害 | `1 + max(0, N(enmity)) × (1 - h) + max(0, N(stamina)) × h`，生命比例 `h` 限制到 0–1。 |
+| 护甲贯通 | 仅物理类别；其他活体攻击者使护甲输入乘以 `1 - clamp(N(penetration), 0, 1)`，韧性不变。 |
+| 魔法贯通 | Spell Power 钩子仅将 `GENERIC` 抗性输入乘以相同贯通因子。 |
+| 韧性 | `T = clamp(N(tenacity), 0, 0.95)`。 |
+| 异常命中 | `clamp(1 - T + max(0, N(accuracy)), 0.05, 1)`；`N(accuracy) >= 1` 跳过随机判定。 |
+| 控制时长 | `max(1, round(duration × (1 - T)))`。 |
+| 环境抗性 | 伤害 × `1 - clamp(N(resistance), 0, 0.95)`；排除无受击冷却来源。 |
+| 正向治疗 | 治疗量 × `1 + max(0, N(healAmplification))`。 |
+| 护盾强效 | `max(0.1, 1 + max(0, N(shieldPower)))`。 |
+| 仇恨倍率 | `max(0, 1 + N(aggroGeneration))`。 |
+| 星能汲取 | 比例为正时，符合条件的玩家命中恢复 `max(1, round(maxEnergy × max(0, N(leech))))`。 |
+| 全能吸血 | 正数钩子伤害量 × 非负归一化比例；同一攻击者同 tick 后续命中再乘以 0.22。 |
+| 闪避状态反击 | 要求活体攻击者在 8 格内；伤害为 `max(1, attackDamage × max(0, N(counter)))`，带近战和无受击冷却标记。若攻击者为玩家，则限制其物品使用、攻击、移动和跳跃 12 ticks（0.6 秒）。 |
+
+此处 `N` 指上述归一化。全能吸血依据事件参数而非实际生命损失，且调用正常治疗路径。本模组的通用 PlayerEx 闪避回调为空；这里记录的反击调用位于闪避状态免疫钩子中。不能保证每个第三方闪避结果都会反击。
+
+闪避状态钩子排除爆炸、火焰、摔落、下落方块/铁砧/钟乳石、虚空及绕过护甲的伤害。魔法免疫接受普通魔法、间接魔法或任何已解析学派。`OtherImmuneEffect` 比较保存的 `DamageSource` 对象身份，而非伤害类型相等。
+
+死亡阻止先尝试罗刹路径，再尝试通用根性/不屈根性路径。通用路径拒绝虚空、疾病和药物疾病。没有不屈根性时，要求有限的正数受击前生命，且高于最大生命 25%；成功后生命设为 1。外围钩子无法取得捕获的受击前上下文时，会回退到当前生命加上传入伤害。
+
+### 状态施加与清除
+
+服务端 `addStatusEffect` 包装器依次处理有害效果队伍保护、来自其他活体的命中检查、韧性时长调整。它在调用原始施加方法之前记录恐惧来源，使恐惧目标能在 `onApplied` 中解析施加者。新恐惧施加失败且目标没有恐惧时，会清除此来源记录。
+
+韧性的控制集合包含 `CC` 效果，以及缓慢、虚弱、挖掘疲劳、失明、漂浮和反胃。其他有害类别可能进行命中判定，却不缩短持续时间。
+
+`IsekaiStatusEffect` 默认类别为 `COMMON`；构造时的可清除性与 `IIsekaiEffect.isPersistent()` 是不同标记。牛奶经专用清除路径保留不可清除效果；通用 `clearStatusEffects` 保留持久效果；仅有害净化排除有益、不可清除及持久效果。这些操作不能互换。
+
+`addExtraAttributeModifier` 可为已使用的属性增加另一项修饰符。施加时先移除模板 UUID，再安装调整后的修饰符；移除时先清理所有额外 UUID，再调用父类路径。应采用不同且稳定的 UUID。灵力缠身覆写数值调整以忽略放大器，不要假设所有自定义效果都如此。
+
+`applyStatusEffectTicks` 拒绝 null 输入和非正时长，并将负放大器限制到 0。`applyStackedEffectTicks` 拒绝非正增量或上限，将放大器换算为层数、限制到上限，再以 `stacks - 1` 放大器提交新实例。旧 `applyStackedEffect` 的时长参数单位是秒。独立的 `StatusEffectUtil.addStatusEffect` 直接修改活动映射并调用生命周期回调，绕过普通施加包装器，不能作为等价替代。
+
+`removeOneClearableHarmful` 优先选择放大器最大者，再比较时长和翻译键。`clearHarmful(cap)` 当前先收集匹配效果，再检查上限，因此非正上限仍可能移除一个效果。需要零次移除的调用者应事先判断。
+
+### 周期效果与依赖边界
+
+闪避反击在服务端玩家防御者身上以 `REACTION_PRIORITY` 播放 `IsekaiPlayerAnimations.REACTION_EVASION_RIPOSTE`。`KitsuneLossOfSpiritEffect` 使用 `ActionDisabler.restrained(2 * 20)`：限制物品使用、移动和跳跃 40 ticks（2 秒），动作限制本身仍允许攻击；同时在该服务端玩家身上以 `SKILL_PRIORITY` 播放 `REACTION_SPIRIT_DRAIN_STAGGER`。
+
+`DamageOverTimeEffect` 仅对服务端存活实体触发，并要求剩余时长是间隔的正整数倍。其结算方法至少执行 1 次、最多执行调用者指定次数，可归属给指定攻击者；返回成功调用所请求的伤害总和，而非实际生命损失。该方法不会移除状态实例。
+
+法术易伤定义当前连续调用两次单学派设置器。已检验的 Spell Power 源码保留最后一次调用，其法强倍率与 1 相加。[效果目录](/zh-cn/wiki/status-effects/)记录最终数值与检验的依赖修订。修复或升级集成时，应明确这一差异，不能把被丢弃的首个学派参数直接写成生效行为。
+
+`IsekaiSpellSchools` 遇到同 ID 学派时复用已有对象。新建自定义学派属性的基础值和下限为 0，上限为 2048；近战物理学派绑定 `isekaiexpansion:physical_melee`，其他自定义学派使用对应 Spell Power 伤害 ID。`IsekaiMagicAttribute` 依据模组 ID、学派 ID 与运算生成 UUID，因此同一学派/运算的多个数值不是独立修饰符身份。
+
+## 扩展方式
+
+新增内部属性时，需要注册 ID、附加到对应实体、定义数据元信息与映射，并增加实际消费逻辑。应在消费端明确单位规则。新增效果时，分别选择原版类别、模组类别、可清除性与持久性，实现成对的施加/移除清理，并在相应目录注册 ID。
+
+已有运算占用同一属性时，通过 `addExtraAttributeModifier` 增加额外修饰符。控制效果应保留来源上下文并使用现有目标控制生命周期。玩法状态在服务端修改，客户端着色器、轮廓和声音展示交由相应客户端桥接处理。
+
+## 验证
+
+比较原生与数据驱动数值，包括闪避元数据上限、包装暴击系数，以及恰好为 1 和略大于 1 的输入。逐一测试伤害类别、正负生命比例、贯通与护甲韧性、通用与学派抗性，以及同 tick 多次治疗。
+
+保存并重载全部组件计时器，在满储量和空储量时消耗、中断恢复、切换盾牌，并测试恰好等于和高于重击上限的伤害。分别检查牛奶、全部清除、有害净化与自然到期。
+
+测试额外修饰符的替换与移除、无来源有害效果、友方来源、恐惧施加失败，以及普通插入和直接映射插入。升级易伤依赖时，按配置版本测试每个注册学派在放大器 0 和更高放大器下的结果。文档检查不会执行这些玩法场景。
+
+## 相关页面
+
+- [属性与状态效果](/zh-cn/wiki/attributes-and-effects/)
+- [状态效果](/zh-cn/wiki/status-effects/)
+- [法术集成](/zh-cn/dev/spell-integration/)
+- [成长运行时](/zh-cn/dev/leveling/)

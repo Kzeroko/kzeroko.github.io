@@ -1,0 +1,145 @@
+---
+title: "Structure-space Data"
+description: "Create property regions with anchor NBT and define the furniture that scores their coziness."
+category: data
+order: 82
+updated: 2026-09-19
+---
+
+Structure-space anchors define a property's regions, resident capacity and contract prices. Furniture JSON is a separate server data format: it decides which placed blocks count towards the permanent home's coziness.
+
+## Where the files live
+
+Furniture rules load from `data/<namespace>/home_furniture/*.json`, with the namespace and relative file path forming the rule ID. Override the same resource ID to replace a rule through data-pack resource selection; different IDs remain separate rules. The loader sorts selected IDs and considers only the first 256 resources, including invalid ones in that limit.
+
+Anchor data lives in the block entity of `isekaiexpansion:structure_space_block`, including when that block is saved inside a structure template. It is NBT, not another furniture JSON file. Generated templates use `isekaiexpansion:structure_space_processor` to turn anchors into runtime properties.
+
+## Minimal example
+
+This is the complete bundled `isekaiexpansion:bookshelves` rule:
+
+```json
+{
+  "block": "minecraft:bookshelf",
+  "category": "study",
+  "points": 4,
+  "limit": 5
+}
+```
+
+Its category can contribute at most 20 points, even if another rule also uses `study`.
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `block` | `string` | Required | Block ID or `#block_tag`. Syntax must be a valid identifier. Missing block IDs and empty tags simply match nothing. |
+| `properties` | `object` | `{}` | Exact state-property names mapped to their string values. Every entry must match; an unknown property or value never matches. |
+| `properties.<name>` | `string` | Absent | One state-property value; examples use `part: head` and `lit: true` as strings. |
+| `category` | `string` | Required | `[a-z0-9_.-]{1,64}`; groups scores under the shared 20-point cap. At most 16 distinct accepted categories. |
+| `points` | `integer` | Required | 1–100 points per counted block. |
+| `limit` | `integer` | Required | 1–64 counted blocks per rule per home. |
+
+A property's first matching rule wins for each block. Reaching that rule's repetition limit does not fall through to a later rule. Overlapping regions within one property count each position once; air is skipped. Completed scores cap each category at 20, the home at 100, and Hearthbound at 5 tiers using integer division by 20.
+
+### Anchor NBT
+
+The following is the custom anchor payload; the structure/block-entity container supplies its normal identity and position metadata.
+
+```text
+{
+  RoomId: "room_1",
+  GroupId: "isekaiexpansion:guild_lodging",
+  Regions: [
+    {Box: [I; 0, 0, 0, 5, 3, 5]},
+    {Box: [I; 6, 0, 2, 9, 3, 5]}
+  ],
+  Capacity: 1,
+  AllowRent: 1b,
+  AllowBuy: 1b,
+  RentPrice: 100L,
+  BuyPrice: 10000L,
+  ShowBox: 1b
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `RoomId` | `string` | `room_1` | Room identity: `[a-z0-9_./-]{1,64}` when binding. Raw anchor NBT does not validate it. |
+| `GroupId` | `string` | `default` | Minecraft identifier, so the default resolves to `minecraft:default`. Editor/wire length at most 64. |
+| `Regions` | `list of compounds` | Required | 1–16 inclusive relative regions, subject to the shape limits below. |
+| `Regions[].Box` | `int array` | Required | Exactly 6 integers: minimum XYZ, maximum XYZ. Each minimum must not exceed its maximum. |
+| `Capacity` | `int` | `1` | Resident slots. Missing or nonpositive raw NBT becomes 1; editor/runtime binding requires 1–64. |
+| `AllowRent` | `boolean byte` | `true` | Whether rental requests are accepted. |
+| `AllowBuy` | `boolean byte` | `false` | Whether purchase requests are accepted. |
+| `RentPrice` | `long` | `0` | Copper per started in-game day; nonnegative at editor save and registration. Raw NBT reads the stored value without clamping. |
+| `BuyPrice` | `long` | `0` | Copper per permanent resident slot, with the same validation as rent. |
+| `ShowBox` | `boolean byte` | `true` | Authoring preview only; ignored by generated registration and absent from runtime property state. |
+
+The default column describes loading into a new anchor. Missing room/group keys retain the anchor's existing field values when reading into an already-created object. The Regions payload remains required even though a newly placed anchor starts with a single block at relative origin.
+
+| Geometry constraint | Limit |
+| --- | --- |
+| Regions per home | 1–16 |
+| Inclusive envelope on each axis | At most 128 blocks |
+| Sum of region volumes | At most 262144 blocks; overlaps still consume this authoring budget |
+| Editor and save-packet relative coordinates | −128 through +128 on each axis |
+| Runtime registration coordinates | Absolute; the editor's relative-coordinate cap is not a general shape-origin limit |
+
+Room display names use `structure.<structure_namespace>.<structure_path_with_slashes_as_dots>.<room_id>`; the room ID itself is appended unchanged. Without a translation, the catalogue shows the room ID.
+
+## Full example
+
+A multipart block can be restricted to its canonical counted part:
+
+```json
+{
+  "block": "#minecraft:beds",
+  "properties": {
+    "part": "head"
+  },
+  "category": "rest",
+  "points": 10,
+  "limit": 2
+}
+```
+
+Here `part` is the dynamic property name covered by `properties.<name>`. To require a lit campfire, the corresponding string filter is `"lit": "true"`. State filters do not validate against every selected block at reload; blocks with no such property simply fail the match.
+
+### Authoring and binding
+
+1. As a creative operator with permission level 2, use `isekaiexpansion:structure_dev_wand` on a block to set the first corner; sneak-use to set the second.
+2. Apply the wand to an anchor to replace its regions. Sneak-apply appends another region. This updates the authoring block, not the runtime property.
+3. Open the anchor without the wand. In Regions, edit the inclusive relative minimum and maximum coordinates. Add region duplicates the selected region; Remove region retains at least a single region.
+4. Use Preview draft to inspect unsaved geometry. The stored anchor must have ShowBox enabled for its renderer to display the draft. Closing the editor clears that draft preview.
+5. Set the identity, capacity and prices. Save with Bind / update in this world enabled to register the property too. This toggle starts disabled. The server accepts edits only within 64 blocks of the anchor; check its chat response rather than treating the local sent indicator as success.
+
+Binding chooses the containing structure ID, or `isekaiexpansion:authored_home` when none exists. At an already-bound anchor, room and group IDs cannot change. Updating that identity preserves residents and grants, replaces geometry and reindexes the property. Capacity cannot be reduced below existing residents. Separate homes cannot overlap; overlapping regions of the same home are allowed.
+
+Unbind empty property refuses while any permanent resident or active renter remains at the anchor. It preserves the authoring block. An already-unbound anchor also reports success. Removing an authoring block does not itself remove a runtime binding.
+
+Generated registration mirrors and rotates every relative region around the anchor, offsets it to world coordinates, queues registration on the server, and removes the anchor from the generated template output. It creates missing identities only; regeneration does not overwrite an existing exact identity.
+
+## Validation
+
+For furniture, required fields that are absent, null, or not convertible to their expected values reject that rule. Unknown keys are ignored. The parser uses scalar conversions rather than a strict JSON schema: authors should still use strings and integers as shown. An empty object or non-object resource is rejected and logged; an invalid identifier or out-of-range score/limit is also logged and skipped. It does not abort the entire catalogue.
+
+Rules introducing a category after 16 distinct accepted categories are skipped. Resources after the first 256 sorted IDs are not parsed. Matching uses that same ID order. Unknown block IDs, empty tags, unknown state properties and unmatched values load but score nothing. The namespace of the rule controls its identity, not the namespace of its selected block.
+
+Anchor shape parsing rejects missing/empty Regions, a Box of the wrong length, reversed corners, and geometry beyond the budgets. There is no legacy Min/Max or single-Bounds reader. Anchor loading does not fully validate identity, negative prices or the upper capacity bound; editor saves and runtime registration do. Author valid values at the source.
+
+The generation processor catches registration argument errors in its queued task and logs them. Earlier parsing errors are outside that catch. If there is no usable server world, generating structure ID or NBT payload, the processor removes the anchor without registering a home. Do not use that path as a substitute for standalone binding.
+
+## Reloading
+
+Furniture rules reload with server data. Successful parsed entries replace the old list, cached matches are cleared, and the revision changes. The data-pack completion callback also invalidates tag matches; it does not condition that invalidation on reload success. Clients receive derived survey snapshots, not a copy of all furniture rules.
+
+Surveys never load chunks. They restart after shape/rule changes, a relevant block change or an aged result. All regions must be loaded; a home skipped for missing chunks needs a later request to enter the queue again. Owned homes containing their owner are requested periodically, and opening the ledger requests their survey.
+
+Anchor edits take effect when saved; runtime binding requires the bind toggle. Reloading furniture does not recreate properties or replace contracts. Runtime world state uses `data/isekaiexpansion/structure/spaces_v2.dat` in each dimension's persistent-state directory; there is no v1 import. See the developer reference before changing saved data.
+
+## Related
+
+- [My Home](/en/wiki/my-home/) — contracts, permissions and rest rewards.
+- [Structure-space runtime](/en/dev/structure-spaces/) — public facade, transaction boundaries, saved fields and packet contracts.
+- [Persistent state](/en/dev/persistent-state/) — versioned world data.

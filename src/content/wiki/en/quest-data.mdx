@@ -1,0 +1,179 @@
+---
+title: "Quest Data"
+description: "Define quest identity, prerequisites, selection conditions and resolution cooldowns."
+category: data
+order: 90
+updated: 2026-09-24
+---
+
+A quest definition combines objectives, rewards and rules for when a player or team may accept it. Definitions reload as one validated catalogue: a broken prerequisite graph or invalid definition keeps the previous catalogue intact.
+
+## Where the files live
+
+Use `data/<namespace>/quests/**/*.json`. Each file defines one quest; `data/example/quests/misc/visit.json` normally becomes `example:misc/visit`. An explicit `id` overrides that identity. Ordinary resource-pack priority selects the resource at a shared file path; different surviving files that claim the same quest ID reject the quest catalogue reload.
+
+Quest definitions are server data. Titles and descriptions are client translations in `assets/<namespace>/lang/en_us.json` and `zh_cn.json`, not fields inside the quest. This checkout's demonstration quests in `docs/examples/quests/` are authoring fixtures rather than installed gameplay content.
+
+## Minimal example
+
+This is the visit-location objective shape used by the demonstration fixtures, reduced to required fields. Save it at `data/example/quests/first_tick.json`. It completes on the next qualifying player tick after acceptance because it has no location filter; add an objective condition to require a destination.
+
+```json
+{
+  "tier": "misc",
+  "prerequisites": [],
+  "objectives": [
+    {
+      "id": "visit",
+      "progress_type": "boolean",
+      "type": "isekaiexpansion:visit_location",
+      "data": {}
+    }
+  ],
+  "rewards": []
+}
+```
+
+## Fields
+
+### Root
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `id` | `identifier` | File resource ID | Overrides quest identity; malformed identifiers reject the definition. |
+| `tier` | `string` | Required | Selects the tier below; blank or unknown values reject the definition. |
+| `chapter` | `identifier` | isekaiexpansion:side_stories for misc and bounty; isekaiexpansion:prologue otherwise | Grouping ID. Trimmed; blank rejects. Unqualified names use isekaiexpansion. No separate chapter-registration check. |
+| `prerequisites` | `array<object>` | Required | All listed completion requirements must hold. Empty accepts no prerequisite. |
+| `conditions` | `object` | No additional pick restriction | Contains pick; wrong container type rejects. |
+| `conditions.pick` | `object / array<object>` | Always true | General condition tree evaluated when picking. An array means all children. |
+| `complete_cooldown` | `array<object>` | [] | Resolution cooldown rules below; empty disables both restrictions. |
+| `objectives` | `array<object>` | Required | Non-empty objective list. Every objective must complete. |
+| `rewards` | `array<object>` | Required | Ordered reward list; empty grants none. Repeated entries are allowed. |
+| `client_visible` | `boolean` | true for misc and bounty; false otherwise | Includes the definition and its profile state in normal client synchronisation. Does not prevent server activation. |
+| `misc_picker_weight` | `integer` | 1 | Positive relative selection weight. Supplying this field outside misc rejects it, even when its value is 1. |
+| `misc_pools` | `array<string>` | [default] for misc; [] otherwise | Misc-only pool membership. Empty or all-blank input becomes default; duplicates collapse. Unknown names reject. |
+| `bounty` | `object` | Required for bounty; absent otherwise | Physical commission metadata; see [Bounty data](/en/wiki/bounty-data/). Rejected on other tiers. |
+| `mainstory_progress` | `object` | Unbounded integer range | Main-story tiers only; presence outside main-story tiers rejects. |
+| `mainstory_progress.min` | `integer` | -2147483648 | Inclusive lower bound on the picking player's story progress. |
+| `mainstory_progress.max` | `integer` | 2147483647 | Inclusive upper bound; less than min rejects. |
+
+| Tier constant | Accepted JSON names | Selection behaviour |
+| --- | --- | --- |
+| `MAINSTORY` | mainstory, main_story | One-time: either a previous completion or failure prevents restarting. |
+| `IMPORTANT_MAINSTORY` | important_mainstory, important_main_story | Same one-time eligibility and story-progress filtering. |
+| `MISC` | misc, misc_quest, misc_quests | Pool-based weighted selection; successful completion unlocks repetition. |
+| `BOUNTY` | bounty | Weighted board postings; a receptionist-confirmed live contract authorizes progress, and the issuing receptionist settles it. The paper copy is optional. |
+
+Tier and pool names trim whitespace, ignore case and replace spaces/hyphens with underscores. Pool constants are `DEFAULT`, `TOWN`, `COMBAT`, `DEBUG`, `ADVANCEMENT`, `CRAFTING`, `FORGERY` and `ALCHEMY`; their JSON names are `default`, `town`, `combat`, `debug`, `advancement`, `crafting`, `forgery` and `alchemy`.
+
+The normal pick path permits a solo player or a team's owner. It rejects already-active quests and unmet prerequisites, then checks cooldowns and pick conditions. Main-story selection uses the first eligible definition ordered by minimum story progress, then quest ID. Misc selection uses relative weights among eligible candidates in the requested pool and optional chapter; weight does not bypass eligibility. A completed misc quest must remain unlocked for repetition.
+
+### Prerequisites, objectives and rewards
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `prerequisites[].quest` | `identifier` | Required | Another quest in the same successfully loaded catalogue. Self references, duplicate references, missing targets and cycles reject reload. |
+| `prerequisites[].minimum_completions` | `integer` | 1 | Required successful completion count, at least 1; failure counts do not satisfy it. |
+| `objectives[].id` | `string` | Required | Nonblank, unique within the quest; also forms translation keys. |
+| `objectives[].progress_type` | `string` | Required | numeric accumulates progress; boolean completes from a flag. Case-insensitive, trimmed, hyphens normalised. |
+| `objectives[].required` | `integer` | 1 | Positive numeric target. A boolean objective requires exactly 1. |
+| `objectives[].type` | `identifier` | Required | Registered objective type, such as `isekaiexpansion:visit_location`. Unknown type rejects reload. |
+| `objectives[].data` | `object` | Required | Type-specific fields, content triggers and supported failure rules. Empty is valid only when that type needs no fields. |
+| `objectives[].conditions` | `object / array<object>` | Always true | Objective-event filter tree. Uses a different set of leaf types from conditions.pick. |
+| `rewards[].type` | `identifier` | Required | Registered reward type; unknown type rejects reload. |
+| `rewards[].data` | `object` | Required | Reward-specific payload; no implicit empty object. |
+| `data.progress_per_tick` | `integer` | 1 | For visit_location: positive progress per qualifying player tick. Boolean progress still completes on its first qualifying event. |
+
+Objective payloads and event filters are documented in [Quest objectives](/en/wiki/quest-objectives/). Reward payloads and recipient selection are in [Quest rewards](/en/wiki/quest-rewards/).
+
+### Pick conditions
+
+Condition objects use `type` and `data`. Arrays at any condition-node position are shorthand for `isekaiexpansion:all`. The following table describes general conditions used by picking and objective content triggers; it does **not** describe objective event-filter leaves.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | Required | Registered general condition type. All built-ins below use isekaiexpansion. |
+| `data` | `object` | Required | Condition payload. Unknown payload keys do not add checks. |
+| `data.children` | `array<object>` | [] | Recursive children for all, any and not; children may themselves be shorthand arrays. |
+| `data.min` | `integer` | -2147483648 | Inclusive lower bound for range conditions below. |
+| `data.max` | `integer` | 2147483647 | Inclusive upper bound; max below min rejects. |
+| `data.value` | `boolean` | true | Expected team membership for has_team. |
+| `data.target_rank` | `string` | Required in practice | Promotion target; missing becomes an empty string and then rejects as unknown. |
+| `data.crossed_only` | `boolean` | false | objective_progress additionally requires progress to cross into the range on this event. |
+
+| Type | Meaning |
+| --- | --- |
+| `isekaiexpansion:all` | Every child must pass; stops at the first failure. Empty passes. |
+| `isekaiexpansion:any` | Any child may pass; stops at the first success. Empty fails. |
+| `isekaiexpansion:not` | Negates exactly 1 child; any other child count rejects. |
+| `isekaiexpansion:player_level` | Picking/event player's Isekai Core level is within min–max. Missing player fails. |
+| `isekaiexpansion:player_rank` | Player's numeric adventurer rank is within min–max. Missing player fails. |
+| `isekaiexpansion:adventurer_rank_promotion_ready` | Isekai Core reports readiness for target_rank; does not promote. |
+| `isekaiexpansion:has_team` | Real team membership equals value; a solo profile is not a team. |
+| `isekaiexpansion:team_member_count` | Count of online players in the same quest profile is within min–max. |
+| `isekaiexpansion:team_average_level` | Floor of the online profile members' mean Isekai Core level is within min–max. |
+| `isekaiexpansion:team_average_rank` | Floor of their mean numeric adventurer rank is within min–max. |
+| `isekaiexpansion:objective_progress` | Current objective progress is within min–max. A pick has no current objective, so this leaf always fails there. |
+| `isekaiexpansion:sequence` | Stateful content-trigger condition; rejected anywhere inside conditions.pick, including nested groups. See Quest objectives. |
+
+Online-member checks do not count offline teammates and do not require the same dimension. If no matching online member is found and there is an acting player, that player is the fallback member.
+
+For `objective_progress`, boolean false/true becomes 0/1. Numeric `crossed_only` requires previous progress below min and new progress within the inclusive range; jumping beyond max fails. Boolean crossing requires false → true, as well as the range check. Ordinary pick conditions should use player/team leaves, not objective progress.
+
+Isekai Core owns adventurer ranks. Checked against its local source checkout for the consumed `0.4.0-build60`: accepted promotion targets are `copper`, `silver`, `gold`, `diamond`, `mythril`, `adamantite`, `stormyx` and `celestium`, case-insensitive and trimmed. `none` is rejected here. Readiness requires the next rank and, beyond the initial rank, the dependency's reputation requirement; already holding the target does not pass readiness. This is a source-checkout verification, not a claim of binary equivalence.
+
+### Resolution cooldowns
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `complete_cooldown[].type` | `string` | Required | ALL or THIS, trimmed and case-insensitive. At most one entry of each type. |
+| `complete_cooldown[].data` | `object` | Required | Cooldown payload. |
+| `complete_cooldown[].data.value` | `integer` | Required | Non-negative game-time ticks; 0 disables this rule. For example, 1200 ticks is 60 seconds at 20 ticks per second. |
+
+Despite the field name, both **completion and failure** start the resolution clock. `THIS` uses this quest's most recent resolution. `ALL` uses the latest resolution, in this profile, among currently loaded quests that have a positive ALL rule. It does not use every quest indiscriminately.
+
+Each candidate applies its own authored duration to the relevant clock. Both rules must expire before selection succeeds; negative elapsed time is treated as 0, and no previous resolution means no cooldown. Time is world game time, not real-world time spent with the server stopped.
+
+### Translation keys
+
+| Text | Translation key pattern |
+| --- | --- |
+| Quest title | `quest.<namespace>.<quest-path>.title` |
+| Quest description | `quest.<namespace>.<quest-path>.desc` |
+| Objective title | `quest.<namespace>.<quest-path>.objective.<objective-id>.title` |
+| Objective description | `quest.<namespace>.<quest-path>.objective.<objective-id>.desc` |
+| Chapter title | `quest_chapter.<namespace>.<chapter-path>.title` |
+| Chapter description | `quest_chapter.<namespace>.<chapter-path>.desc` |
+
+Paths replace slashes with dots. Objective IDs replace both slashes and colons with dots. Choose IDs whose normalised forms remain distinct; unique raw IDs alone do not guarantee unique translation keys.
+
+## Validation
+
+| Input | Result |
+| --- | --- |
+| Missing tier, prerequisites, objectives or rewards | Rejects the definition and keeps the previous quest catalogue |
+| Empty root object or empty objectives | Rejected |
+| Empty prerequisites or rewards | Accepted |
+| Unknown root key | Ignored; no additional behaviour |
+| Unknown objective, reward or condition type | Rejected |
+| Invalid identifier syntax or incompatible field type | Rejected during parsing |
+| Unregistered chapter | Accepted as a grouping ID; translations are separate |
+| Missing prerequisite target, self reference, duplicate prerequisite or cycle | Rejected |
+| Duplicate quest ID across surviving resources | Rejected |
+| Duplicate objective ID within a quest | Rejected |
+| Invalid field range, wrong tier-specific field, duplicate cooldown type or pick sequence | Rejected |
+| Other referenced game resources | Validated by each objective/reward parser or at execution; successful quest parsing alone does not prove they exist |
+
+Malformed JSON text can be discarded by the underlying resource-reading stage before quest validation. The atomic guarantee applies to the definitions delivered to the quest parser; it is not a promise that every unreadable resource preserves an earlier entry.
+
+## Reloading
+
+Server data reload rebuilds the catalogue and increments its revision only after definition and prerequisite-graph validation succeeds. A successful empty catalogue replaces the old one. Saved quest profiles are separate from these definitions; changing IDs is not a save-data migration.
+
+Full client synchronisation sends visible definitions and the corresponding filtered profile. Clients still need translation assets locally. The [Quest runtime](/en/dev/quest-system/) page describes sync triggers, active-state reconciliation and diagnostics.
+
+## Related
+
+- [Quest objectives](/en/wiki/quest-objectives/) — objective types, event filters, delivery, content actions and failures.
+- [Quest rewards](/en/wiki/quest-rewards/) — reward fields, recipients and failure handling.
+- [Quest runtime](/en/dev/quest-system/) — state ownership, persistence and integration.

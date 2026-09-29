@@ -1,0 +1,77 @@
+---
+title: "表情贴纸播放 API"
+description: "播放选项、排队策略、接收者与服务端和客户端生命周期。"
+category: api
+order: 10
+updated: 2026-09-18
+---
+
+表情贴纸由服务端发起，排队与显示状态由各客户端维护。公开入口为 `net.kzeroko.isekaiexpansion.api.emoji.EmojiAPI`；选项与策略类型目前位于 `internal.social.emoji`，调用它们会依赖内部类型，不能视为另一套稳定 API。
+
+## 入口
+
+对已经处于服务端世界中的存活实体调用 `EmojiAPI.play`。目录中没有该 ID、实体死亡或已移除、在客户端世界调用时，请求都会被忽略。方法不返回是否接纳；即使已发送，客户端仍可能因优先级或缺少纹理而不显示。
+
+## 常见用法
+
+### 播放或排队
+
+```java
+void showGreeting(LivingEntity speaker) {
+    EmojiAPI.play(speaker,
+            new Identifier("isekaiexpansion", "evelina/smile"),
+            EmojiPlaybackOptions.DEFAULT.policy(EmojiPlaybackPolicy.QUEUE));
+}
+```
+
+客户端没有当前贴纸时，`QUEUE` 立即播放；已有贴纸时则进入队列。直接调用 API 的默认时长独立于目录中供选择器使用的时长。
+
+### 清除贴纸
+
+`EmojiAPI.clear(speaker)` 删除服务端中断状态，并向当前追踪者及玩家实体本人发送清除请求。客户端丢弃队列，让当前贴纸播放退场动画。先前 play 调用传入的额外观看者不会被保存，也不会自动收到后续 clear 广播。
+
+## 方法一览
+
+| 方法 | 执行端 | 结果 |
+| --- | --- | --- |
+| `play(LivingEntity, Identifier)` | 服务端 | 使用 `EmojiPlaybackOptions.DEFAULT`。 |
+| `play(LivingEntity, Identifier, EmojiPlaybackOptions)` | 服务端 | 选项为 null 时同样使用默认值。 |
+| `play(LivingEntity, Identifier, EmojiPlaybackOptions, Collection<ServerPlayerEntity>)` | 服务端 | 接收者包括当前追踪者、额外观看者，以及玩家实体本人；接收者会去重。 |
+| `clear(LivingEntity)` | 服务端 | 忽略 null 或客户端实体；清除当前服务端状态并广播。 |
+| `onEntityDamaged(LivingEntity, DamageSource, float)` | 服务端钩子 | 实际应用的正伤害会检查最新请求；启用受伤中断时将其清除。 |
+
+事件层已经注册伤害钩子。普通播放集成无需再次调用。
+
+| 选项 | 默认值 | 约定 |
+| --- | --- | --- |
+| `durationTicks` | `70` | 至少 1 刻（0.05 秒）；70 刻即 3.5 秒，之后开始退场。 |
+| `priority` | `50` | 限制在 0–1000。 |
+| `policy` | `REPLACE` | null 也采用 REPLACE。 |
+| `interruptible` | `true` | 允许 REPLACE 中断当前请求。 |
+| `interruptOnDamage` | `true` | 服务端的受伤中断标记，与替换规则独立。 |
+
+同名选项方法返回新的不可变选项值。各客户端分别决定播放策略：
+
+| 策略 | 已有当前贴纸时 |
+| --- | --- |
+| `REPLACE` | 仅当当前贴纸可中断，且新优先级不低于当前值时替换。替换成功会清空队列；未获准替换的请求直接丢弃。 |
+| `QUEUE` | 始终入队，不考虑优先级或可中断标记。容量为 3；超出后丢弃最早入队的请求。 |
+| `FORCE` | 立即替换并清空队列，不考虑优先级或可中断标记。 |
+
+## 线程与生命周期
+
+在服务端线程、实体所在世界已加载时调用。状态表没有同步保护，API 也不会替调用者调度跨线程工作。没有网络处理器或位于另一世界的接收者会被跳过。请求只广播给当前接收者，不是持久化实体数据，也不会为后来开始追踪实体的玩家补播。
+
+服务端按实体 UUID 只保存最新获准请求的维度、到期时间与受伤中断标记。它不镜像客户端队列，也不知道客户端是否拒绝了替换。到期时间按请求发起时间加时长及 20 刻（1 秒）计算，而不是按排队后真正开始播放的时间计算。不要依赖受伤中断精确对应队列中的贴纸。
+
+客户端入场为 8 刻（0.4 秒），退场为 7 刻（0.35 秒）。清除操作启动退场，不会瞬间移除图片。断开连接会清空客户端状态。死亡或已移除实体、对观看者隐形的实体、第一人称下的自己及超过 28 格的实体不会显示；这些显示条件不会取消播放槽。
+
+### 对话与场景衔接
+
+Blabber 通过 `DialogueActionEmoji` 注册 `isekaiexpansion:emoji`。目标可为玩家同世界内正在对话的存活实体、玩家本人或两者，并将对话玩家显式加入观看者。数据字段见[表情贴纸数据](/zh-cn/wiki/emoji-data/)。
+
+`ScenePuppetController` 处理类型为 `emoji` 的演员指令：正时长覆盖默认值，优先级为 500，force 决定使用 FORCE 还是 REPLACE，可中断为 true，受伤中断为 false。场景观看者作为额外接收者加入。NPC 肢体表情走独立分支，不使用表情贴纸目录。
+
+## 相关页面
+
+[表情贴纸数据](/zh-cn/wiki/emoji-data/)说明定义、图片与对话字段。[实体特效](/zh-cn/dev/entity-fx/)说明实体生命周期特效。

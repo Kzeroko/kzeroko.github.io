@@ -1,0 +1,168 @@
+---
+title: "NPC 对话数据"
+description: "Blabber 对话字段、已注册动作、NPC 路由路径、关系回退与本地化。"
+category: data
+order: 120
+updated: 2026-09-26
+---
+
+对话文件定义文字、选项与动作，NPC 解析器决定打开哪个文件。文件位置与回退顺序也是格式的一部分；文件即使有效，也可能被更具体的路由覆盖而始终不被选中。
+
+## 文件位置
+
+使用 `data/<namespace>/blabber/blabber_dialogues/<path>.json`。对话 ID 为 `<namespace>:<path>`，不含注册表文件夹或扩展名。NPC 自动查找在 `isekaiexpansion` 命名空间下构造 ID；其他命名空间可通过显式引用使用，不参与自动路径回退。
+
+整合包固定使用 Blabber `0.5.1-build32`。基础对话格式由该依赖提供，下述约定已对照本地 Blabber 源码与模组自带数据核对。上游 schema 提示不保证覆盖所有本地扩展。
+
+### NPC 查找路径
+
+NPC 类型词元由完整实体 ID 生成：转小写，将连续非字母数字字符替换为下划线，再去掉两端下划线。例如 `isekaiexpansion:mahoutsukai_evelina` 变为 `isekaiexpansion_mahoutsukai_evelina`。
+
+解析器按下表顺序尝试每个事件的作用域路径。`<gender>` 使用 NPC 实际性别键；`<layer>` 为 `simple`、`combat` 或 `base`，唯一 NPC 使用独立分支。
+
+| 作用域 | 普通基础路径 |
+| --- | --- |
+| 唯一 NPC，指定类型 | `npc/unique/<npcType>/<event>` |
+| 唯一 NPC，共享 | `npc/unique/<event>` |
+| 其他，类型与性别 | `npc/<layer>/<npcType>/<gender>/<event>` |
+| 其他，类型 | `npc/<layer>/<npcType>/<event>` |
+| 其他，共享层级 | `npc/<layer>/<event>` |
+| 最终公共回退 | `npc/common/<gender>/<event>` |
+
+菜单路由在 `<event>` 前插入 `menu/<route>/`。随后每个基础路径查找 `relationship/<tier>/<phase>`，不会回退到关系分支之外的裸阶段文件。
+
+普通事件先尝试请求事件，不同于 `interact` 时再尝试 `interact`。已知菜单路由只采用规范事件：`trade` 使用 `trade`，下表其他路由使用 `interact`。自定义路由依次使用请求事件与 `interact`。
+
+| 路由组 | 路由键 |
+| --- | --- |
+| 对话 | `talk`、`talk_quest`、`farewell`、`bond`、`married_distance` |
+| 交易 | `trade` |
+| 指令 | `mode_follow`、`mode_follow_denied`、`mode_stay`、`mode_patrol`、`mode_wander` |
+| 赠礼 | `gift_confirm`、`gift_confirm_invalid`、`gift_cancel`、`outfit_unlock` |
+| 订婚 | `engage_confirm`、`engage_denied_unready`、`engage_denied_already` |
+
+### 关系、阶段与随机变体
+
+关系从玩家实际层级开始，按 `married → trust → friendly → normal` 回退。`married_distance` 固定为 `normal`，`engage_confirm` 固定为 `trust`。这是查找策略，不是权限授予。
+
+首次见面或首次访问某菜单路由使用 `initial`。否则，上次对话 tick 为正且相距不超过 300 ticks（15 秒）时选择 `rapid_repeat`，其余为 `repeat`。`initial` 与 `rapid_repeat` 都可回退到 `repeat`。
+
+NPC 已与其他玩家结婚时，`talk`、`trade`、`farewell` 及显式启用的自定义路由先查找 `relationship/<tier>/is_married/<phase>`。同一关系层级内，所有已婚状态的阶段回退都先于普通阶段回退；同一基础路径内，所有关系层级回退都先于下一条更通用的作用域路径。
+
+每个候选的现有 `<phase>_scenario_1` 至 `<phase>_scenario_5`、同目录 `scenario_1` 至 `scenario_5` 与无后缀文件一起进入等概率随机池。基础文件可以缺失；同目录场景因此能满足多个阶段，不要求先找到阶段专属变体。
+
+### 结构化覆盖
+
+例如 `outfit_unlock_formal` 可解析到 `menu/outfit_unlock/override/formal`。解析器从最右侧下划线开始向左尝试分割，再按同样的类型／性别／层级／公共顺序查找；逐个尝试分隔点，因此路由和覆盖名都可以含下划线。
+
+任务路由与结构化覆盖先于 NPC 谓词覆盖、菜单路径和普通路径。谓词覆盖可指定显式 ID，或查找 `override/<key>`，先在当前菜单分支内，再到分支外。候选缺失会继续回退；礼物的 exclusive 标志不会禁止回退。
+
+### 隶属路径
+
+所属玩家对话在任务覆盖之后先查找 `npc/allegiance/<race>/<contract|dark_magic>/<route>/<phase>`。当前阶段回退到 `repeat`，内容缺失时继续普通查找。见[NPC 隶属](/zh-cn/wiki/npc-allegiance/)。
+
+
+## 最小示例
+
+把下列内容放到 `data/isekaiexpansion/blabber/blabber_dialogues/npc/common/female/interact/relationship/normal/repeat.json`，即可提供女性 NPC 普通交互的公共回退。它不会覆盖已有的更具体文件。
+
+```json
+{
+  "start_at": "line",
+  "unskippable": true,
+  "states": {
+    "line": {
+      "text": {"translate": "dialogue.isekaiexpansion.example.line"},
+      "choices": [
+        {
+          "text": {"translate": "dialogue.isekaiexpansion.example.leave"},
+          "next": "end"
+        }
+      ]
+    },
+    "end": {"type": "end_dialogue"}
+  }
+}
+```
+
+将两个翻译键加入 `language_assemble/categories/dialogues` 下的英文与简体中文分类，再运行语言组装。键前缀只是约定，不会自动生成翻译；缺失翻译时可能显示原始键。
+
+## 字段
+
+### 对话、状态与选项
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `$schema` | 字符串 | 不填 | 仅供编辑器提示，运行时编解码器不读取。 |
+| `start_at` | 字符串 | 必填 | 精确状态键；缺失／类型错误使解码失败，键不存在则在选择起始状态时失败。 |
+| `unskippable` | 布尔值 | false | 请求不可跳过的对话界面，不阻止强制关闭会话。 |
+| `states` | 状态对象映射 | 必填 | `line`、`end` 等键是自定义状态名，不是固定字段。 |
+| `states.<name>.text` | Minecraft 文本值 | 空文本 | 字面字符串或有效文本组件；填写错误的状态文本使解码失败。 |
+| 文本 `translate` | 字符串 | 不填 | 示例文本组件使用的翻译键；必须是有效文本组件，不能填任意对象。 |
+| `choices` | 选项对象数组 | 空数组 | 有序玩家回复；非结束状态没有选项会使结构校验失败。 |
+| 选项 `text` | Minecraft 文本值 | 必填 | 按钮文字，缺失或错误使解码失败。 |
+| 选项 `next` | 字符串 | 必填 | 精确目标状态键，悬空引用可能在点击时失败。 |
+| 选项 `requirement` | 谓词对象 | 不填：可选 | 包含 `type` 与对应编解码器载荷的已注册谓词；填写错误使解码失败。 |
+| 选项 `requirement_tip` | Minecraft 文本值 | 不填 | 不可选时的解释文字，本身不添加条件。 |
+| 状态 `actions` | 动作对象数组 | 空数组 | 通过选项进入该状态时按顺序执行；使用复数 `actions`，旧单数 `action` 不是此字段。 |
+| 状态 `type` | 字符串 | `DEFAULT` | 忽略大小写的 `DEFAULT`、`END_DIALOGUE`、`ASK_CONFIRMATION`；未知名失败，编辑器内部 `normal` 应在导出时省略。 |
+| 动作／谓词 `type` | 标识符字符串 | 必填 | 已注册编解码器 ID，未知 ID 无法解码。 |
+| 动作／谓词 `value` | 由编解码器决定 | 依编解码器 | 基础值编解码器通过此字段接收分派载荷；记录类型的命名字段与 `type` 并列，它不是通用对象包装层。 |
+
+动作在选项进入的目标状态上按数组顺序执行，然后才处理该状态结果。仅选择初始状态或恢复状态不会执行其动作。因此效果应放在通过选项到达的状态上，需要时可放在结束状态。
+
+### 本模组提供的动作
+
+| 动作 ID | 载荷 | 行为 |
+| --- | --- | --- |
+| `isekaiexpansion:give_item` | `item`，可选 `size`、`nbt`、`update` | 给予对话玩家物品，库存放不下则掉落。 |
+| `isekaiexpansion:reveal_energy` | 必填字符串 `value` | 显示玩家能量条，忽略字符串内容。 |
+| `isekaiexpansion:reveal_rank` | 必填字符串 `value` | 显示玩家阶位牌，忽略字符串内容。 |
+| `isekaiexpansion:open_npc_trade` | 无载荷 | 仅当会话 NPC 存活、距离不超过 4 格且玩家受到信任时，在对话中打开交易。 |
+| `isekaiexpansion:emote` | `emote`，可选 `force` | 让会话 NPC 播放身体动作表情。 |
+| `isekaiexpansion:emoji` | emoji 播放字段 | 见完整的[emoji 动作字段](/zh-cn/wiki/emoji-data/)。 |
+
+该模块没有注册 `isekaiexpansion:add_rep`。铁匠与寻路功能在各自子系统初始化时注册其他动作，使用其所属参考文档。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| 给予 `item` | 标识符字符串 | 必填 | 查物品注册表；编解码器校验 ID 语法，没有额外的物品存在性谓词。 |
+| 给予 `size` | 整数 | 1 | 直接传给物品栈构造，没有追加正值范围或物品最大堆叠限制。 |
+| 给予 `nbt` | 字符串 | 空 | SNBT 复合标签；解析失败记录日志，物品继续发放但不带所填 NBT。 |
+| 给予 `update` | 布尔值 | true | 插入／掉落后显式同步主库存。 |
+| 显示 `value` | 字符串 | 必填 | 任意字符串，包括空字符串，不是效果参数。 |
+| 动作表情 `emote` | 字符串 | 必填 | 不得为空白；能否播放由 NPC 动作表情目录检查。 |
+| 动作表情 `force` | 布尔值 | true | 传给 NPC 对话动作表情播放流程，见[情绪运行时](/zh-cn/dev/npc-emotion/)。 |
+
+### 依赖动作与要求
+
+整合包的 Blabber 格式提供：字符串 `value` 的 `blabber:command`、标识符字符串 `value` 的 `blabber:redirect`，以及无载荷的原版村民交易动作 `blabber:open_trade`。本模组 NPC 交易应使用 `isekaiexpansion:open_npc_trade`。
+
+命令动作以玩家身份静默执行，权限等级为 2，属于作者编写的服务端效果。重定向选择另一个对话 ID。`blabber:player_level` 要求接受整数 `value`，检查玩家等级是否至少达到该值；其整数编解码器没有追加非负约束。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| 命令 `value` | 字符串 | 必填 | 命令文本，JSON 有效不代表命令可执行。 |
+| 重定向 `value` | 标识符字符串 | 必填 | 目标对话 ID，重定向时必须存在。 |
+| 玩家等级 `value` | 整数 | 必填 | 包含边界的最低等级，编解码器接受负数。 |
+
+## 验证
+
+检查每个起始键和目标键，保证可到达结束状态，并避免没有选项的非结束状态。依赖校验器检查通向结束的路径并警告部分不可达状态，不能替代完整悬空边检查；一个分支即使有有效路径，也仍可能含错误目标。
+
+状态／选项的可选字段一旦填写错误会失败，不会静默采用默认值。未知对象键通常不属于声明字段，拼错的键可能被忽略而非报错。编辑器拒绝单数 `action`，但不能指望运行时解码自动发现它。
+
+把选择测试与格式解析分开。事件、命名空间、关系分支或作用域写错时，文件可能成功加载却永不被选中。测试共享场景对多个阶段的影响、已与别人结婚时的回退，以及缺失的专属覆盖。效果执行时还应测试已改变的主手和当前会话目标。
+
+## 重载
+
+对话模板属于 Blabber 的同步数据注册表，随数据包重载。重载后应开启新对话测试；已有会话保留捕获的状态映射。资源／语言重载另行处理翻译文本。
+
+仅添加对话 JSON 不会创建新的代码父菜单或动作编解码器；这些接口见[运行时扩展参考](/zh-cn/dev/npc-dialogue/)。
+
+## 相关页面
+
+- [NPC 对话运行时](/zh-cn/dev/npc-dialogue/)
+- [NPC 情绪](/zh-cn/wiki/npc-emotions/)
+- [Emoji 数据](/zh-cn/wiki/emoji-data/)
+- [铁匠委托](/zh-cn/wiki/blacksmith-commissions/)

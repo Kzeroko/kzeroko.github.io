@@ -31,9 +31,10 @@ export interface BaseLayoutProps {
    * `'full'` renders the site header and footer. `'bare'` renders neither —
    * used by the 404 page, which is served for every unmatched path in both
    * languages and would otherwise show one language's chrome around bilingual
-   * content.
+   * content. `'app'` keeps the header but drops the footer and page scrolling, for
+   * full-height tools such as Dialogue Studio.
    */
-  chrome?: 'full' | 'bare';
+  chrome?: 'full' | 'bare' | 'app';
   mainClass?: string;
   bodyClass?: string;
 }

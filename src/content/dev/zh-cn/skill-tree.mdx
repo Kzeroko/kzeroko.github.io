@@ -1,0 +1,147 @@
+---
+title: "技能树运行时"
+description: "Puffish 图形桥接、服务端条件检查、可习得能力奖励与快照式客户端界面。"
+category: systems
+order: 70
+updated: 2026-09-24
+---
+
+技能树集成为 Puffish Skills 增加本地解锁条件与可习得能力奖励，并通过 Modern UI 界面展示其状态。这些接入点位于 `internal.skills`、`util.skills`、`util.origins` 与 `client.screen.skilltree`，属于内部实现；此子系统没有异界扩展公共 API 门面。
+
+## 它做什么
+
+Puffish Skills 管理图形配置、玩家类别状态、点数来源、依赖检查与解锁数据包。异界扩展提供以下桥接：
+
+| 负责方 | 职责 |
+| --- | --- |
+| `SkillRequirementLoader` / `SkillRequirementRegistry` | 按类别与节点查询一项本地条件，维护类别身份与活跃能力门槛 |
+| `SkillsModMixin` | 本地条件失败时，在 Puffish 处理前拒绝服务器解锁 |
+| `LearnablePowerReward` / `SkillPowerUtil` | 将奖励数量转为 Apoli 能力来源与升级等级 |
+| `CommonEventFactory` | 将 IsekaiCore 等级变化传入主树点数 |
+| `SkillTreeScreenController` | 在 Minecraft 客户端线程捕获依赖状态，并在该线程提交解锁请求 |
+| `SkillTreeScreenFragment` / 图形与纹理视图 | 管理界面选择、搜索、长按、等待状态与渲染 |
+
+下文的依赖约定依据本地解析的 `net.puffish:skillsmod:0.18.2+1.20` 源码归档核对。`SkillsAPI` 是第三方 API，不是本仓库的门面。内置图形见[命运轮环](/zh-cn/wiki/skill-tree/)，本地 JSON 约定见[技能树数据](/zh-cn/wiki/skill-tree-data/)。
+
+## 运行时模型
+
+### 服务端状态与点数
+
+Puffish 的类别状态保存已解锁节点 ID、按来源记录的点数、类别可用性与经验。类别 NBT 使用 `unlocked`、`experience`、`unlocked_skills` 与 `points`；此桥接不会为技能树解锁另建持久化文件。复用定义 ID 的节点共享奖励计数，其值等于引用该定义的已解锁节点数量。
+
+`SkillsUtil.MAIN_CATEGORY` 为 `isekaiskills:main`，`AUTO_LEVEL_SOURCE` 为 `isekaiexpansion:auto`。内置类别初始有 1 点，默认开放，正常花费上限为 100。
+
+| 等级回调 | 服务端变化 |
+| --- | --- |
+| 等级提升 | 向自动来源增加 `newLevel - oldLevel` |
+| 等级回退 | 重置主树技能，再将自动来源设为 `newLevel - 1` |
+| 等级重置 | 清除主类别 |
+
+这些回调要求玩家是非客户端世界中的服务器玩家。它们不是加入时的修复逻辑，不会持续强制已储存总点数等于玩家等级。其他来源仍然有效；正常剩余点数为 `min(total points, spent-point limit) - spent points`。
+
+### 条件与重载
+
+服务器数据重载在解析文件前清空本地条件集合。错误会中止该资源的剩余条目，保留此前已成功注册的条目，再继续处理其他资源。集合按条件对象身份存储，类别与节点查询取首个匹配项。因此重复定义没有稳定的优先项，也不能组合条件。
+
+Origins 加载会独立重建类别身份映射，来源为 `isekaiorigins`、`isekaiclasses` 与 `isekaiprofessions` 命名空间中的已注册 ID。条件重载则从 `ClassDisciplineUtil.limitPowerIds()` 重建类别能力门槛列表。修改重载顺序时，应区分这些注册表。
+
+`IsekaiEvents` 在服务器游戏连接加入时发送 `SyncSkillRequirementPacket`。该包替换客户端条件集合；当前重载接线不会再次向在线玩家发送。
+
+| 按顺序排列的网络字段 | 编码 |
+| --- | --- |
+| 条目数 | 整数 |
+| 节点 ID、类别 ID、条件名称 | 字符串、标识符、字符串 |
+| 条件值 | 按条件类型使用标识符字符串、整数或双精度数 |
+| 是否有可选目标 | 布尔值 |
+| 存在时的目标 ID | 标识符 |
+
+解码器没有显式的数量上限；它使用与加载器相同的条件构造校验，并拒绝未知条件名称。不要只修改一端的枚举名称或值类型。客户端界面刷新不能代替缺失的网络同步。
+
+Puffish 自身的重载会隐藏旧类别、重置奖励、加载配置，再更新玩家。类别移除与奖励重置不同于本地条件同步。依赖的持久化会保留离线玩家的解锁 ID；离开时重置已应用奖励，加入时再根据存档更新奖励。
+
+### 可习得奖励
+
+`LearnablePowerReward` 通过依赖的 `SkillsAPI` 注册 `isekaiexpansion:learnable_power`。数据解析要求 `power` 标识符，并拒绝未使用的数据键。`update` 转发依赖传入的数量；`dispose` 本身为空，因此实际移除依赖正常的计数重置生命周期。
+
+`SkillPowerUtil.editLearnablePowerFromId` 解析能力类型，不存在时直接返回。它使用 `isekaiexpansion:learnables` 来源；新数量高于已存技能等级时添加能力，数量降到 0 时移除该来源。对于 `IUpgradableSkillPower`，它按能力最大等级更新已存等级，同步持有者并协调习得技能栏。中间等级的下降会保留能力。
+
+不要让无关奖励定义共用一项可习得能力，并假设各自计数会相加：每次奖励更新都把自己的定义计数写向同一个本地能力等级条目与来源。
+
+## 约定
+
+### 服务端解锁顺序
+
+服务器的 HEAD 注入依次检查：
+
+1. 列入能力门槛的类别，要求玩家具有与类别 ID 相同且**处于活跃状态**的 Apoli 能力。
+2. 已映射的种族、职业或技艺类别，必须匹配玩家当前的非空身份。空身份或 `Origin.EMPTY` 不会在此步骤被拒绝。
+3. 对应节点条件必须通过当前数值比较。
+
+`force` 参数不会绕过这些本地检查。通过后，由 Puffish 判断节点是否存在、已解锁、被排斥、连通且可负担。其正常默认值为 `required_skills = 1`，所以内置树的多入边交汇处可择一路线。正常购买要求剩余点数同时满足节点花费与所需点数下限，并满足累计花费下限。依赖的强制操作可以绕过这些正常图形与预算限制。
+
+条件不消耗被检查的数值。此前解锁后再失去条件，不会自行撤销解锁；客户端快照在附加条件为假时，仍保留 `UNLOCKED` 与 `EXCLUDED` 状态。
+
+### 客户端状态与生命周期
+
+`SkillsClientModMixin` 拦截依赖的界面打开，并通过其按键切换替代界面。`open` 在客户端捕获状态，将原界面保留为父界面，没有玩家时不打开。刷新与提交转到 Minecraft 客户端执行器；快照通过 `MuiModApi.postToUiThread` 交给 Modern UI 线程。
+
+快照复制排序后的节点与边列表、本地化文字、点数状态和资格。图形绘制时不读取可变的 Puffish 客户端目录。类别 ID 字符串以 `isekai` 开头时隐藏经验等级展示；这不改变依赖的经验存储。
+
+| 界面规则 | 当前实现 |
+| --- | --- |
+| 快照刷新 | 150 毫秒 |
+| 搜索防抖 | 180 毫秒；匹配本地化标题与说明的子串 |
+| 解锁长按 | 单调时钟上的 1.2 秒 |
+| 拖动阈值 | 5 个界面单位 |
+| 解锁请求等待超时 | 5 秒 |
+| 确认效果 | 观察到服务器解锁状态后播放 900 毫秒 |
+| 几何过渡 | 210 毫秒 |
+
+`SkillTreeHold` 每次按下只消费一次。完成后清除目标，但按下锁存仍保持到松开，自动重复不能再次提交解锁。切换类别、拖动、缩放、失焦、离开图形区域或失去资格都会取消长按。方向选择依据空间位置，不是遍历前置边。
+
+`submit` 会重新检查活跃界面、当前类别、类别资格、依赖的 `AFFORDABLE` 状态与本地条件，然后发送现有的 `SkillClickOutPacket`。客户端长按不是服务器安全边界。观察到节点已解锁、节点消失或超过时限时清除等待状态；超时不会取消服务器处理。
+
+此界面不暂停世界，也不模糊背景。销毁时移除刷新与搜索回调、取消动画、释放图形资源，并且仅在自己仍是活跃片段时解除绑定。纹理边框、显现层与图标经同一个 Minecraft 表面批量绘制；绘制后恢复深度状态、矩阵与着色器颜色。互斥边仅在选中其端点时显示。
+
+## 扩展方式
+
+### 主树制作
+
+生成器为 `tools/puffish_main_tree/generate_main_tree.mjs`。修改星轨定义与构图规则，再从仓库根目录执行。它会覆盖生成的类别、图形定义、节点与连接数据、条件文件、被动与主动能力文件，以及 Puffish 语言分类文件。接受结果前先检查这些差异；对生成文件的手工修改不会作为独立输入合并回来。
+
+```powershell
+node tools/puffish_main_tree/generate_main_tree.mjs
+./gradlew.bat assembleLanguageFiles
+node tools/puffish_main_tree/validate_main_tree.mjs
+```
+
+生成的平衡、缺失素材与 SVG 报告放在 `build/puffish-main-tree/`。它们是本地生成输出，不是正式文档。平衡报告中的主动技能目标数值不代表已实现效果。
+
+调整布局时保留稳定的节点 ID：存档进度按节点 ID 索引。可复用定义描述奖励；重复主动节点刻意共用定义，使奖励数量成为等级。当前图形有 379 个节点、140 个定义、525 条有向连接与 7 组互斥关系。42 个汇流节点均没有出边。
+
+校验器检查可达性、定义、资源纹理、能力注册、双语语言组装、玩家属性注册、阶段预算、终点互斥、主动等级节点数量与节点间距。连接交叉只发出警告。它不会模拟所有服务器重载、多人解锁竞争或战斗效果。
+
+### 主动效果实现
+
+当前处理器为 `AegisDomainSkill`、`HeroicRushSkill`、`StarfallVolleySkill`、`ThousandfoldEdgeSkill`、`ProvidenceMarkSkill`、`AstralNovaSkill` 与 `SanctuarySkill`。它们均继承 `LearnableActiveSkillSkeleton`，且各自的 `execute(SkillTriggerContext)` 方法体都为空。
+
+基类分配 `isekaiexpansion:learnable_active_<path>`，并将 `onTrigger` 转发至 `execute`。对应 Origins 资源使用类型 `isekaiorigins:triggerable_skill`、侧别 `ACTIVE`、类别 `LEARNED` 与该处理器 ID。`meta` 中包含 `max_level = 3`、`cooldown = "0"` 和 `energy = "0"`。冷却与能量表达式必须经 `SkillUpgradeMeta` 求值为非负整数；资源不使用旧的顶层升级键。
+
+在已注册处理器中实现效果，并通过现有触发路径读取等级与消耗上下文。`SkillPowerUtil.tryTriggerSkill` 检查激活策略、冷却与能量；执行被接受后，扣除能量并设置经过急速调整的冷却。空骨架仍会走被接受的路径，所以只改元数据，可能让玩家为一个空效果付费。处理器、生成的元数据、校验器假设与玩家文档应一起更新。
+
+生成器边框名称对应已提供的 `circle_rank_1`、`circle_rank_2`、`circle_rank_3`、`hexagon_rank_2` 与 `hexagon_rank_3` 纹理族，并带有对应的暗色变体。新增奖励或图标时，应先通过素材与翻译校验，再发布重新生成的图形。
+
+## 验证
+
+- 组装语言后运行校验器，确认所有节点仍可到达，汇流不会绕过阶段门槛。
+- 使用新玩家解锁鉴定，再分别在等级与花费门槛之下、达到门槛时检查各关口。确认多入边交汇处只要求配置数量的前置节点。
+- 选择任一终点能力，确认另一项被排斥。对比正常解锁与可信的依赖强制调用：本地条件仍必须生效。
+- 在 3 个等级节点解锁同一主动定义，通过依赖的重置流程降低等级，并检查习得技能栏协调结果。
+- 在线时重载有效条件修改，对比服务器拒绝与客户端旧视图，然后重新连接再比较。检查同文件先正确后错误的条目，以及另一文件中的重复条目。
+- 在请求等待中长按、拖动、缩放、换类别、失焦、关闭再打开。确认只有观察到服务器解锁才播放确认效果，旧片段停止接收更新。
+- 同时测试独立服务器与集成服务器。源码核验和静态图形校验器本身不能证明多人或渲染行为。
+
+## 相关页面
+
+[命运轮环](/zh-cn/wiki/skill-tree/)面向玩家。[技能树数据](/zh-cn/wiki/skill-tree-data/)定义本地条件与奖励负载。[进阶运行时](/zh-cn/dev/progression/)介绍身份变化，[天赋运行时](/zh-cn/dev/talents/)介绍天赋条件状态。
+

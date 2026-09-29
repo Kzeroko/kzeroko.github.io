@@ -1,0 +1,143 @@
+---
+title: "Camera animation assets"
+description: "Build Gecko camera tracks with explicit units, naming, keyframe fields and reload checks."
+category: assets
+order: 73
+updated: 2026-09-19
+---
+
+A camera animation is a Gecko animation containing a bone named `camera`. Its position uses 16 model units per block, while its rotation becomes camera pitch, yaw and roll in degrees; the same resource can feed the client camera API or a server-authored cinematic track.
+
+## What you are making
+
+Write UTF-8 JSON at `assets/<namespace>/camera_animations/*.json`. Nested resources are discovered too. No geometry file, texture or visible cube is required by this loader: it reads animation data and selects the exact `camera` bone.
+
+The local loader delegates baking to third-party GeckoLib **4.8.4**, as pinned in this checkout. The keyframe formats, easing names and inferred duration below were checked against that dependency's source; the mod owns discovery, ID conversion and camera sampling.
+
+## Requirements
+
+An animation needs at least one position or rotation keyframe on `camera`. A missing bone, a differently capitalised name or a scale-only track produces no camera registry entry. Other bones can affect an inferred animation length even though the camera sampler does not use their poses.
+
+Animation names determine registry IDs:
+
+| Animation name | Resource namespace | Registered ID |
+| --- | --- | --- |
+| `boss_intro` | `isekaiexpansion` | `isekaiexpansion:boss_intro` |
+| `animation.boss_intro` | `isekaiexpansion` | `isekaiexpansion:boss_intro` |
+| `animation.example.intro` | `isekaiexpansion` | `example:intro` |
+| `animation.example.intro.closeup` | `isekaiexpansion` | `example:intro.closeup` |
+
+The parser removes an initial `animation.`, then uses the first internal dot to split namespace from path. Without that split it uses the resource namespace. Invalid resulting identifiers throw; the resource loader catches the exception silently. Two resources registering the same ID replace each other in discovery order, which this loader does not sort. Give each animation a unique ID.
+
+## Steps
+
+1. In an animation authoring tool, create a bone named `camera` and animate position or rotation. A static position is enough to make an entry.
+2. Use XYZ position and XYZ rotation arrays. Position is local to the selected playback anchor: +X is right, +Y is up and −Z is forward at the north-facing reference. Use 16 position units for one block. Rotation is pitch, yaw and roll in degrees.
+3. Set a finite positive `animation_length` in seconds. The loader does not enforce that authoring constraint; explicit duration avoids dependence on other bones and the unbounded inferred duration of an all-zero-time track.
+4. Export animation JSON into the resource directory. Preserve ascending timestamp order in the file: Gecko's baker iterates entries without sorting them.
+5. Reload client resources and confirm the ID is present with the registration check below. Then test motion with the anchor and playback mode that will actually use it.
+
+The sampler supplies `query.anim_time` in seconds for MoLang expressions. It does not set up an animated entity context or dispatch Gecko sound, particle or timeline events. Scale and an authored FOV do not change the sampled camera pose; the sampler returns null FOV. Put FOV nodes and timed events in the [cinematic scene format](/en/wiki/cinematic-scene-data/) when those are required.
+
+## Declaring it
+
+This reduced form of the bundled `boss_intro.json` registers `isekaiexpansion:boss_intro` when stored in that namespace:
+
+```json
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "boss_intro": {
+      "loop": "hold_on_last_frame",
+      "animation_length": 4,
+      "bones": {
+        "camera": {
+          "position": {
+            "0.0": { "vector": [0, 0, 0] },
+            "4.0": { "vector": [0, 24, -72] }
+          },
+          "rotation": {
+            "0.0": { "vector": [0, 0, 0] },
+            "4.0": { "vector": [-10, 35, 0] }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Resource and animation fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format_version` | `string` | Not read | Export metadata; this camera loader does not validate or branch on it. |
+| `animations` | `object` | No registrations | Animation-name map. A non-object root is ignored; a missing map is ignored, while a wrongly typed map throws. |
+| `animations.<name>` | `object` | No entry | One Gecko animation; the map key supplies the registry ID. Unknown animation fields do not add camera behaviour. |
+| `animations.<name>.loop` | `boolean` or `string` | `false` | `true`, `"true"` or `"loop"` repeats; `"hold_on_last_frame"` holds; `false`, `"false"` or `"play_once"` plays once. Unknown, numeric or non-primitive values use play-once. String matching is case-sensitive. |
+| `animations.<name>.animation_length` | `number` | Inferred | Seconds, converted to ticks at ×20. Missing duration uses the largest channel end time across all bones, including scale; an inferred zero duration becomes `Double.MAX_VALUE` ticks. No positive-range clamp is applied. |
+| `animations.<name>.bones` | `object` | `{}` | Bone-name map; no camera bone means no camera entry. |
+| `bones.camera` | `object` | No entry | Exact selected bone name. At least one position or rotation axis must have frames. |
+| `bones.camera.position` | Channel | Empty, sampled as zero | Model-unit XYZ displacement, divided by 16 for blocks. |
+| `bones.camera.rotation` | Channel | Empty, sampled as zero | Authored degree XYZ rotation. The baker's Gecko sign/radian conversion is reversed by the camera sampler. |
+| `bones.camera.scale` | Channel | Empty | Baked by Gecko and counted for inferred duration, but ignored by camera sampling. |
+
+A channel is a number or MoLang string replicated across XYZ, an XYZ array at time zero, an object containing `vector` at time zero or an ordered timestamp map. Write exactly three vector entries: the baker reads the first three, fails on a short array and ignores extras.
+
+### Keyframe fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `<seconds>` | `string` map key | Required for a timestamp map | Timestamp in seconds. Numeric keys are parsed; non-numeric keys become zero. A zero-time entry after an earlier entry is rejected. Times are not sorted or clamped. |
+| `vector` | `array<number>` with MoLang strings accepted | Required in vector-object form | XYZ values. A timestamp value may also be a bare XYZ array. |
+| `easing` | `string` | `linear` | Curve applied to the segment ending at this frame. Unknown or non-string values use linear; strings are lowercased, without stripping separators or spaces. |
+| `easingArgs` | `array<number>` | `[]` | Arguments for the selected Gecko curve; ordinary parameterised curves read the first value. Invalid numeric values fail baking. |
+| `pre` | XYZ array or vector object | No pre-frame | Bedrock keyframe form without `vector`: inserts the value at timestamp −0.001 seconds, except timestamp zero stays zero. |
+| `post` | XYZ array or vector object | No post-frame | Inserts the value at the actual timestamp. At least one of `pre` or `post` is needed in this form. |
+| `lerp_mode` | `string` | `linear` | Applied as easing to the Bedrock post-frame. It does not change a pre-only keyframe. |
+
+The built-in easing names are `linear` (alias `none`), `step`, `catmullrom` and the following families. Gecko can register additional curves; this table covers its bundled names.
+
+| Family | Accepted names |
+| --- | --- |
+| Sine | `easeinsine`, `easeoutsine`, `easeinoutsine` |
+| Quadratic | `easeinquad`, `easeoutquad`, `easeinoutquad` |
+| Cubic | `easeincubic`, `easeoutcubic`, `easeinoutcubic` |
+| Quartic | `easeinquart`, `easeoutquart`, `easeinoutquart` |
+| Quintic | `easeinquint`, `easeoutquint`, `easeinoutquint` |
+| Exponential | `easeinexpo`, `easeoutexpo`, `easeinoutexpo` |
+| Circular | `easeincirc`, `easeoutcirc`, `easeinoutcirc` |
+| Back | `easeinback`, `easeoutback`, `easeinoutback` |
+| Elastic | `easeinelastic`, `easeoutelastic`, `easeinoutelastic` |
+| Bounce | `easeinbounce`, `easeoutbounce`, `easeinoutbounce` |
+
+`step` defaults to 2 steps and throws during evaluation if its first argument is below 2. Elastic defaults to 1, bounce to 0.5, and back uses 1.70158 when omitted or multiplies that constant by the supplied argument. Catmull-Rom neighbour arguments are filled from adjacent frames by the baker. A channel with only one frame is forced to linear. These are Gecko contracts, separate from the cinematic scene's smaller easing enum.
+
+### Reloading and checking registration
+
+Resource reload clears the registry first. Invalid JSON, wrong types and invalid IDs can leave an animation absent with no local loader log. Gecko logs MoLang failures per animation; other baking exceptions can reject the resource before local registration starts. A later registration failure can leave earlier entries from that resource registered. Reload does not preserve the previous registry as a fallback.
+
+Run this on the client after resource loading; it checks registration without starting playback:
+
+```java
+var id = new Identifier("isekaiexpansion", "boss_intro");
+var animation = CameraAnimationRegistry.get(id);
+if (animation == null) {
+    throw new IllegalStateException("Camera animation was not registered: " + id);
+}
+```
+
+`CameraAnimationRegistry` is an internal client implementation type under `client.camera.anim`, not a public facade. Use [Camera Scene API](/en/dev/camera-api/) to play it. Existing playback retains its captured animation object across reload; start a new playback to check edited assets. A native cinematic Gecko track clamps sampling to the asset length and uses the scene's duration; it does not automatically adopt the asset's loop/hold mode.
+
+## Checklist
+
+- Confirm the exact animation ID, namespace and `camera` bone name, then check registration after reload.
+- Test the start and final pose with the intended anchor. Confirm one block of displacement uses 16 units and that pitch, yaw and roll have the expected signs.
+- Test a malformed copy, then restore the valid file and reload. Confirm missing registration is detected rather than mistaken for a playback failure.
+- Test the intended explicit duration and playback mode. API `GECKO` follows the asset mode; an explicit API mode overrides it.
+- Check behaviour in the client with the target mod set. This reference verifies source contracts; it does not certify an in-game rendering run.
+
+## Related
+
+- [Camera Scene API](/en/dev/camera-api/) — anchors, modes, input and transition ownership.
+- [Cinematic scene data](/en/wiki/cinematic-scene-data/) — native tracks, actor cues, effects and world events.

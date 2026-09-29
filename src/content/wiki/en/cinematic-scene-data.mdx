@@ -1,0 +1,252 @@
+---
+title: "Cinematic Scene Data"
+description: "Define camera tracks, actor cues, world events and subtitles with the complete cinematic-scene JSON format."
+category: data
+order: 86
+updated: 2026-09-26
+---
+
+A cinematic scene is a server-loaded timeline that combines camera motion, actor cues, world events and subtitles. Positions are relative to a supplied pivot, so the same scene can play at different locations without rewriting its coordinates.
+
+## Where the files live
+
+Place scene JSON in `data/<namespace>/cinematic_scenes/*.json`, including subdirectories. By default its resource path becomes the scene ID; an explicit `id` overrides it. Higher-priority packs replace the same resource ID. Different files can collide on an explicit scene ID: the loader logs the collision but has already replaced the earlier entry, and resource iteration is not sorted.
+
+Camera-only Gecko animations are separate client assets under `assets/<namespace>/camera_animations/*.json`. A scene's `gecko` track references their animation registry ID, not the JSON filename. The native `spline` track needs no such asset.
+
+## Minimal example
+
+This short fixed shot uses the same camera-node fields as the bundled `isekaiexpansion:hidden_hud_subtitle_scene`. Save it as `data/example/cinematic_scenes/fixed_shot.json` to define `example:fixed_shot`; its 40 ticks equal 2 seconds at 20 ticks per second.
+
+```json
+{
+  "schema": 1,
+  "length_ticks": 40,
+  "camera": {
+    "track": {
+      "nodes": [
+        { "t": 0, "pos": [0, 1.7, 4], "rot": [0, 180, 0], "fov": 60 }
+      ]
+    }
+  }
+}
+```
+
+An empty object also parses, but supplies no camera pose. It still has default playback settings, so a successfully loaded file is not necessarily a useful shot.
+
+## Fields
+
+### Root and playback
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `schema` | `integer` | 1 | Stored version; the loader does not reject another integer. |
+| `id` | `string` | File resource ID | Overrides the lookup ID. Must be a resource identifier. |
+| `length_ticks` | `integer` | duration, then 160 | Scene length in ticks, clamped to at least 1. |
+| `duration` | `integer` | 160 | Legacy length alias; length_ticks wins, but this value is still parsed if present. |
+| `playback` | `object` | Defaults below | HUD, input, blend and fade settings. |
+| `pivot` | `object` | Defaults below | Metadata only; runtime uses the transform supplied by the trigger or caller. |
+| `actors` | `object` | Triggering player | Actor-key map; player is inserted if absent. |
+| `camera` | `object` | Empty track/effects | Contains track and effects. |
+| `actor_tracks` | `object` | Empty | Actor-key → cue array. |
+| `events` | `array<object>` | Empty | Server world events. |
+| `subtitles` | `array<object>` | Empty | Client subtitle cues. |
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `hide_hud` | `boolean` | true | Hide the ordinary HUD; subtitles have their own overlay. |
+| `lock_input` | `boolean` | true | Lock cinematic input and close other client screens while playing. |
+| `lock_movement` | `boolean` | true | Hold viewer movement except scripted local-player locomotion. |
+| `allow_esc_skip` | `boolean` | false | Permit viewer skip votes; all current viewers must vote. |
+| `fade_in_ticks` | `integer` | 10 | Entry fade duration in ticks; positive values delay local playback and advance its starting age. |
+| `fade_out_ticks` | `integer` | 10 | Exit fade duration in ticks. |
+| `blend_in_ticks` | `integer` | fade_in_ticks | Within a playback object, defaults to its entry fade. Without that object the blend default is 8. |
+| `blend_out_ticks` | `integer` | fade_out_ticks | Within a playback object, defaults to its exit fade. Without that object the blend default is 8. |
+| `pivot.source` | `string` | trigger | Blank resets to trigger; stored, not used to choose the pivot. |
+| `pivot.space` | `string` | local_yaw | Blank resets to local_yaw; does not enable an alternate world-space mode. |
+
+All scene times are ticks. Length is clamped, but cue times are not checked against it: entries after the end never run. Playback fade/blend values have no parser range check; client transport normalises negative values to 0. **Omitting `playback` gives blend values of 8; supplying an empty object gives 10**, because absent blend fields inherit the fade values.
+
+### Pivot coordinates and actors
+
+The supplied transform uses +X right, +Y up and −Z forward in the scene's reference pose. Local yaw 180 faces forward. Position offsets rotate by pivot yaw minus 180; local yaw becomes pivot yaw plus local yaw minus 180. All positions use blocks, and rotations use degrees. The `pivot` metadata does not select or move the actual transform.
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `<actor-key>` | `object` | No custom actors | Trimmed, limited to 64 characters; letters, digits, underscore, hyphen, dot and colon survive. Other characters become collapsed underscores; empty becomes player. |
+| `selector` | `string` | triggering_player for player; nearest otherwise | triggering_player, nearest or nearest_type. Unknown value falls back to nearest. |
+| `entity_type` | `string` | Absent | Optional entity type ID; applies to nearest searches. |
+| `radius` | `number` | 16 | Search-box half extent in blocks, at least 1 at resolution. The injected default player actor uses 0 and bypasses the search. |
+| `name` | `string` | Absent | Exact displayed-name match for nearest searches. |
+| `uuid` | `string` | Absent | Valid UUID; a found living entity takes precedence over nearest filters. |
+
+For `triggering_player`, the player wins before UUID and other filters. Otherwise a UUID-resolved living entity wins; if it cannot be found, nearest resolution continues. Both nearest selectors use the same axis-aligned search box and optional type/name filters, then choose the closest living, present candidate to the pivot. The box is not a spherical radius test. An explicit type filter excludes the triggering player from that search.
+
+Actor keys that normalise to the same text overwrite earlier keys. A supplied `player` definition is retained; only an absent key gets the default triggering-player definition. Unresolved custom actors are omitted at playback start.
+
+### Camera tracks and nodes
+
+The first table describes `camera` and its `track`; the second describes each `track.nodes` entry.
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `track` | `object` | Empty spline | Camera track inside camera. |
+| `effects` | `array<object>` | Empty | Timed screen effects inside camera. |
+| `type` | `string` | gecko if animation exists; otherwise spline | spline or gecko; unknown becomes spline. |
+| `interpolation` | `string` | catmull_rom | catmull_rom or linear; unknown becomes catmull_rom. |
+| `animation` | `string` | Absent | Animation registry ID for a gecko track; missing/unresolved gives no camera pose. |
+| `nodes` | `array<object>` | Empty | Spline keyframes sorted by time. Empty gives no pose; a single node is a fixed pose. |
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `t` | `integer` | time, then 0 | Tick position; non-negative. Present t wins without reading time. |
+| `time` | `integer` | 0 | Alias used only when t is absent. |
+| `pos` | `array<number>` | [0, 0, 0] | Exactly 3 local block coordinates: x, y, z. |
+| `rot` | `array<number>` | [0, 180, 0] | Exactly 3 degree values: pitch, yaw, roll. See the target/rotation caveat below. |
+| `fov` | `number` | Absent | Degrees; no parser range clamp. Both ends absent preserves the underlying FOV; one supplied endpoint supplies that segment's FOV. |
+| `look_at` | `target` | Absent | Resolved target overrides pitch/yaw. An unresolved target leaves authored rotation. |
+| `ease` | `string` | linear | Segment ending at this node uses this easing. |
+
+Native tracks interpolate position with the selected interpolation, pitch linearly, and yaw/roll by wrapped-angle interpolation. The destination node supplies easing. A destination look target takes precedence over the previous node's target; the target is not blended between actors.
+
+Scene transport rebuilds the camera JSON. When a node has `look_at`, it writes that target and omits `rot`; the client therefore reparses the default rotation. Do not rely on authored roll or an authored fallback rotation surviving a targeted node through normal server playback. Untargeted nodes retain their rotation.
+
+Gecko tracks sample elapsed scene time at 20 ticks per second and clamp to the animation's length. This path does not apply the camera-only API's loop/hold selection. Missing animation data produces no pose.
+
+### Targets
+
+`look_at` and `face` accept an object using the fields below, a 3-number local position array, or the string `walk_target`. Other strings produce no target; null also means no target.
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `actor` | `string` | Absent | Actor-key target, based on its feet position before offset. |
+| `pos` | `array<number>` | Absent | Exactly 3 local coordinates if no actor/walk target is selected. |
+| `offset` | `array<number>` | [0, 0, 0] | Exactly 3 local offsets; rotate around the pivot before adding. |
+| `walk_target` | `boolean` | false | true selects the movement destination, ahead of actor or pos. |
+| `target` | `string` | Empty | walk_target is the only special string value here. |
+
+Object priority is walk target, then actor, then position. Actor targets use feet, so add an upward offset to frame the face. `walk_target` is meaningful for an actor cue; a camera node has no movement cue to supply that destination and cannot resolve it. Target actor strings are not normalised by the direct data parser, while the editor and client transport normalise them; use the same already-normalised key everywhere.
+
+### Camera effects
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `t / time` | `integer` | 0 | Shared non-negative tick position and alias rules. |
+| `type` | `string` | shake | shake or distortion; unknown becomes shake. |
+| `duration` | `integer` | 20 | Ticks, at least 1. |
+| `strength` | `number` | 1 | Shake pixels clamp to 0–48; distortion strength clamps to 0–1. Values at or below 0.001 do not start an effect. |
+| `frequency` | `number` | 14 | Shake frequency clamps to 0.1–60; distortion forwards it to the shader. |
+| `damping` | `number` | 2.2 | Shake decay exponent, clamped to 0.1–8; unused by distortion. |
+| `speed` | `number` | 1 | Distortion shader time multiplier; unused by shake. |
+
+Shake instances combine up to their strength cap; a new distortion replaces the current distortion. These are client screen effects, not changes to actor position. A late viewer starts only the remaining portion of an already-started effect, rather than replaying its full duration.
+
+### Actor tracks
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `<actor-key>` | `array<object>` | No track | Normalised like actor keys. A missing resolved actor skips the track. |
+| `t / time` | `integer` | 0 | Shared non-negative tick position and alias rules. |
+| `type` | `string` | pose | pose, move_path, teleport, emoji, npc_body_emote or animation; unknown becomes pose. |
+| `duration` | `integer` | 0 | At least 0 ticks. Movement needs a positive duration; meaning for other cue types is listed below. |
+| `mode` | `string` | walk when absent | grounded, walk, sprint, teleport_interpolated or navigation. Unknown/blank becomes grounded, not walk. |
+| `pos` | `array<number>` | Absent | Exactly 3 local coordinates; pose without it keeps current position. |
+| `yaw` | `number` | Absent | Local degrees; absent uses current yaw or movement/facing behaviour. |
+| `points` | `array<array<number>>` | Empty | Path points, each exactly 3 coordinates. Takes precedence over pos for path sampling. |
+| `face` | `target` | Absent | Facing target; walk_target refers to this cue's final path point or pos. |
+| `id` | `string` | Absent | Emoji, NPC emote or player/NPC animation ID, depending on type. |
+| `force` | `boolean` | true | Emoji FORCE versus REPLACE policy; not a general movement-force switch. |
+| `speed` | `number` | 1 | Walk/sprint nominal speed multiplier, clamped to 0.25–4; navigation uses at least 0.05. |
+| `ease` | `string` | linear | Used for interpolated movement, not gait-based walk/sprint speed. |
+
+| Cue or mode | Playback behaviour |
+| --- | --- |
+| `pose` / `teleport` | Discrete server position/yaw change. The default walk mode, and explicit grounded/sprint modes, fit the pose to nearby ground. |
+| `move_path` with `walk` / `sprint` | Collision-aware locomotion. Non-player actors move on the server; each player actor moves through its own client's movement input. |
+| `move_path` with `navigation` | Path-aware actors request navigation to the endpoint; other actors use interpolated placement. |
+| `move_path` with `grounded` / `teleport_interpolated` | Server interpolation along the authored path; grounded does not add collision-aware ground fitting to each interpolated step. |
+| `emoji` | Play the named sticker for the authored positive duration, otherwise the emoji system's default. |
+| `npc_body_emote` | Force the named body emote on a supported NPC; not a general player animation. |
+| `animation` | NPC busy animation on the server; registered player animation on clients. For players, duration controls entry blend, clamped to 0–10 ticks, not clip length. |
+
+Walk/sprint needs a path with non-zero length. A single point, or `pos` alone, does not form a walk from the actor's current position. Movement does not snap an off-path actor to its first point; use an explicit pose when that cut is intended.
+
+| Gait rule | Value |
+| --- | --- |
+| Nominal walk speed | 0.2160 blocks per tick |
+| Nominal sprint speed | 0.2808 blocks per tick |
+| Authored speed multiplier | 0.25–4 |
+| Accepted timing speed | 0.80–1.25 × the scaled nominal speed |
+
+Path length divided by duration determines the requested speed; outside that band it is clamped and the loader reports a timing warning. **The correction does not extend the cue window or scene length.** A blocked actor, off-path start or too-short duration can still leave the actor short of its destination.
+
+Movement cues run from their start through start plus duration, inclusive, when duration is positive. Overlapping cues are not rejected or merged; avoid giving the same actor competing movement instructions. Missing actors and missing animation IDs skip their action rather than rejecting the scene.
+
+### World events
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `t / time` | `integer` | 0 | Shared non-negative tick position and alias rules. |
+| `type` | `string` | sound | sound, effek, particle, weather or time; unknown becomes sound. |
+| `id` | `string` | Absent | Sound/Effek/particle resource ID; those event types do nothing without it. |
+| `pos` | `array<number>` | Pivot | Exactly 3 local coordinates for positioned events. |
+| `volume` | `number` | 1 | Sound volume, passed through. |
+| `pitch` | `number` | 1 | Sound pitch, passed through. |
+| `scale` | `number` | 1 | Effek scale. |
+| `duration` | `integer` | 20 | At least 1 tick; used by weather, not to terminate sounds or Effek instances. |
+| `category` | `string` | players | Sound category, case-insensitive; unknown/blank falls back to players. |
+| `weather` | `string` | clear at execution | rain, thunder or storm; all other values clear weather. Applies to the whole scene world. |
+| `time_of_day` | `integer` | -1 | World time value; negative does nothing. |
+| `count` | `integer` | 1 | Particle count, at least 1. |
+| `spread` | `array<number>` | [0, 0, 0] | Exactly 3 particle spread values in world axes; not pivot-rotated. |
+| `speed` | `number` | 0 | Particle speed argument. |
+| `visible_to_all` | `boolean` | true | Forwarded only to the Effek broadcast helper; not a general event audience filter. |
+
+Events are server-side and fire once when due. Sounds and particles use world broadcasting, and weather/time alter the world rather than just viewers' presentation. Particle events support simple registered particle types without extra payload data; block/item-style particle parameters are not part of this format.
+
+### Subtitles and easing
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `t / time` | `integer` | 0 | Shared non-negative tick position and alias rules. |
+| `duration` | `integer` | 40 | Visible duration in ticks, at least 1. |
+| `speaker` | `string` | Absent | Optional translation key or literal; blank hides the speaker line. |
+| `text` | `string` | Required | Translation key or literal text. |
+| `chars_per_second` | `number` | 48 | Text reveal speed; non-positive shows the full line immediately. |
+| `color` | `integer / string` | 0 (inherit theme) | Integer ARGB or hexadecimal string with optional #. At most 6 hex digits gets opaque alpha; longer values cast to a 32-bit integer. |
+
+Only one subtitle is active at a time; a new cue replaces it. Text and speaker strings are resolved as translation keys, with literal strings remaining usable. The subtitle overlay can render while the ordinary HUD is hidden. A late viewer resumes an unexpired cue partway through its reveal.
+
+Easing names are `linear`, `step`, `ease_in_quad`, `ease_out_quad`, `ease_in_out_quad`, `ease_in_sine`, `ease_out_sine`, `ease_in_out_sine`, `ease_in_cubic`, `ease_out_cubic`, `ease_in_out_cubic`, `ease_in_back` and `ease_out_back`. Input is case-insensitive, trims whitespace and accepts hyphens/spaces as underscores; compact names such as `easeInOutQuad` are also recognised. Unknown names fall back to `linear`.
+
+## Validation
+
+| Input | Result |
+| --- | --- |
+| Missing optional field | Uses the field-specific default above |
+| Unknown field | Ignored; it does not enable another event or execution mode |
+| Wrong type for an optional object/array container | Treated as absent; this differs from a malformed item inside a valid array |
+| Malformed array entry, invalid resource ID/UUID, missing subtitle text, vector with other than 3 elements, failed scalar conversion | Rejects that scene resource; other scenes continue |
+| Unknown recognised-option value | Falls back to that option group's default; it is not a load error |
+| Unsupported schema integer | Stored; no version rejection or migration |
+| Duplicate explicit scene ID | Logs an error after replacing the previous loaded entry; no stable resource-order winner |
+| Empty root object | Accepted with defaults |
+| Invalid JSON text | Does not produce a valid scene |
+| Failure during reload | The newly collected map replaces the old map, including partial success; failed old scenes are not retained |
+
+The parser does not impose finite-number checks, maximum timeline length, maximum keyframe count or existence checks for every referenced asset. Use finite values and valid IDs; successful parsing does not establish that an actor, animation, sound or particle is available.
+
+Normal scene-start transport sends a compressed authoring draft, limited to 262144 compressed bytes on receipt, and at most 64 actor bindings with keys up to 64 characters. This is a compressed-size bound, not a decompressed-memory limit. Client reconstruction rounds many vector, rotation and effect values to 3 decimal places, normalises target keys and discards unknown fields. Keep timelines within that transport budget and avoid depending on finer precision.
+
+## Reloading
+
+`/reload` rebuilds the server scene catalogue and increments its revision, including reloads with errors. Starting a scene sends its current definition and resolved actor bindings; clients do not need the server data pack locally for native tracks. Gecko camera animations and other visual assets still belong in client resource packs.
+
+Active server playbacks retain the scene object they started with. Reloading a definition changes later starts, not the existing timeline. Restart the scene to inspect changes, and reload client resources separately after editing camera animation assets.
+
+## Related
+
+- [Cinematic scene runtime](/en/dev/cinematic-scenes/) — triggers, viewers, actor authority and saved history.
+- [Camera animation assets](/en/dev/camera-animations/) — the resource format used by Gecko camera tracks.
+
+[Emoji data](/en/wiki/emoji-data/) defines stickers used by emoji cues. [NPC assets](/en/dev/npc-assets/) covers NPC animation resources, and [Developer editor preferences](/en/dev/editor-preferences/) explains the shared editor theme controls.

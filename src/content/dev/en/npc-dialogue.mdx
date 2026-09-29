@@ -1,0 +1,150 @@
+---
+title: "NPC dialogue runtime and interaction menus"
+description: "Dialogue admission, route resolution, cached parent menus, gifts, relationship state and extension contracts."
+category: systems
+order: 120
+updated: 2026-09-26
+---
+
+NPC conversations combine server-side admission and route selection with Blabber sessions. This reference covers the internal interaction hooks and transaction order; dialogue JSON and file lookup are documented separately.
+
+## What it does
+
+`NpcInteractionManager` handles interaction menus and gifts; `NpcDialogueManager` hands a requested route to Blabber; `NpcDialogueHandler` selects an existing dialogue. These implementation types are not public API facades. The mod registers the handler for `BaseNpcEntity` and a separate handler for villagers.
+
+Main-hand interaction checks contract scrolls first, then sleeping and dialogue admission, quest delivery, gift items and finally the ordinary parent menu. Offhand interaction passes through. A failed parent-menu start falls back to ordinary dialogue; a consumed interaction need not mean a dialogue actually started.
+
+## Runtime model
+
+### Admission and ownership
+
+Ordinary dialogue rejects dead or sleeping NPCs. The default follower gate permits the following player only after the NPC has been idle for 20 ticks (1 second); other players cannot start that follower's conversation. Custom NPCs can add admission restrictions.
+
+The resolver rejects an NPC locked by another player using a supported interaction screen. A stale lock without such a screen is released. Simple non-combat NPCs reject dialogue while they remember an attack target; combat NPCs reject a valid active target unless the speaking player is trusted.
+
+The interaction task requires an alive NPC, a supported screen and a player within 4 blocks (squared distance 16). Water contact or externally modified velocity prevents the task from starting; panic stops it. It stops navigation, focuses the speaker and clears walk/look memories and the entity claim on completion. These checks are distinct from an action's own range validation.
+
+`DialogueFacing` acts only on a matching active session, pauses for combat and scene ownership, and leaves dead, sleeping, removed or cross-world actors alone. Camera session start/stop is connected through Blabber events rather than inferred from screen visibility.
+
+### Route handoff and selection
+
+Pending routes are keyed by player UUID and include NPC UUID and an expiry after 160 ticks (8 seconds). Consumption removes the entry before checking target and expiry; a mismatched NPC consumes it too. The exact expiry tick is accepted; later ticks reject. The map has no periodic sweep.
+
+Selection tries, in order:
+
+1. Quest dialogue for the menu route.
+2. Owner allegiance dialogue by race, bond, route and phase.
+3. Encoded menu-route override candidates.
+4. NPC predicate overrides in registration order.
+5. Menu-route dialogue paths.
+6. Ordinary event dialogue paths.
+
+Each tier advances when it finds no existing registered dialogue. Predicate exceptions log and skip that override. The first matching predicate with an existing candidate wins; a true predicate with no file does not suppress later choices. An explicit override ID is tried before generated paths.
+
+The static `startDialogue` overload checks the ordinary admission gate only when its original `menuRouteKey` argument is null. Supplying a nonnull route, including a blank string later normalised away, bypasses that gate. It still rejects dead/sleeping NPCs and proceeds through handler checks. Treat this as an internal trusted entry point; enforce the intended follower/custom admission before calling it.
+
+A selected dialogue records the start tick, scenario, dotted dialogue path, `total_talks`, event counter and met/relationship/layer/dialogue flags before returning Blabber's start result. Menu and predicate overrides also record their corresponding counters and flags. Selection is not a completion receipt, and failure after selection does not roll these values back.
+
+### Parent menus
+
+Common parent menus are registered lazily once. Unique NPC menus are cached by normalised entity type, with relationship and quest-highlight variants. The prototype NPC's customisation hooks run during registration, not on each click; do not capture that prototype as the eventual interaction target.
+
+| Menu | Stable choice keys | Default gate |
+| --- | --- | --- |
+| Root | `chat`, `trade`, `orders`, `bond`, `outfit`, `farewell` | Trade uses the NPC merchant policy; the default requires trust or ownership. Orders/bond reject a spouse of another player. Outfit requires unique NPC and trust; common root has no outfit choice. |
+| Commands | `follow`, `stay`, `patrol`, `wander`, `back` | Follow/stay require trust; patrol/wander require friendly. Allegiance grants all of these to the owner. |
+| Gift | `confirm`, `cancel` | Confirm requires a gift in the current main hand; target and gift are re-resolved on execution. |
+
+Menus are unskippable by default. Quest-aware chat adds `(!)` and routes through the preferred quest conversation. Follower mode changes happen before their response dialogue; a missing response file does not undo the mode change.
+
+### Bond, romance and marriage state
+
+A selected `bond` menu dialogue records pending reward state. Natural close of that same dialogue awards 25 favor experience if the NPC is still alive in the player's server world, is not married to someone else, and this computed day has not already paid. Forced close gives nothing. A non-bond selection clears pending bond state.
+
+The reward day uses `floorDiv(6000 + timeOfDay, 24000) + 1`, wrapped into positive counter space. It follows world time-of-day rather than real time. The stored counter prevents repeat reward on the same computed day.
+
+Relationship resolution is a pure snapshot. `NpcRelationships` owns explicit marriage bindings; maximum favour never creates or replaces a spouse. Allegiance permissions are evaluated separately by `NpcAccessPolicy`; see [relationship runtime](/en/dev/npc-allegiance/).
+
+## Contracts
+
+### Gift processing
+
+Confirm re-reads the current main-hand stack. A missing/non-gift stack uses `gift_confirm_invalid`; marriage-distance rejection consumes nothing. An accepted result clamps consumption to the available stack, decrements it, calls item acceptance and NPC receipt hooks, adds nonnegative favor, updates emotion, then resolves the response route. No creative-mode consumption exemption appears in this path.
+
+The hooks run only when actual consumption is positive. Favor and emotion run for any accepted result. Exceptions from the acceptance/receipt hooks are not wrapped in a rollback; item consumption can already have happened.
+
+`NpcGiftItem` has code-defined profiles, not a JSON gift-rule loader.
+
+| Profile/result field | Default | Contract |
+| --- | --- | --- |
+| `favorPerItem` | constructor value, clamped to at least 0 | Multiplied by consumed count; positive overflow saturates at 2147483647. |
+| `consumeCountPerUse` | −1 | Any value at most 0 consumes the entire stack; positive values consume at most that count. |
+| `successMenuRoute` | `gift_confirm` | Normalised lowercase token. |
+| `invalidMenuRoute` | `gift_confirm_invalid` | Normalised lowercase token. |
+| `exclusiveDialogue` | false | Carried in profiles/results but not consulted by the interaction manager or dialogue resolver; does not disable fallback. |
+| Rule `key`, `priority`, `matcher`, `profile` | authored | Sort descending priority, then key; first matching rule wins. Matcher exceptions log and continue. |
+| Result `menuRouteKey`, `consumeCount`, `favorGain`, `accepted` | returned by resolver | Counts/gain clamp nonnegative; rejected results do not grant their favor value. |
+
+Builder helpers `overrideNpc` and `overrideNpcIdentity` use priorities 100 and 200 respectively, full-stack consumption and an exclusive flag. General `overrideWhen` accepts explicit priority, predicate, count and routes. Higher-priority custom rules can outrank either helper.
+
+Outfit gifts require the target NPC type, an existing selectable outfit and a still-locked player entitlement. They consume 1, then revalidate and commit the unlock in `onGiftAccepted`. The response route is `outfit_unlock_<outfitId>`. They do not equip the outfit automatically.
+
+Romance is part of the NPC relationship system. `EngageRingItem` implements the proposal through the Engage Ring: a valid proposal sets maximum favor and binds the spouse while resolving the result, then returns consumption 1 and favor gain 0. Those mutations precede the common consumption stage. Favor thresholds come from the IsekaiCore level storage dependency.
+
+The ring rejects another spouse, already-maximum favor or insufficient marriage readiness. Maximum favour without a spouse is not repaired. Allegiance rejects proposals until released. Proposal dialogue reports the outcome; the item owns the relationship mutation. Player-facing steps are in [NPC favour and romance](/en/wiki/leveling/).
+
+### Extension hooks
+
+Enable `hasDialogueOverrides` and populate `registerNpcDialogueOverrides` for per-interaction predicates. `NpcDialogueContext` exposes NPC, player, event, relationship tier, phase and nullable menu route. Its `hasEloquence`/`hasCharm` helpers compare live attributes inclusively against the requested minimum. `NpcDialogueOverride.forMenu` combines route equality with an optional predicate/explicit ID; `of` supports general predicates.
+
+Unique NPCs can override `customizeRootParentMenu`, `customizeCommandsParentMenu` and `customizeGiftParentMenu`. Context includes `ROOT`/`COMMANDS`/`GIFT`, optional relationship tier, NPC type and gender. Labels and denial text are evaluated during `build`; requirements and actions receive the actual player/NPC at interaction time.
+
+| Builder operation | Behaviour |
+| --- | --- |
+| `setPrompt`, `setUnskippable`, `clearChoices` | Replace prompt/policy or empty the menu. |
+| `addChoice` | Append label/action, optionally with requirement and denial text. |
+| `removeChoice`, `replaceChoice` | Operate on first matching normalised key; return false if absent. |
+| `insertChoiceBefore`, `insertChoiceAfter` | Insert relative to first matching anchor; append if absent. |
+| `routeAction` | Normalise route; `talk` delegates quest-aware selection, others use the route manager. |
+| `build` | Capture labels/prompt; defer NPC resolution and callbacks. A missing NPC makes a guarded choice unavailable and an action a no-op. |
+
+Duplicate choice keys are allowed, so replacement/removal can leave later duplicates. Key normalisation lowercases and replaces non-token characters with underscores; an empty key becomes `choice`. Builder callbacks have no generic exception isolation.
+
+Parent text keys use `menu.isekaiexpansion.npc.parent.`; unique keys insert `unique.<npcType>.`. Gift keys for common NPCs can use `gift.gender.<gender>.`. These builders emit their chosen translation key directly, without checking a common fallback key. Keep the unique keys complete. Command feedback has a separate explicit fallback mechanism.
+
+Add a custom route to `isAdditionalMarriedAwareMenuRoute` if it should probe the married-to-other branch. This only affects lookup; enforce interaction eligibility separately.
+
+### Dialogue names
+
+The speaker heading and `{name}` token use the current player's Trust decision when the conversation opens. Before Trust, the label is a role/type; at Trust it is the full name. Parent and normal dialogue share this policy. Custom names and allegiance ownership do not bypass it. The [Naming API](/en/dev/naming/) supplies third-party role/trust resolvers and the translated metadata contract.
+
+### Session metadata
+
+`NpcFavorDialogueMetadata` supplies typed favor, emotion, personality, mode and squad-slot metadata only for base NPCs. The HUD reads session metadata rather than server NPC fields. See [NPC emotions](/en/wiki/npc-emotions/) and [emotion runtime](/en/dev/npc-emotion/) for the full metadata contract; it is not authored dialogue JSON.
+
+## Extending it
+
+Keep admission, file selection and effects separate. Use actual callback arguments, not a cached prototype, for mutable player/NPC state. Require a response route explicitly when an effect depends on it; the current gift and mode pipelines do not make content lookup transactional.
+
+Register new actions with a codec and a namespaced ID in common initialisation. Validate the current session target and any range/trust requirements at action execution. The existence of a dialogue file or client button is not authorisation for an effect.
+
+## Verifying
+
+Test first, repeated and rapid conversations at each relationship tier, with and without every fallback file. Add a true override pointing at a missing file and a throwing predicate; verify later candidates remain usable. Test menu expiry, wrong-target consumption and two players competing for the same NPC.
+
+Open menus on one NPC instance, then another of the same unique type. Confirm callbacks use the current target. Change favor, gift stack and follower ownership while the menu is open; check runtime gates and absence of captured prototype state.
+
+Give a full stack, a capped-count custom gift, an already-unlocked outfit gift and each ring rejection case. Check inventory, favor, marriage binding and route independently, including missing response content and failed hooks. Close a bond dialogue naturally and forcibly on the same day, then cross the computed day boundary.
+
+Verify translated unique/common menus, disabled-choice explanations, emotes, emoji, favor metadata, conversation facing and scene handoff on owner and observer clients.
+
+## Related
+
+- [Dialogue data and routing](/en/wiki/dialogue-data/)
+- [Dialogue objects and UI](/en/dev/dialogue-ui/)
+- [Dialogue tools](/en/dev/dialogue-tools/)
+
+- [NPC foundations](/en/dev/npc/)
+- [NPC followers](/en/dev/npc-followers/)
+- [NPC emotions](/en/dev/npc-emotion/)
+- [Humanoid presets and NPC outfits](/en/wiki/humanoid-presets/)

@@ -1,0 +1,185 @@
+---
+title: "Humanoid saves, editor and paint runtime"
+description: "Creation scopes, profile persistence, compact packets, paint storage and diagnostic commands."
+category: systems
+order: 101
+updated: 2026-09-27
+---
+
+Character creation, saved appearances and painting share server-authoritative appearance state. This reference covers their internal persistence, editor permissions and network contracts.
+
+## What it does
+
+This reference covers the implementation behind character creation, saved appearances and painted parts. Read [architecture](/en/dev/humanoid/) for ownership and mutation entry points, [preset data](/en/wiki/humanoid-presets/) for all profile ranges and JSON fields, and [part assets](/en/dev/humanoid-parts/) for rendering inputs. These are internal contracts, not a public humanoid facade.
+
+## Runtime model
+
+### Profile ownership and creation
+
+The player component holds a live profile, creation stage, revision and at most 8 saved profiles. Its component ID is `isekaiexpansion:humanoid_appearance`; respawn uses `ALWAYS_COPY`. A changed profile increments revision and synchronises from the server. Equal assignment does nothing. Dimensions recalculate when height or the presence of a body changes. Saved profiles are sent only to their owner; the live profile, revision and stage are sent to observers.
+
+Creation normally advances `BASE → TRAIT → COMPLETE`. The base step commits first; trait creation waits until origin selection is no longer pending. Full `CREATION` completes both steps. Explicit reset returns to `BASE`. Committing a noncreation scope does not advance the stage.
+
+Opening an editor replaces the player's grant with a fixed 15-minute expiry measured by the monotonic clock. Submission neither renews nor consumes it. Disconnect closes it. A grant permits its own scope; only `CREATION` permits every scope. Invalid scope ordinals decode as `WARDROBE`.
+
+| Scope | Server merge | Editor chapters |
+| --- | --- | --- |
+| `CREATION` | Entire submitted profile, then sanitisation. | `PRESET BODY FACE HAIR TRAIT OUTFIT UNDERWEAR ACCESSORY PAINT IDENTITY` |
+| `CREATION_BASE` | Submitted profile with its trait references replaced by the current ones; a trait slot empty in the current profile ends up empty. | `IDENTITY PRESET BODY FACE HAIR UNDERWEAR OUTFIT ACCESSORY PAINT` |
+| `CREATION_TRAIT` | Current parts with their trait references replaced by the submitted ones; palette stays unchanged. | `TRAIT` |
+| `APPEARANCE` | Submitted palette, face and hair/face/trait references. | `PRESET FACE HAIR TRAIT PAINT` |
+| `WARDROBE` | Submitted outfit, underwear and accessory references; palette stays unchanged. | `OUTFIT UNDERWEAR ACCESSORY PAINT` |
+| `IDENTITY` | Literal or preset name, nickname toggle, gender and age. | `IDENTITY` |
+
+Within the slot kinds a scope owns, the merged references are replaced outright, so a slot that is empty in the source profile becomes empty. Slots of other kinds are never read from the submission. The cleared reference `isekaiexpansion:cleared`, which outfit overlays use to empty a slot, is not a catalogue part, so a submission carrying it is treated like any unknown reference. Sanitisation then refills origin traits and makes every [part chain](/en/dev/humanoid-parts/) whole or absent. Chapter visibility does not alter these server merge rules: wardrobe colour edits, for example, do not copy the palette.
+
+**Current access limitation:** `RequestHumanoidScreenPacket` routes a `CREATION` request through the owed-creation flow, but directly grants other requested scopes without a permission or stage check. Scopes constrain a submitted merge; they are not an access-control boundary for privileged editing. An invalid or expired submit only revalidates the existing profile; an unchanged profile need not produce a corrective sync.
+
+The service resolves the actual origin, sanitises catalogue compatibility, removes unavailable parts and unknown paint references, and fills first-creation defaults. An empty catalogue preserves part references. Catalogue fallback may refill a mandatory slot after unavailable parts were removed; do not interpret the intermediate removal pass as a guarantee that every fallback meets an unlock condition. Direct internal assignment bypasses this pipeline.
+
+### Saved slots and editor handover
+
+Slots use indices 0–7. Saving pads gaps with the default profile; clearing replaces a slot with the default rather than removing its index. Save and clear requests do not require an editing grant. Applying a saved slot requires a full `CREATION` grant and commits through that scope, completing creation.
+
+The client retains the latest pending editor grant. It waits for 3 screen-free ticks before opening it. Held screens are keyed by `AFTER_CHARACTER_BASE` or `AFTER_CHARACTER_COMPLETE`; a ready held screen takes precedence over a pending grant. A held screen is released after 600 eligible polling ticks even if its gate remains unmet. An active screen pauses those polls, so this is not a wall-clock timeout. A 60-tick idle watchdog requests owed creation when appropriate; Fate UI resumption also waits for 60 quiet ticks.
+
+The ModernUI editor does not pause the world. First-time creation blocks normal closing. Its detached editing session has 48 undo states. Gender changes apply compatible defaults; changing a part resets its style and paint unless the part ID stays the same, while changing only style preserves paint. Choosing a chained part equips its whole chain, and replacing or removing a member removes the others. Confirm uploads locally available referenced paintings, sends the profile and closes immediately; it does not wait for server acknowledgement.
+
+The name browser selects translated full-name IDs and checks new choices against the server catalogue on submission. It creates at most 8 result controls. Compact reset controls restore numeric defaults, compatible parts, active colour channels or the blank account-name default, with undo/redo support. See [Naming API](/en/dev/naming/) for selection and persistence contracts.
+
+Preset gallery cards do not enforce preset unlock metadata. Part cards use gender lock/origin, assets, requirements and unlock checks, list parts styled for the character's gender or unisex first and preview a chained part with its whole chain; the client-side advancement check cannot establish a server advancement award. Server validation remains authoritative.
+
+## Contracts
+
+### NBT and wire format
+
+These keys describe saved state, not data-pack JSON. Profile constructors normalise identity, build, face, palette and part references using the same ranges documented in [preset data](/en/wiki/humanoid-presets/).
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| Component `Profile` | compound | default profile | Live appearance. |
+| Component `Saved` | compound list | empty | Reads at most 8 profiles. |
+| Component `CreationStage` | int | `BASE` | Enum ordinal; invalid values fall back to `BASE`. |
+| Component `Revision` | int | 0 | Change counter; no range clamp or overflow handling. |
+| Profile `Version` | int | 1 | Clamped to at least 1; larger versions are accepted without format dispatch. |
+| Profile `Identity` | compound | default identity | `Nickname` string, optional `PresetName` identifier string, `UseNickname` boolean, `Gender` string, `Age` int. Defaults are empty, absent, false, female and 18; nickname limit 48 UTF-16 units, preset-ID limit 256, age range 12–400. A preset clears the literal nickname. |
+| Profile `Build` | compound | default build | Float keys `Height`, `TorsoWidth`, `ArmLength`, `ArmThickness`, `LegLength`, `LegThickness`, `HeadScale`, `ChestSize`, `ChestLift`, `ChestSpread`. Height defaults to 1.8, lift/spread to 0 and other values to 1. |
+| Profile `Face` | compound | default face | Float keys `EyeSpacing`, `EyeHeight`, `EyeDepth`, `EyeScale`, `EyeTilt`; scale defaults to 1 and others to 0. |
+| Profile `Palette` | compound | channel defaults | `Channels` is an int array in colour enum order, masked to RGB. A short array retains defaults for missing channels; extra entries are ignored. Missing/wrong array type uses defaults. |
+| Profile `Parts` | compound list | empty | Entries contain `Slot` string and `Ref` compound. Unknown slots or wrong reference types are skipped; later duplicate slots overwrite earlier values. |
+| Part `Ref` | compound | no reference | `Part` identifier string is required; invalid ID removes the reference. `Style` defaults to `default`; optional `Paint` must be 32 hexadecimal characters and is normalised to lowercase, otherwise discarded. |
+| Profile `Origin` | string | absent | Invalid identifier becomes absent; player validation replaces it with the actual origin. |
+
+Style names are trimmed, lowercased, limited to 64 characters and restricted to ASCII letters, digits, underscore and hyphen; invalid names become `default`. Saved palette order and slot ordinals are compatibility-sensitive.
+
+The shared codec starts with a version VarInt and a section byte. Section bits 1, 2, 4, 8, 16 and 32 select identity, build, face, palette, parts and origin respectively. Omitted sections use defaults. The reader does not branch on version or consume payload for unknown section bits; peers must agree on this format.
+
+| Section | Payload |
+| --- | --- |
+| Identity | Flag byte: 1 nickname, 2 nickname enabled, 4 opposite of the default gender, 8 age, 16 preset name. Payload order is nickname string, age VarInt, preset-ID string when flagged; string limits are 48 and 256 respectively. |
+| Build | Sparse VarInt bitmask and floats in `Height TorsoWidth ArmLength ArmThickness LegLength LegThickness HeadScale ChestSize ChestLift ChestSpread` order. |
+| Face | Sparse VarInt bitmask and floats in `EyeSpacing EyeHeight EyeDepth EyeScale EyeTilt` order. |
+| Palette | VarInt bitmask in channel enum order; each present RGB value occupies 3 bytes. |
+| Parts | VarInt entry count, then slot unsigned byte and flags. Flags 1/2 omit the default namespace/slot path prefix; 4/8 include style/paint. String limits: namespace 64, path 192, style 64, paint 32. Invalid slot ordinal resolves to `BODY`; the reader does not cap the entry count. |
+| Origin | Identifier string, maximum 128 characters. |
+
+Component sync appends revision VarInt, creation-stage byte and an owner boolean after the profile. Only the owner receives the saved count and profiles. NPC profile tracking reuses the compact profile codec.
+
+### Paint editor and blob format
+
+Paint is a transparent overlay on a part texture, composed after tint. It cannot add visible pixels outside the source art's alpha coverage. The editor copies existing paint or creates a canvas from the source texture, clamping each dimension to 256; unavailable dimensions use 64 × 64. Empty paint clears the reference. Nonempty paint is cached locally and referenced by content ID before upload.
+
+Tools are brush, eraser, line, rectangle, ellipse, fill and picker. Canvas history holds 32 states and resets when rebinding. Brush width is 1–32 pixels with radius half the width (0.5 at width 1), hardness 0–1 and opacity 0.02–1. Zoom is 1–32 times the fitted scale; wheel steps multiply by 1.25. Mirroring uses `width - 1 - x`. Fill matches exact ARGB values; erasing subtracts alpha. Per-gesture maximum coverage prevents repeated darkening over the same pixel. The picker returns the overlay RGB whenever its alpha is nonzero, otherwise the source RGB; it does not sample the final composited colour.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| Magic | 4-byte int | `0x49535054` | Big-endian blob signature. |
+| Format version | byte | 1 | Current paint encoding. |
+| Width / height | 2 unsigned shorts | none | Each dimension must be 1–256. Together with signature/version, the header is 9 bytes. |
+| Pixel payload | compressed bytes | none | Deflated big-endian ARGB ints; maximum accepted encoded blob size is 96 KiB. |
+| Content ID | string | none | First 32 hex characters of SHA-256 over raw pixel bytes only. Dimensions are not part of the hash. |
+
+The encoder itself does not enforce the encoded-size ceiling; wrapping/decoding does. Decode requires the expected decompressed byte count, but does not require inflater completion or reject every possible trailing byte. Equal flattened pixels with different dimensions can share an ID; the store keeps the first encoded blob for an existing ID.
+
+### Paint transport and storage
+
+Chunks carry ID, total byte count, total chunk count, chunk index and bytes. Total bytes must be positive and at most 96 KiB; data must be 1–16 KiB; chunk count must be 1–7 and the index must be inside that count. The writer needs at most 6 chunks at the byte ceiling. The reader does not require count to equal the ceiling division of bytes. Multi-chunk offsets use `index × 16 KiB`; duplicate chunks replace bytes without increasing the received count. Single-chunk completion uses actual data without matching declared total bytes. Completion decodes the blob and verifies its content ID.
+
+Each transfer accumulator permits 8 active partials; starting another clears all partials. There is no partial-transfer timeout. Disconnect clears the player's upload accumulator. Upload and read requests have no editor-scope or ownership gate: paint storage is shared, not private per player.
+
+The persistent-state key is `isekaiexpansion/humanoid/paint_v1`, supplied by `IsekaiPersistData.key("humanoid", "paint", 1)` in the server's overworld manager.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Entries` | compound list | empty | Stored paint records. |
+| `Id` | string | empty | Empty IDs are skipped on load. |
+| `Data` | byte array | empty | Empty arrays or arrays exceeding 96 KiB are skipped; loading does not decode or hash-validate them. |
+| `Used` | long | 0 | Last-use epoch day from real UTC time, not world time. |
+
+New inserts evict the oldest last-use day when exceeding 8192 blobs or 48 MiB. Existing IDs retain their original bytes and refresh their use day. Startup prunes entries older than 60 days; there is no daily tick prune. Access touches use day, but a saved appearance is not a permanent storage pin. Loading does not enforce quotas; duplicate stored IDs replace the map value while still increasing the byte accumulator for each record.
+
+Client disk files live under `isekaiexpansion/humanoid_paint/<id>.ispt` in the game run directory and are hash-verified on read. The 256-entry memory cache clears as a whole at its limit. Unknown requests retry after 5 seconds; an explicit missing response is remembered until valid arrival or disconnect. Disconnect clears pending/missing/transfer state but retains loaded memory and disk data.
+
+### Composed textures
+
+The composed texture cache targets 384 entries with access-order eviction. Its key includes base texture, mask, bound RGB values and paint. Composition runs on a worker; GPU upload runs on the render thread. While a new colour result is pending, the renderer can use the last ready texture from the same base/mask/paint family, or the base texture. That family deliberately excludes colours.
+
+Paint revision invalidates painted entries; resource reload clears the cache. A stale job must still match its entry before upload, otherwise its image is closed. Keep resource ownership and render-thread upload intact when changing composition.
+
+NPCs finish their controller-driven pose through `HumanoidBoneShaper.finishAnimatedPose`. It applies identity proportions even during death and item use, then clears transformation-change flags without resetting the rendered transforms. This keeps the next controller tick from accumulating custom offsets or scale while preserving the completed pose for repeated render passes.
+
+NPC locomotion belongs to IsekaiExpansion's `NpcAnimationController` and the shared Gecko kit. Entity-specific files override individual clips, including for unique characters; see [NPC assets](/en/dev/npc-assets/). Citizens, adventurers and unique NPCs all use the common follower tasks. Better Animations' sibling integration is limited to `isekaiexpansion:simple_clone`; NPCs no longer opt into its player locomotion layer.
+
+`NpcModelBones` gives the renderer separate mutable bone graphs for `NPC`, `MORPH` and `FIRST_PERSON`. Graphs copy the authored bind transform and share cube geometry. A replaced baked source after resource reload replaces its owned graph. Player features, NPC world poses and first-person morph arms cannot overwrite each other's bones. Repeated passes retain their completed pose instead of clearing it before GeckoLib's duplicate-frame check.
+
+`HumanoidPlayerPoseBridge` still maps a matching morph presentation to its owning player's pose, including the outer body and held-item channels. Autonomous NPCs accept their own Better Combat weapon animation or an explicitly posed preview; ordinary movement uses Gecko. Death, tracked item use, emotes, POI activity and authored combat retain their own motion.
+
+The server runs NPC movement and combat, synchronising ordinary entity and tracked activity state. Rendering reads each NPC on the client without consulting a nearby player's input. Verify live movement, first- and third-person morphs, two clients, late joining, dimension travel and reconnect in-game. Also check clip fallback, resource reload and repeated player/NPC/morph/arm pose isolation.
+
+### Player pose and held items
+
+The player renderer retains its vanilla model and feature pipeline. `PlayerEntityRendererMixin` hides vanilla body geometry after posing and adds `HumanoidPlayerFeature`; the rig receives the live biped pose. `HumanoidPlayerPoseBridge.restoreBindPose` restores initial offsets, rotations and scales before shaping so transforms do not accumulate between frames. Existing armour follows the outer height scale, but this path does not reshape armour to match individual limb sliders.
+
+First-person rendering receives the caller's already-posed arm and applies `animatedArm.rotate`; arm-visible part layers follow the body pose. A runtime failure disables `HumanoidFirstPersonArmRenderer` for the client process. The player feature separately disables its own instance after a render failure. Inspect the logged exception; neither flag is cleared by these classes on resource reload.
+
+`HumanoidItemAnchor` applies only to players whose humanoid body is active. It reads pivot differences from `right_arm` to `main_item` and `left_arm` to `off_item`, applies the current arm pose, scales the locator offset by arm thickness/length, then cancels that local scale before orienting the item. Locator rotation is not read. Overall height already belongs to the outer render transform.
+
+Anchors cache by body model. The shared rig is tried only when neither body anchor resolves; if one body anchor exists, the missing side does not separately inherit the rig anchor and that side returns to the normal held-item path. Moving only a locator's rotation therefore cannot repair a grip offset. The held-item feature also applies the player's active item animation transform before drawing.
+
+## Extending it
+
+Append compatible fields deliberately: NBT keys, wire flags/order, defaults, constructor normalisation, equality, visual invalidation and both endpoints must agree. A version number alone does not provide migration. Preserve palette enum order and slot ordinals; review bitmask capacity before adding channels.
+
+When adding an editing scope, update the grant relation, server merge, chapter list and request authorisation together. Decide whether clearing, palette edits, saved-slot apply and paint upload are permitted. A hidden chapter alone cannot enforce those decisions.
+
+Keep paint format/hash changes coordinated with disk cache, persistent state, transfer validation and profile references. A format that adds dimensions to identity needs an explicit migration strategy for existing IDs.
+
+## Verifying
+
+### Operator commands
+
+These commands are under `/isekaiexpansion` (alias `/ise`) and require permission level 2.
+
+| Command | Result |
+| --- | --- |
+| `/ise humanoid edit [target]` | Full creation editor for the executing player or selected players; not marked first-time. |
+| `/ise humanoid appearance <target>` | Appearance-scope editor for selected players. |
+| `/ise humanoid reset <target>` | Sanitises the default profile, resets stage to `BASE`, opens first-time full creation. |
+| `/ise charactercreate [targets]` | Replays the first-join opening sequence for the executing player or selected players. Unspends the fate and retracts its effects, empties every enabled origin layer and lets automatic layers choose as a login does, resets the character to a sanitised first-time default at `BASE`, then grants `CREATION_BASE` with the origin chooser held behind it. The trait step and the fate follow in their normal order, and the first-join particle arrival replays. |
+| `/ise humanoid export player <name> [target] [--purge]` | Exports self or a humanoid entity to `config/isekaiseries/humanoid_presets/<name>.json`. |
+| `/ise humanoid export npc <name> <target>` | Exports a base NPC's base profile and wardrobe to `config/isekaiseries/npc_presets/<name>.json`. |
+| `/ise humanoid resync` | Resends the current catalogue and revalidates online players; does not reload files. |
+| `/ise humanoid status` | Reports part/preset/NPC-preset counts and stored paint count/size. |
+
+Export names keep lowercase ASCII letters, digits and underscore, convert hyphen/space to underscore, drop other characters and stop at 48 characters. Empty results fail. Existing output files are overwritten. `--purge` removes nickname use, literal/preset name, origin and trait parts while retaining gender and age. JSON exports omit paint, round shapes to 3 decimal places and have the outfit-unlock caveat documented in [preset data](/en/wiki/humanoid-presets/). Review and copy exports into a data pack; the export directory is not an automatic catalogue input.
+
+Verify scope merges with changed palette, gender and trait references and with emptied slots, including one member of a part chain. Exercise grant expiry and saved-slot apply separately. Test initial creation through origin choice, respawn and reconnect, plus a held screen interrupted by another UI. Observe another player to confirm live appearance sync without exposing saved slots.
+
+For paint, test local preview, server acceptance, another client's download, missing IDs, oversized/noisy blobs, duplicate chunks, disconnect and resource reload. Check tint alpha, transparent source pixels and pending texture fallback. A successful docs or plugin build does not establish these in-game behaviours.
+
+## Related
+
+- [Humanoid architecture](/en/dev/humanoid/)
+- [Humanoid preset data](/en/wiki/humanoid-presets/)
+- [Humanoid part assets](/en/dev/humanoid-parts/)
+- [Blockbench creator](/en/dev/blockbench-plugin/)

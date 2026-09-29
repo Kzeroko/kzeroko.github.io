@@ -1,0 +1,90 @@
+---
+title: "Reputation data"
+description: "Entity factions, dynamic profession membership and faction relation rules."
+category: data
+order: 30
+updated: 2026-09-18
+---
+
+Entity faction rules assign factions and behaviour roles; relation rules decide whether factions are friendly, neutral or hostile. An entity can match several files, and all matching entity rules contribute.
+
+## Where the files live
+
+Entity rules use `data/<namespace>/reputation/entity_factions/*.json`; relation rules use `data/<namespace>/reputation/faction_relations/*.json`. Each file defines one rule. Its resource ID comes from namespace and path; the JSON has no ID or version field.
+
+Entity rules with different resource IDs accumulate rather than override by filename. Relation conflicts use priority and relation type. Identical resource paths undergo normal data-pack resource selection first.
+
+## Minimal example
+
+This keeps only the required field from the bundled villager rule. It matches villagers but adds no factions or roles:
+
+```json
+{
+  "entity_types": ["minecraft:villager"]
+}
+```
+
+## Fields
+
+### Entity factions
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `entity_types` | `array<string>` | required | Entity IDs or tags prefixed with `#`. Any matcher suffices; `[]` matches nothing. IDs are syntax-checked, not required to be registered. |
+| `factions` | `array<string>` | `[]` | Adds static factions. IDs are normalised and created on demand, not resolved against an external registry. |
+| `dynamic_factions` | `array<string>` | `[]` | Only `minecraft:villager_profession` is accepted; `villager_profession` is its alias. Adds `minecraft:villager_profession/<profession_id>` for villagers; other entities contribute nothing. |
+| `roles` | `array<string>` | `[]` | Normalised role names. `protector` is consumed by defender checks; other names are accepted without a defined behaviour here. Duplicates collapse. |
+| `include_structure_origin_factions` | `boolean` | `false` | Collects stored structure-origin factions when the entity supports them. It does not assign a faction merely because the entity stands inside a structure. |
+
+### Faction relations
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `source_factions` | `array<string>` | required | Normalised faction IDs on the acting side. An empty list never matches. |
+| `target_factions` | `array<string>` | required | Normalised faction IDs on the target side. An empty list never matches. |
+| `relation` | `enum(friendly, neutral, hostile)` | required | Trims and ignores case. Friendly aliases: `ally`, `allied`, `alliance`; hostile aliases: `enemy`, `war`. Other values reject the file. |
+| `bidirectional` | `boolean` | `true` | Also tests with acting and target faction sets exchanged. |
+| `priority` | `integer` | `0` | Higher matching priority wins. No explicit clamp; write a signed 32-bit integer. Equal priority prefers hostile, then friendly, then neutral. |
+
+
+## Full example
+
+Place this entity rule in the entity-faction directory:
+
+```json
+{
+  "entity_types": ["minecraft:villager"],
+  "factions": ["minecraft:village"],
+  "dynamic_factions": ["minecraft:villager_profession"],
+  "roles": ["protector"],
+  "include_structure_origin_factions": true
+}
+```
+
+This separate relation file follows the bundled civilisation/monster relationship:
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/civilization"],
+  "target_factions": ["isekaiexpansion:side/monster"],
+  "relation": "hostile"
+}
+```
+
+Faction IDs are trimmed and lower-cased; backslashes and vertical bars become slashes, spaces become underscores and blank IDs become `unknown`. Role names receive the same case and space handling but do not convert vertical bars or replace blank names with `unknown`. Entity IDs and tags must still use valid resource-ID syntax.
+
+## Validation
+
+A missing required key, wrong type in a consumed field, invalid entity-ID syntax, unknown dynamic faction type or unknown relation rejects that file. The loader logs the error and continues with other files. Both loaders replace their previous rule lists with this load's successful rules; a bad file does not retain its old rule. Unknown fields are ignored, with no version migration. An empty object lacks required keys; empty text is invalid JSON.
+
+Syntactically valid unregistered entity IDs load but cannot match a nonexistent type. Empty tags and empty `entity_types` arrays match nothing; empty faction arrays add nothing. Unknown static faction IDs are created on demand. Multiple entity rules can contribute together. Relation rules compare higher priority first, then hostile before friendly before neutral.
+
+When no relation rule matches, a shared faction makes the sides friendly; otherwise they are neutral. An explicit rule can override that shared-faction default.
+
+## Reloading
+
+Both directories are server data resources read at startup and on `/reload`. Reload replaces the rule lists, and subsequent faction/relation queries use the new rules. This path does not synchronise the whole rule table to clients; player-visible reputation reports and gameplay results use runtime queries.
+
+## Related
+
+See [Reputation](/en/wiki/reputation/) for player consequences and [Trade overrides](/en/wiki/trade-overrides/) for merchant catalogues.

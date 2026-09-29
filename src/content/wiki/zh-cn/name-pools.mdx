@@ -1,0 +1,82 @@
+---
+title: "姓名池数据"
+description: "定义可翻译的完整姓名，并按种族、文化与姓名倾向选择。"
+category: data
+order: 115
+updated: 2026-09-26
+---
+
+姓名池保存固定的姓名标识符及匹配规则。内置目录提供双语全名，扩展内容也使用相同格式，供NPC命名和[角色姓名浏览器](/zh-cn/wiki/character-names/)读取。
+
+## 文件放在哪里
+
+服务端覆盖文件位于`data/<namespace>/naming/pools/<path>.json`，客户端姓名浏览器的覆盖文件位于`assets/<namespace>/naming/pools/<path>.json`。姓名池ID为`<namespace>:<path>`。最高优先级资源包中的同路径文件完整替换该池，不同ID的池可以并存。
+
+内置池放在`assets/isekaiexpansion/naming/pools/`，由`assets/isekaiexpansion/naming/catalog.json`列出。两端都先读取内置目录。资源包扩展会自动发现，无需修改清单；新增内置池则须加入清单。
+
+`isekaiexpansion:elven`池中的`aelith_silverfrond`对应身份ID `isekaiexpansion:elven/aelith_silverfrond`，翻译键为`name.isekaiexpansion.elven.aelith_silverfrond`。池标题使用`name_pool.isekaiexpansion.elven`，池路径中的斜杠改为点。英文与中文分别写入`language_assemble/categories/names/en_us.json`和`language_assemble/categories/names/zh_cn.json`，再组装语言文件。仓库外的资源包直接提供普通客户端语言资源。
+
+## 最小示例
+
+下面使用内置精灵姓名。保存为`data/isekaiexpansion/naming/pools/elven.json`后，会将该池替换成只有一个中性姓名的通配池：
+
+```json
+{
+  "names": {
+    "unisex": ["aelith_silverfrond"]
+  }
+}
+```
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `selectors` | `array<object>` | `[]` | 可互相替代的匹配条件，最多64条。省略或留空时使用一条通配条件。 |
+| `selectors[].origins` | `array<identifier>` | `[]` | 允许的种族ID，最多64个不同值。空列表匹配所有种族；校验语法，不要求已注册。 |
+| `selectors[].cultures` | `array<string>` | `[]` | 允许的文化ID，最多64个不同值。空列表匹配所有文化，每个值须符合`[a-z0-9_-]{1,64}`。使用`yamato`或`donghuang`，不要填写翻译后的名称。 |
+| `priority` | `integer` | `0` | 范围−1000–1000。同等具体程度的池取最高优先级；并列池合并候选姓名。 |
+| `names` | `object` | 必填 | 姓名倾向分组，合计须有1–16384个姓名。 |
+| `names.female` | `array<string>` | `[]` | 女性姓名ID，每个须符合`[a-z0-9_]{1,96}`。 |
+| `names.male` | `array<string>` | `[]` | 男性姓名ID，语法相同。 |
+| `names.unisex` | `array<string>` | `[]` | 中性姓名ID，男女筛选和中性筛选都可选中。 |
+
+单条条件中，两组非空列表必须同时匹配。选择顺序为种族与文化组合、仅文化、仅种族、通配。每一级先保留优先级最高的池，再按姓名倾向筛选；结果为空则继续下一级。选择全部倾向时包含所有分组，最终候选中的每个姓名概率相同。
+
+## 完整示例
+
+下面的精灵池覆盖只匹配东煌精灵，使用的两个姓名已有内置翻译：
+
+```json
+{
+  "selectors": [
+    {
+      "origins": ["isekaiorigins:elf"],
+      "cultures": ["donghuang"]
+    }
+  ],
+  "priority": 10,
+  "names": {
+    "female": ["aelith_silverfrond"],
+    "male": ["aelar_silverfrond"]
+  }
+}
+```
+
+## 校验
+
+未知字段、结构类型错误、无效标识符、非字符串姓名、小数或越界优先级，以及空姓名集都会使重载失败。同一完整姓名ID不能重复，也不能同时出现在两个倾向分组中；条件列表中的重复值会合并。目录最多包含256个池、100000个姓名和4096种不同条件组合，且必须保留通配池。池标识符最长150个字符。
+
+全部姓名池通过校验后，才会替换当前目录。专用服务器不检查翻译是否存在，仓库的姓名目录检查会检查这一项。应同时提供两种语言；缺少翻译时会显示翻译键。已分配的姓名即使后来从池中移除，仍保留原翻译键。
+
+## 重载
+
+服务端池随数据包重载，姓名浏览器随客户端资源重载，目录不会通过网络发送。服务器新增玩家预设姓名时，也应提供配套客户端资源。新选择的预设ID若不在服务器目录中，提交会被拒绝；仅修改客户端资源不能绕过校验。已经选定的姓名在预设被关闭或移除后，仍可保留并编辑其他选项。
+
+通过`data/<namespace>/tags/entity_types/nameable_npcs.json`扩展NPC资格，目标标签为`isekaiexpansion:nameable_npcs`。`isekaiexpansion:naming_excluded`会排除原本符合条件的实体类型。内置可选条目为`guardvillagers:guard`。异界扩展独特NPC与已有自定义名称的实体始终受到保护；重载规则不会为已有姓名的实体重新取名。
+
+## 相关页面
+
+- [角色姓名](/zh-cn/wiki/character-names/)
+- [命名API](/zh-cn/dev/naming/)
+- [人形与NPC预设](/zh-cn/wiki/humanoid-presets/)

@@ -1,0 +1,174 @@
+---
+title: "Particlize"
+description: "The compose and decompose effect that dissolves an entity into shards: the profile JSON, every field it accepts, how inheritance resolves, and the client budget."
+category: client
+order: 30
+updated: 2026-09-18
+tagline: "Dissolving an entity into shards, and the JSON that shapes it."
+tags: ['fx', 'particlize', 'shaders', 'resource pack']
+---
+
+Particlize takes an entity's rendered model and either scatters it into shards or assembles it from them. A profile decides how that looks: how long it runs, what the dissolve edge is tinted, how many shards fly off, and how much of it survives at distance. Profiles are resource-pack JSON, so an effect can be retuned without touching code. What plays at which moment is [Entity FX](/en/dev/entity-fx/).
+
+## Where the files live
+
+```
+assets/<namespace>/particlize_fx/<name>.json
+```
+
+One file is one profile, and its identifier is `<namespace>:<name>`. The bundled set lives under `assets/isekaiexpansion/particlize_fx/` — twelve files, with `base.json` as the one every other profile inherits from.
+
+Because these are assets rather than data, a resource pack overrides a profile the same way it overrides a texture: the pack highest in the list wins the whole file. There is no per-field merging between packs. Inheritance inside a profile is a different mechanism, described below.
+
+## Minimal example
+
+Every field falls back to a built-in default, so the smallest accepted file is `{}`. The smallest *useful* one inherits and changes one thing:
+
+```json
+{
+  "extends": "isekaiexpansion:base",
+  "surface": {
+    "tint": "#7FE6FFFF"
+  }
+}
+```
+
+`extends` names another profile by identifier. The parent's JSON is deep-merged with this file's before anything is parsed: nested objects merge key by key, and any key present here replaces the parent's. That is why the example above keeps every other surface setting from `base`.
+
+Inheritance chains as far as you like, and a cycle is detected and reported rather than hanging.
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `extends` | identifier | no parent | Profile to inherit from, deep-merged before parsing. A missing target fails this profile. |
+| `timeline` | object | built-in defaults | When the effect runs and for how long. |
+| `surface` | object | built-in defaults | The dissolve pass over the entity's own geometry. |
+| `shards` | object | built-in defaults | The loose particles thrown off during the dissolve. |
+| `lod` | object | built-in defaults | Distance thresholds and the complexity budget. |
+
+The four objects are independent. Omit one and it takes its defaults whole; include it and only the keys you write are changed, the rest keeping their defaults or the parent's values.
+
+### `timeline`
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `duration_ticks` | integer | `32` | Length of the dissolve, clamped to `1…1200`. |
+| `delay_ticks` | integer | `0` | Wait before anything renders, clamped to `0…1200`. Use it to line up with a wind-up. |
+| `hold_ticks` | integer | `8` | How long the finished state stays on screen, clamped to `0…1200`. |
+| `easing` | enum | `smoother_step` | Curve applied to progress: `linear`, `smooth_step`, `smoother_step`, `quad_in`, `quad_out`. An unrecognised name silently becomes `smoother_step`. |
+
+### `surface`
+
+The dissolve itself — the shader pass over the entity's own geometry.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `shape` | enum | `plane` | The mask the dissolve sweeps with: `plane`, `sphere`, `cylinder`, `box`, `noise`. Unrecognised names become `plane`. |
+| `direction` | `array<number>` | `[0.0, 1.0, 0.0]` | Sweep direction, normalised on load. A zero-length vector becomes straight up. |
+| `tint` | colour | `#B873FFFF` | Colour washed over the dissolving surface. `#RRGGBBAA`. |
+| `tint_strength` | number | `0.22` | How much of `tint` reaches the surface, `0.0…1.0`. |
+| `edge_color` | colour | `#7629FFFF` | Colour of the advancing dissolve edge. |
+| `edge_width` | number | `0.13` | Thickness of that edge, `0.001…1.0`. It cannot be zero — an edge of nothing renders as a hard seam. |
+| `emission` | number | `0.85` | Self-lit brightness of the edge, `0.0…4.0`. Above `1.0` it blows out, which is the point for magic. |
+| `noise_scale` | number | `5.5` | Frequency of the dissolve noise, `0.01…128.0`. Higher is grainier. |
+| `noise_strength` | number | `0.16` | How much that noise distorts the edge, `0.0…1.0`. |
+| `cell_scale` | number | `14.0` | Size of the shatter cells, `1.0…128.0`. Higher means more, smaller fragments. |
+| `shatter` | number | `0.18` | How strongly the surface breaks into those cells, `0.0…1.0`. |
+| `displacement` | number | `0.025` | How far fragments drift from the model, `0.0…2.0`, in blocks. |
+| `bounds_padding` | number | `0.06` | Extra render bounds so drifting fragments are not culled, `0.0…1.0`. Raise it if the effect clips at the edges. |
+
+### `shards`
+
+The loose particles thrown off during the dissolve.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | `false` renders the surface pass only. The client config can also switch shards off globally. |
+| `color` | colour | `#B873FFE6` | Shard colour, alpha included. |
+| `count` | integer | `84` | Shards at close range, clamped to `0…512`. |
+| `far_count` | integer | `24` | Shards past `lod.far_distance`, clamped to `0…count` — a larger value is reduced to `count`, never the other way round. |
+| `size` | number | `0.035` | Shard size in blocks, `0.002…1.0`. |
+| `size_variance` | number | `0.55` | Random spread around `size`, `0.0…1.0`. |
+| `speed` | number | `0.55` | Initial outward speed, `0.0…4.0`. |
+| `spread` | number | `0.45` | Cone width of the initial scatter, `0.0…4.0`. |
+| `gravity` | number | `0.015` | Downward pull, `-1.0…1.0`. Negative floats the shards upward. |
+| `lifetime_ticks` | integer | `14` | How long a shard lives, `1…1200`. |
+
+### `lod`
+
+Distance and complexity budget. These are the fields that decide whether a crowded fight stays playable.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `near_distance` | number | `24.0` | Full quality inside this radius, `1.0…512.0` blocks. |
+| `far_distance` | number | `56.0` | Reduced quality past it; clamped to at least `near_distance`. |
+| `max_distance` | number | `96.0` | Nothing renders past it; clamped to at least `far_distance`. |
+| `complex_model_vertices` | integer | `6000` | Above this vertex count the model is treated as complex, `256…1000000`. |
+| `extreme_model_vertices` | integer | `18000` | Above this it takes the cheapest path; clamped to at least `complex_model_vertices`. |
+| `fallback_high_subdivisions` | integer | `8` | Subdivision level for the fallback mesh near the camera, `1…12`. |
+| `fallback_medium_subdivisions` | integer | `5` | Mid-range level; clamped to at most `fallback_high_subdivisions`. |
+| `fallback_low_subdivisions` | integer | `3` | Far level; clamped to at most `fallback_medium_subdivisions`. |
+
+The three distances and the three subdivision levels are each clamped in order, so a profile cannot describe a far distance nearer than its near distance, or a low level richer than its high one. Write them in a sensible order and the clamps never fire.
+
+## Validation
+
+Nothing here throws at the player.
+
+- **A malformed or unparseable profile** is logged as a warning naming the resource, and that one profile is dropped. Every other profile still loads.
+- **`extends` pointing at a profile that does not exist** fails that profile the same way, with `Unknown inherited profile` in the log.
+- **A cycle in `extends`** is detected while resolving and logged with the full path, rather than recursing until the client dies.
+- **An out-of-range number** is clamped, not rejected. A `count` of `9999` becomes `512` and nothing tells you in game — check the log only for load failures, not for clamping.
+- **A non-finite number** falls back to the low end of its range.
+- **An unknown enum name** falls back: `plane` for `shape`, `smoother_step` for `easing`. Case and surrounding whitespace do not matter.
+- **If no profile loads at all**, the registry keeps one entry — `arcane_pulse` mapped to the built-in default — so the renderer always has something rather than crashing on an empty map.
+
+Asking the registry for an identifier it does not have returns nothing. That is a caller's problem to handle, not a silent substitution.
+
+## Reloading
+
+`ParticlizeProfileRegistry` is a client resource reload listener, so profiles reload with F3+T and with any resource pack change. Parsing happens off-thread and the parsed map is swapped in atomically, so an effect mid-play finishes with the profile it started with.
+
+Nothing about profiles crosses the network. The server sends which profile id to play; the client resolves it from its own resource packs. Two players with different packs will correctly see different effects.
+
+## Playing a profile
+
+Server-side, `ParticlizeFxBroadcaster` decides who sees the effect:
+
+| Method | Who sees it |
+| --- | --- |
+| `playTracking(target, profileId, mode, …)` | Everyone tracking the entity. Returns an effect id. |
+| `playTrackingObservers(…)` | Trackers, with an explicit observer filter. |
+| `playNearby(entity, profileId, mode, seed, priority, radius)` | Everyone inside `radius` of the entity. |
+| `playFor(…)` | One named viewer. |
+| `cancelTracking(target, effectId)` | Stops a running effect by the id `playTracking` returned. |
+| `clearFor(viewer)` | Drops everything queued for one player, for logout and dimension change. |
+
+The `seed` argument makes a scatter reproducible: the same seed produces the same shard pattern on every client, which matters when two players compare a recording and not at all otherwise.
+
+`ParticlizeMode` is `DECOMPOSE`, `COMPOSE` or `PULSE`. `ParticlizePriority` is `AMBIENT`, `NORMAL`, `IMPORTANT` or `CRITICAL`, and decides what survives when the client is over budget.
+
+Client-side, `ParticlizeFx` starts an effect locally and returns a `ParticlizeHandle` for cancelling it. Use it only for something purely cosmetic and purely local; anything another player should see goes through the broadcaster.
+
+## Client config
+
+Under `particlize_fx` in `config/isekaiexpansion.json`. All client-side: the server never enforces these.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `enableParticlizeFx` | boolean | `true` | `false` disables every particlize effect on this client. |
+| `particlizeFxShards` | boolean | `true` | `false` keeps the surface dissolve and drops the loose shards. |
+| `particlizeFxRenderDistance` | integer | `128` | Hard cap in blocks, `8…256`. Applied on top of each profile's `lod.max_distance`; the smaller of the two wins. |
+| `particlizeFxShaderCrowdThreshold` | integer | `4` | How many simultaneous shader-path effects before the renderer starts downgrading, `1…16`. |
+| `particlizeFxNativeCrowdThreshold` | integer | `8` | The same limit for the cheaper native path, `1…32`. |
+| `particlizeFxMaxShardsPerFrame` | integer | `1024` | Upper bound on shards drawn in one frame, `128…2048`. Profiles asking for more are trimmed, priority first. |
+
+<Callout type="note" title="Profiles propose, the client disposes">
+A profile's `count` and `lod` are requests. The crowd thresholds and the per-frame shard cap override them whenever several effects overlap, which is exactly when a profile looks most expensive. Tune a profile alone, then check it again with five of them on screen.
+</Callout>
+
+## Related
+
+- [Entity FX](/en/dev/entity-fx/) — which profile plays on death, teleport and respawn.
+- [Effekseer Particles](/en/dev/effekseer-particles/) — the other effect system, for authored emitters rather than entity dissolves.

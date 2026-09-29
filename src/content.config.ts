@@ -22,7 +22,7 @@ const seo = z.object({
 /* Wiki — player-facing system reference                                       */
 /* -------------------------------------------------------------------------- */
 
-const wikiCategories = ['core', 'combat', 'crafting', 'world'] as const;
+const wikiCategories = ['core', 'combat', 'crafting', 'world', 'data'] as const;
 
 const wiki = defineCollection({
   loader: contentGlob('wiki'),
@@ -36,6 +36,36 @@ const wiki = defineCollection({
     /** Date the underlying game data was last verified against the mod source. */
     updated: z.coerce.date(),
     /** Short line shown on the wiki index card, when the description is too long. */
+    tagline: z.string().optional(),
+    tags: z.array(z.string()).default([]),
+    draft: z.boolean().default(false),
+    seo: seo.optional(),
+  }),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Dev — documentation for people writing code against the mod                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Separate from `wiki` on purpose: the audience is different, and a developer
+ * page in the player sidebar is noise for everyone who is not one.
+ *
+ * Both collections are authored in the IsekaiExpansion repository under
+ * `src/main/resources/ise_doc/` and mirrored here. Edit them there.
+ */
+const devCategories = ['start', 'api', 'systems', 'client', 'assets'] as const;
+
+const dev = defineCollection({
+  loader: contentGlob('dev'),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    /** Groups the page in the sidebar and on the dev index. */
+    category: z.enum(devCategories),
+    order: z.number().default(100),
+    /** Date the page was last verified against the mod source. */
+    updated: z.coerce.date(),
     tagline: z.string().optional(),
     tags: z.array(z.string()).default([]),
     draft: z.boolean().default(false),
@@ -131,5 +161,5 @@ const pages = defineCollection({
     }),
 });
 
-export const collections = { wiki, codex, blog, pages };
-export { wikiCategories, codexKinds, accents, localeEnum };
+export const collections = { wiki, dev, codex, blog, pages };
+export { wikiCategories, devCategories, codexKinds, accents, localeEnum };

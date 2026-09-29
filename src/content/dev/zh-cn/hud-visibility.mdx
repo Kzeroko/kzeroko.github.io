@@ -1,0 +1,93 @@
+---
+title: "HUD 显隐与布局"
+description: "统一淡出已接入的界面，并让任务卡片避开随从与可见聊天内容。"
+category: client
+order: 180
+updated: 2026-09-26
+---
+
+`HudAPI` 统一管理已接入 HUD 的淡入淡出，各调用方分别持有会自动到期的隐藏请求。准星指向可阅读的悬赏告示时，预览会持续续期自己的请求，预览本身仍然显示。
+
+## 入口
+
+客户端使用 `net.kzeroko.isekaiexpansion.api.client.HudAPI`。门面委托 `internal.client.hud` 实现，不修改任务进度、输入处理或原版 HUD 的显隐设置。
+
+玩家 HUD、追踪任务面板、地城 HUD 和化形 HUD 注册各自的 ModernUI 根视图。舒适度与随从状态使用即时绘制包装。其他模组的 HUD 和原版元素不会自动接入。
+
+## 常见用法
+
+### 保持 HUD 隐藏
+
+为调用方分配固定 ID，在交互仍处于焦点时由客户端 tick 续期：
+
+```java
+private static final Identifier READING = new Identifier("example", "reading");
+
+static void focusedTick() {
+    HudAPI.suppress(READING, 350);
+}
+```
+
+停止续期后，请求会自行到期。调用 `HudAPI.release(READING)` 可立即移除此调用方的请求；其他调用方仍有请求时，HUD 继续保持隐藏。
+
+### 注册保留式界面
+
+挂载时，在 ModernUI 线程注册专用根视图。根视图的透明度交给 API 管理，面板自身的过渡动画放在子视图上。
+
+```java
+static void attachHud(View root) {
+    HudAPI.register(root);
+}
+
+static void detachHud(View root) {
+    HudAPI.unregister(root);
+}
+```
+
+即时绘制在渲染线程调用 `HudAPI.render(context, () -> drawPanel(context))`。包装会乘上当前着色器透明度，通过 `DrawContext` 提交，并在 `finally` 中恢复原着色器颜色。回调绘制期间须保留该颜色；自行重置颜色的绘制代码无法继承淡出效果。
+
+## 方法一览
+
+| 方法 | 端 / 线程 | 作用 |
+| --- | --- | --- |
+| `initClient()` | 客户端初始化 | 仅注册一次 tick 与断线处理；模组已调用。 |
+| `suppress(owner, lingerMs)` | 客户端线程 | 新增或延长该调用方的到期时间；`owner` 不可为空。 |
+| `release(owner)` | 客户端线程 | 移除该调用方的请求；不存在时不做处理。 |
+| `opacity()` | 客户端渲染线程 | 根据单调时钟返回 `0..1` 范围内的缓动透明度。 |
+| `render(context, draw)` | 客户端渲染线程 | 只影响此回调；透明度为零时跳过回调。 |
+| `register(root)` | ModernUI 线程 | 接管根视图透明度；重复注册无效果。 |
+| `unregister(root)` | ModernUI 线程 | 取消根视图淡出动画，将透明度恢复为 `1`。 |
+
+| 时间项 | 数值 |
+| --- | --- |
+| 淡出 | `220` 毫秒 |
+| 淡入 | `320` 毫秒 |
+| 可接受的保持时长 | `1..60000` 毫秒；超出范围抛出 `IllegalArgumentException` |
+| 悬赏阅读保持时间 | `350` 毫秒；世界中的告示可读时持续续期 |
+
+## 线程与生命周期
+
+请求采用真实经过时间，不依赖世界刻。仅在客户端世界有效时调用 `suppress`；世界或玩家缺失、断线时，清除全部请求并恢复已注册根视图。切换维度不会清除请求，但未续期的请求仍会正常到期。这些类型仅供客户端使用，专用服务器不可加载。
+
+客户端线程管理请求表，不可变的过渡快照传给 ModernUI 线程，由后者管理视图与动画。淡出过程中注册的根视图会立即采用当前透明度。续期不会重启动画，过渡反向时从当前透明度继续。接口不会替调用方切换线程。
+
+## 任务布局与聊天区域
+
+随从状态栏保持固定位置。`PlayerHudOverlay` 上报整组状态栏的占用范围，宽度包含实际绘制的名字。内部的 `HudRenderBounds` 只在 HUD 绘制聊天的调用期间收集背景与文字，按绘制矩阵和 GUI 缩放换算成窗口物理像素，不读取聊天配置文件。
+
+几何信息变化时，`HudLayoutSnapshot` 通过现有的合并消息通道传给 ModernUI。`TrackedQuestHudLayout` 按当前宽度测量各卡片，将自然高度交给 `QuestHudPlacement`。任务先从可见随从下方往下排；遇到可见聊天区域前，移到随从右侧，从随从组的顶部重新向下排。右侧卡片也会避开之前超出随从列宽的任务卡片。多个聊天窗口的绘制范围互不接触时，会保留为独立障碍区域。
+
+布局只在窗口内放置完整卡片。空间不足时，会在可用位置显示任务簿提示，必要时让最后一张卡片让出位置。如果整个窗口都没有空位，提示也可能无法显示，任务仍可在任务簿中查看。淡入淡出和缩放动画保持在卡片的分配范围内。
+
+可选的 Chat Plus 兼容已按 **Chat Plus 2.8.1 for Fabric 1.20.1** 核对。其小数坐标背景绕过原版 `DrawContext.fill`，由 `ChatPlusDrawBoundsMixin` 单独采集；文字走共用文字钩子。外围聊天作用域也覆盖 Chat Plus 未聚焦时使用原版聊天的模式。只有实际绘制的内容占位，消息淡出后会释放空间。此逻辑只调整任务卡片，聊天与随从仍由各自原有逻辑决定坐标。
+
+### 验证
+
+先运行`./gradlew.bat compileJava`，再进入游戏检查布局。
+
+客户端验收应覆盖随从加入与离开、长名字、多张任务卡片、聊天淡出、多个移动后的聊天窗口、透明聊天背景、GUI 缩放及窗口尺寸变化。Chat Plus 的两种消息排列方向和未聚焦时使用原版聊天的模式也需检查。最终屏幕观感需在游戏中验证。
+
+## 相关
+
+- [任务运行时](/zh-cn/dev/quest-system/)
+- [公会悬赏](/zh-cn/wiki/bounty-quests/)

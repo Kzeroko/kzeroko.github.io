@@ -1,0 +1,232 @@
+---
+title: "Combat attributes and status runtime"
+description: "Attribute metadata, damage stages, energy and shield storage, status application and lifecycle contracts."
+category: systems
+order: 35
+updated: 2026-09-26
+---
+
+This subsystem connects registered attributes, Data Attributes mappings, PlayerEx damage functions and status-effect lifecycle hooks. Its helpers are internal implementation surfaces; the [player attribute guide](/en/wiki/attributes-and-effects/) and [effect catalogue](/en/wiki/status-effects/) cover gameplay outcomes.
+
+## What it does
+
+`IsekaiAttributes` registers tracked native attributes. Bundled Data Attributes resources define downstream mappings, entity defaults and metadata overrides. `CombatAttributeUtil`, the energy/shield components and the status hooks consume those values; registration alone does not give an attribute a combat effect.
+
+`IsekaiDamageCondition` registers functions through `ExAPI.registerDamageModification`. `IsekaiEffects` and `IsekaiMagicEffects` register the effect catalogue. Spell Power owns spell-school evaluation and vulnerabilities; PlayerEx owns the downstream primary and critical stats.
+
+## Runtime model
+
+### Native attributes and supplied metadata
+
+These are the Java declarations, before Data Attributes overrides or entity-specific defaults. Every entry is tracked.
+
+| ID | Java default | Java range |
+| --- | --- | --- |
+| `isekaiexpansion:max_energy` | 30 | 0–10000 |
+| `isekaiexpansion:energy_regen_speed` | 0.5 | 0.2–200 |
+| `isekaiexpansion:max_shield_gauge` | 75 | 0–1000 |
+| `isekaiexpansion:shield_gauge_regen_speed` | 2 | 0.5–10 |
+| `isekaiexpansion:melee_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:melee_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:magic_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:magic_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:range_crit_chance` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:range_crit_damage` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:elemental_power` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:dys_aether` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:aether_power` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:ability_haste` | 0 | -99–500 |
+| `isekaiexpansion:armor_penetration` | 0 | 0–100 |
+| `isekaiexpansion:magic_penetration` | 0 | 0–100 |
+| `isekaiexpansion:tenacity` | 0 | 0–100 |
+| `isekaiexpansion:enmity` | 0 | 0–100 |
+| `isekaiexpansion:stamina` | 0 | 0–100 |
+| `isekaiexpansion:omnivamp` | 0 | 0–100 |
+| `isekaiexpansion:shield_power` | 0 | 0–100 |
+| `isekaiexpansion:aggro_generation` | 0 | -100–500 |
+| `isekaiexpansion:burst_damage` | 0 | 0–1000 |
+| `isekaiexpansion:energy_leech` | 0 | 0–100 |
+| `isekaiexpansion:shield_break` | 0 | 0–100 |
+| `isekaiexpansion:evasion_counter` | 0 | 0–1000 |
+| `isekaiexpansion:debuff_accuracy` | 0 | 0–1000 |
+| `isekaiexpansion:guts_chance` | 0 | 0–100 |
+| `isekaiexpansion:stealth_efficiency` | 0 | 0–100 |
+| `isekaiexpansion:environmental_resistance` | 0 | 0–100 |
+| `isekaiexpansion:heal_amplification` | 0 | 0–500 |
+| `isekaiexpansion:eloquence` | 0 | -100–1000 |
+| `isekaiexpansion:charm` | 0 | -100–1000 |
+| `isekaiexpansion:tenju_affinity` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:bonus_damage_level` | 0 | 0–9 |
+| `isekaiexpansion:magic_sword_sense` | 0 | 0–30 |
+| `isekaiexpansion:constitution` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:strength` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:dexterity` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:intelligence` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:technique` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:perception` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:belief` | 0 | 0–`Double.MAX_VALUE` |
+| `isekaiexpansion:evasion` | 0 | 0–`Double.MAX_VALUE` |
+
+The following supplied files under `data/isekaiexpansion/attributes/overrides/` declare different metadata. In particular, native maximum energy is 10000 while its data maximum is 5000, and native evasion is unbounded up to `Double.MAX_VALUE` while its data maximum is 0.5. Keep these layers distinct when diagnosing the status screen.
+
+| Attribute | Fallback | Range | Increment | Stacking |
+| --- | --- | --- | --- | --- |
+| `isekaiexpansion:aether_power` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:belief` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:constitution` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:dexterity` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:dys_aether` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:elemental_power` | 0 | 0–5000 | 1 | `FLAT` |
+| `isekaiexpansion:energy_regen_speed` | 0.5 | 0.2–200 | 0.1 | `FLAT` |
+| `isekaiexpansion:evasion` | 0 | 0–0.5 | 0.01 | `DIMINISHING` |
+| `isekaiexpansion:intelligence` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:magic_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:magic_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:max_energy` | 0 | 0–5000 | 10 | `FLAT` |
+| `isekaiexpansion:melee_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:melee_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:perception` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:range_crit_chance` | 0 | 0–1000 | 0.01 | `FLAT` |
+| `isekaiexpansion:range_crit_damage` | 0 | 0–1 | 0.001 | `FLAT` |
+| `isekaiexpansion:strength` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:technique` | 0 | 0–500 | 0 | `FLAT` |
+| `isekaiexpansion:tenju_affinity` | 0 | 0–50 | 1 | `FLAT` |
+
+Each override supplies the following fields explicitly. This table describes the bundled declarations; the dependency owns parsing, reload and missing-field behaviour.
+
+| Field | Type | Default | Meaning in the supplied files |
+| --- | --- | --- | --- |
+| `fallbackValue` | number | Explicit | Fallback recorded in the table above. |
+| `minValue` | number | Explicit | Lower metadata bound. |
+| `maxValue` | number | Explicit | Upper metadata bound. |
+| `incrementValue` | number | Explicit | Metadata increment. |
+| `translationKey` | string | Explicit | Display key; primary stats and evasion reuse PlayerEx keys. |
+| `stackingBehaviour` | string | Explicit | `FLAT`, except evasion's `DIMINISHING`. |
+
+`entity_types.json` supplies player and simple-clone defaults. Both have maximum energy 30, energy recovery 0.5, maximum gauge 75 and gauge recovery 2; their listed combat and wrapper bonuses start at 0. The player entry additionally lists social attributes. Healing Amplification is absent from this JSON but is included by the player attribute-builder hook, with native default 0.
+
+`functions.json` declares `ADDITION` forwarding with these coefficients:
+
+| Source attribute | Downstream targets and coefficients |
+| --- | --- |
+| `isekaiexpansion:melee_crit_chance` | `playerex:melee_crit_chance` × 1 |
+| `isekaiexpansion:melee_crit_damage` | `playerex:melee_crit_damage` × 0.5 |
+| `isekaiexpansion:range_crit_chance` | `playerex:ranged_crit_chance` × 1 |
+| `isekaiexpansion:range_crit_damage` | `playerex:ranged_crit_damage` × 0.5 |
+| `isekaiexpansion:magic_crit_chance` | `spell_power:critical_chance` × 100 |
+| `isekaiexpansion:magic_crit_damage` | `spell_power:critical_damage` × 100 |
+| `isekaiexpansion:elemental_power` | `spell_power:fire` × 1; `spell_power:magic_water` × 1; `spell_power:frost` × 1; `spell_power:magic_wind` × 1; `spell_power:magic_earth` × 1; `spell_power:lightning` × 1 |
+| `isekaiexpansion:dys_aether` | `isekaiexpansion:elemental_power` × 1; `spell_power:arcane` × 1; `spell_power:soul` × 1; `spell_power:magic_dark` × 1 |
+| `isekaiexpansion:aether_power` | `isekaiexpansion:dys_aether` × 1; `spell_power:healing` × 1; `spell_power:magic_light` × 1; `spell_power:magic_astral` × 1 |
+| `isekaiexpansion:constitution` | `playerex:constitution` × 1 |
+| `isekaiexpansion:strength` | `playerex:strength` × 1 |
+| `isekaiexpansion:dexterity` | `playerex:dexterity` × 1 |
+| `isekaiexpansion:evasion` | `playerex:evasion` × 1 |
+| `isekaiexpansion:intelligence` | `playerex:intelligence` × 1 |
+| `isekaiexpansion:technique` | `playerex:technique` × 1 |
+| `isekaiexpansion:perception` | `playerex:perception` × 1 |
+| `isekaiexpansion:belief` | `playerex:belief` × 1 |
+
+The JSON nesting is `values → source attribute → target attribute`; each target object contains string `behaviour` and numeric `value`. `properties.json` uses `values → attribute → display-property string`: `percentage`, `float` and `integer` are presentation declarations, not an alternative combat normalisation function. The wrapper critical/evasion percentages use `100.0`, while Spell Power critical chance uses `1.0`.
+
+### Energy and shield state
+
+Both components tick on the server and synchronise through CCA. NBT reads use the primitive zero/false fallback and do not validate every intermediate timer.
+
+| Component / key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| Energy · `energy` | int | 0 | Current reserve; server tick repairs negative or over-maximum values. |
+| Energy · `energyTickTimer` | int | 0 | Recovery pulse timer. |
+| Energy · `energyRevealed` | boolean | false | Energy-bar visibility flag. |
+| Energy · `lockEnergy` | boolean | false | Recovery pause. |
+| Energy · `lockEnergyTimer` | int | 0 | Elapsed lock ticks. |
+| Shield · `shieldGauge` | int | 0 | Current guard reserve. |
+| Shield · `gaugeTickTimer` | int | 0 | Recovery pulse timer. |
+| Shield · `coolingDown` | boolean | false | Broken-guard cooldown state. |
+| Shield · `cooldownTimer` | int | 0 | Remaining cooldown ticks. |
+| Shield · `lockGauge` | boolean | false | Post-consumption recovery pause. |
+| Shield · `lockGaugeTimer` | int | 0 | Elapsed lock ticks. |
+
+Energy recovers 1 per `(int)(20 / regen)` ticks, at most once per tick. Removal clamps current energy to 0, starts a 20-tick lock and synchronises. Direct `setEnergy` is not clamped; `addEnergy` only caps its upper result, and caller-supplied negative amounts are not rejected. The lock timer advances only while below maximum, so a lock can remain set while the reserve is full.
+
+Shield capacity is `max(0, round(baseGauge × shieldPowerMultiplier))`; recovery amount is `max(1, round(5 × shieldPowerMultiplier))`, with interval `max(1, round(20 / regen))` or 20 for nonpositive regen. A block pauses recovery for 40 ticks. A pulse may exceed maximum until the next tick. Cooldown ticks return early and do not regenerate.
+
+For blocked damage above the shield's normal limit but within its maximum, add up to the base cost proportionally, then divide by Shield Power and round with minimum 1. Damage strictly above the maximum breaks immediately; exhausted gauge also breaks. Shield statistics and fallback constants are owned by IsekaiCore, so the component does not hard-code a universal shield profile.
+
+## Contracts
+
+### Damage stages and percentages
+
+Expansion registers its damage functions in this order: class-discipline halving, class combat rules, effective elements, ineffective elements, Energy Inefficiency, starvation/drowning replacement, environmental resistance, spell talents, melee talents, ranged talents and outgoing combat attributes. This states Expansion's registration order, not a universal order relative to every other mod.
+
+Element classification first resolves a registered spell school; other damage uses the local damage-key classifier. Only mobs with nonempty Core element data are affected. Effective and ineffective matches are counted separately and both multipliers apply; the [element table](/en/wiki/elements/) records all registrations. The duplicate Water/melee registration is a set duplicate, not a Wind/melee resistance.
+
+`normalizePercent(v)` returns `v / 100` only when `abs(v) > 1`; otherwise it returns `v`. The boundary is discontinuous: 1 means a full ratio while values just above 1 are percentage points. Do not apply this helper to critical forwarding or haste merely because the UI shows a percent sign.
+
+| Consumer | Formula or contract |
+| --- | --- |
+| Ability cooldown | Nonpositive base → 0; otherwise `max(0, round(baseTicks × 100 / max(1, 100 + haste)))`. |
+| Health-weighted damage | `1 + max(0, N(enmity)) × (1 - h) + max(0, N(stamina)) × h`, with health fraction `h` clamped to 0–1. |
+| Armour penetration | Physical category only; another living attacker reduces armour input by `1 - clamp(N(penetration), 0, 1)`; toughness remains unchanged. |
+| Magic penetration | The Spell Power hook reduces only `GENERIC` resistance input by the same penetration factor. |
+| Tenacity | `T = clamp(N(tenacity), 0, 0.95)`. |
+| Harmful accuracy | `clamp(1 - T + max(0, N(accuracy)), 0.05, 1)`; `N(accuracy) >= 1` skips the roll. |
+| Control duration | `max(1, round(duration × (1 - T)))`. |
+| Environmental resistance | Damage × `1 - clamp(N(resistance), 0, 0.95)`; excludes no-cooldown sources. |
+| Positive healing | Amount × `1 + max(0, N(healAmplification))`. |
+| Shield Power | `max(0.1, 1 + max(0, N(shieldPower)))`. |
+| Aggro multiplier | `max(0, 1 + N(aggroGeneration))`. |
+| Energy Leech | Eligible player hits restore `max(1, round(maxEnergy × max(0, N(leech))))` when the ratio is positive. |
+| Omnivamp | Positive hook amount × nonnegative normalised ratio; later hits by the attacker in the same tick ×0.22. |
+| Dodge-effect counter | Living attacker within 8 blocks; damage `max(1, attackDamage × max(0, N(counter)))`, with melee/no-cooldown flags. A player attacker receives a 12-tick (0.6-second) root restricting item use, attacking, movement and jumping. |
+
+Here `N` means the normalisation above. Omnivamp is based on the event argument, not observed health loss, and calls the normal healing path. The common PlayerEx evasion callback in this mod is empty; the counter invocation documented here is in the dodge-status immunity hook. Do not promise counters for every third-party evasion result.
+
+The dodge-status hook excludes explosions, fire, falls, falling blocks/anvils/stalactites, void and armour-bypassing damage. Magic immunity accepts ordinary/indirect magic or any resolved school. `OtherImmuneEffect` compares the stored `DamageSource` object by identity, not by damage-type equality.
+
+Death prevention tries the Rakshasa path before the generic Guts/Death Defiance path. The generic path rejects void, sickness and potion sickness. Without Death Defiance it needs finite positive pre-hit health above 25% of maximum; success sets health to 1. The surrounding hook falls back to current health plus incoming damage if its captured pre-hit context is unavailable.
+
+### Status application and removal
+
+The server `addStatusEffect` wrapper first applies harmful team protection, then accuracy for a different living source, then tenacity duration adjustment. It records fear's source before calling the original application so the fear goal can resolve it during `onApplied`. A failed new fear application clears that remembered source if no fear remains.
+
+Tenacity's control set is `CC` effects plus Slowness, Weakness, Mining Fatigue, Blindness, Levitation and Nausea. Other harmful categories may roll accuracy without losing duration.
+
+`IsekaiStatusEffect` defaults to category `COMMON`; constructor clearability and `IIsekaiEffect.isPersistent()` are separate flags. Milk preserves unclearable effects through the specialised clear path. General `clearStatusEffects` preserves persistent effects. Harmful-only cleansing rejects beneficial, unclearable and persistent effects. These are not interchangeable operations.
+
+`addExtraAttributeModifier` allows another modifier for an already-used attribute. On apply it removes the template UUID then installs the adjusted modifier; on removal it removes every extra UUID before the superclass path. Use distinct stable UUIDs. Spirit Mantle overrides amount adjustment to ignore amplifier; do not infer that override for every custom effect.
+
+`applyStatusEffectTicks` rejects null inputs and nonpositive duration, and clamps negative amplifier to 0. `applyStackedEffectTicks` rejects nonpositive additions/caps, converts amplifier to stack count, clamps to the maximum and submits a new instance with amplifier `stacks - 1`. The older `applyStackedEffect` parameter is in seconds. The separate `StatusEffectUtil.addStatusEffect` directly mutates the active map and invokes lifecycle callbacks; it bypasses the ordinary application wrapper and is not a substitute for it.
+
+`removeOneClearableHarmful` selects the greatest amplifier, then duration, then translation key. `clearHarmful(cap)` currently collects a matching effect before testing its cap, so a nonpositive cap can still remove an effect. Callers needing zero removals must guard that case.
+
+### Periodic and dependency boundaries
+
+Evasion counters play `IsekaiPlayerAnimations.REACTION_EVASION_RIPOSTE` at `REACTION_PRIORITY` on the server-player defender. `KitsuneLossOfSpiritEffect` uses `ActionDisabler.restrained(2 * 20)`: item use, movement and jumping are restricted for 40 ticks (2 seconds), while the action gate leaves attacks available. It also plays `REACTION_SPIRIT_DRAIN_STAGGER` at `SKILL_PRIORITY` on the server player.
+
+`DamageOverTimeEffect` pulses only on a live server entity when remaining duration is a positive multiple of its interval. Its settlement helper applies at least 1 pulse up to the caller's maximum, attributes an optional attacker and returns the sum of requested damage for successful calls, not measured health loss. It does not remove the status instance.
+
+Spell vulnerability definitions currently call a single-school setter twice. The inspected Spell Power source retains the last call; its power multiplier is additive to 1. The [effect catalogue](/en/wiki/status-effects/) records the resulting values and the inspected dependency revision. Preserve this distinction when fixing or upgrading the integration; do not silently document the discarded first-school tuple as active.
+
+`IsekaiSpellSchools` reuses a pre-existing school with the same ID. Newly created custom school attributes have base/minimum 0 and maximum 2048; physical melee binds to `isekaiexpansion:physical_melee` while other custom schools use their Spell Power damage IDs. `IsekaiMagicAttribute` derives its UUID from mod ID, school ID and operation, so multiple values for that same school/operation are not independent modifier identities.
+
+## Extending it
+
+For an internal attribute, register its ID, attach it to the relevant entity, define its data metadata/mappings and add a concrete consumer. Keep the unit convention explicit at that consumer. For an effect, choose vanilla category, mod category, clearability and persistence independently; implement symmetric apply/remove cleanup and register the ID in the appropriate catalogue.
+
+Add an extra modifier through `addExtraAttributeModifier` when another operation already targets the same attribute. For crowd control, retain source context and use the existing goal-control lifecycle. Mutate gameplay state on the server; client shader, outline and sound presentation belongs in the corresponding client bridge.
+
+## Verifying
+
+Compare native and data-driven values, including evasion's metadata maximum, wrapper critical coefficients and exactly 1 versus values just above 1. Exercise all damage categories, positive/negative health fractions, penetration with toughness, generic versus school resistance and repeated same-tick healing.
+
+Save/reload all component timers, spend at full and empty reserves, interrupt recovery, switch shields and test damage exactly at and above the crushing limit. Check milk, general clear, harmful cleanse and natural expiry independently.
+
+Test effect replacement and removal with extra modifiers, source-less harmful effects, friendly sources, fear application failure and ordinary versus direct-map insertion. For vulnerability upgrades, test every registered school at amplifier 0 and a higher amplifier against the configured dependency. The documentation checks do not execute these gameplay scenarios.
+
+## Related
+
+- [Attributes and effects](/en/wiki/attributes-and-effects/)
+- [Status effects](/en/wiki/status-effects/)
+- [Spell integration](/en/dev/spell-integration/)
+- [Progression runtime](/en/dev/leveling/)

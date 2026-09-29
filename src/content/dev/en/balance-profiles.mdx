@@ -1,0 +1,62 @@
+---
+title: "Balance profiles"
+description: "Shared weapon, potion, equipment and effect values."
+category: systems
+order: 65
+updated: 2026-09-26
+---
+
+Internal balance profiles group related values in immutable records under `internal.balance`. Gameplay and tooltips read the same profile; durations carry their unit explicitly.
+
+## What it does
+
+| Owner | Values |
+| --- | --- |
+| `WeaponBalance` | Melee constructor damage and attack-speed offset, leech abilities, Tenju, bows and projectiles. |
+| `RavenBalance` | Raven's healing, stance, execution and Groove. |
+| `PotionBalance` | Restoration fractions, fatigue, timed buffs and substitute durations. |
+| `EquipmentBalance` | Named armour slots, Phoenix rebirth and Trinity Processor attributes. |
+| `EffectBalance` | Adapt, Aegis Ward and Spirit Mantle magnitudes. |
+
+These are internal Java authoring tables. They are compiled into the mod and have no reload listener, packet or public API facade. Both sides need the same build.
+
+## Runtime model
+
+Profiles initialise once and are read without lookup maps or per-tick allocation. `TickDuration` stores ticks; `TickDuration.seconds(int)` converts whole seconds using 20 ticks per second. `ticks()` feeds runtime timers; `seconds()` is for consumers requiring whole seconds and throws if the duration has a fractional second.
+
+`WeaponBalance.Melee.damage()` is the constructor damage bonus. `attackSpeed()` is the offset from vanilla's base attack speed, so values must be above −4. Armour records name boots, leggings, chestplate and helmet; `values()` returns a new array for the material constructor.
+
+## Contracts
+
+Record constructors reject invalid fractions, negative durations and nonfinite magnitudes where applicable. Null durations are rejected. An invalid authored static profile fails class initialisation instead of leaving a partly configured table.
+
+Raven's execution uses `nextInt(100) < chancePercent()`, so 12 means exactly 12%. Its remaining-health fraction is 0.50, stance duration is 600 ticks (30 seconds), cooldown is 1800 ticks (90 seconds), and Groove lasts 600 ticks (30 seconds) with at most 4 stacks.
+
+Spirit Mantle uses fixed magnitudes at every amplifier:
+
+| Attribute | Amount |
+| --- | --- |
+| Aether Power | +20% total |
+| Attack damage | +15% total |
+| Attack speed | +10% total |
+| Movement speed | +10% total |
+| Tenacity | +20 |
+| Energy Regen Speed | −50% total |
+
+## Extending it
+
+Add related values to the owning profile and use its accessors in both the mechanic and tooltip. New fields should say whether they are fractions, attribute points, counts or time. Keep mutable collections out of profiles; copy at the integration boundary when an API requires an array.
+
+```java
+var stance = RavenBalance.STANCE;
+player.getItemCooldownManager().set(this, stance.cooldown().ticks());
+int tooltipSeconds = stance.cooldown().seconds();
+```
+
+## Verifying
+
+Run `./gradlew.bat compileJava`. In game, check tooltip units against the applied timers.
+
+## Related
+
+See [equipment skills](/en/dev/equipment-skills/), [combat runtime](/en/dev/combat-runtime/) and [status effects](/en/wiki/status-effects/).

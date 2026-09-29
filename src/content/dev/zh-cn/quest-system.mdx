@@ -1,0 +1,235 @@
+---
+title: "任务运行时"
+description: "团队档案、目标事件、持久化、同步与内部任务扩展入口。"
+category: systems
+order: 170
+updated: 2026-09-26
+---
+
+任务运行时在服务端档案中保存权威进度，将玩法事件分发给进行中的目标，再向客户端发送筛选后的视图。本页介绍内部实现及其失败边界；数据包作者应先阅读[任务数据](/zh-cn/wiki/quest-data/)。
+
+## 它做什么
+
+实现位于 `internal.quest`；这些注册表、选择器、事件与状态类属于内部入口，并非公开的 `QuestAPI` 门面。`QuestSystemInit.initCommon()` 注册连接同步、团队成员变更监听、玩法回调和服务端逐刻处理。`QuestClientSystem.init()` 负责缓存、断开连接与 HUD 初始化。
+
+定义与进度各有自己的生命周期。`QuestLoader` 重载成功后替换整套定义索引并增加修订号；重载失败则保留原索引。进行中的进度仍保存在持久化档案中。定义消失后，其任务不再进入活动触发器索引和客户端投影，但已保存的记录不会因此删除。
+
+## 运行时模型
+
+### 档案归属与接取
+
+`QuestTeamKeyResolver` 对 IsekaiCore 团队使用 `team:<UUID>`，否则使用 `player:<UUID>`。在线成员跨维度共享对应档案。`QuestPickAuthority` 只允许无团队玩家或队长接取；成员关系变化会切换所选档案并发送完整快照，不会合并、复制或删除原档案。
+
+`MainstoryQuestPicker` 检查操作者的 IsekaiCore 主线进度、前置条件、既往结算、冷却与接取条件。`MiscQuestPicker` 随机接取时还按任务池及可选章节筛选，再按符合条件任务的正权重抽取。直接选择也会执行服务端资格检查。请求某个 ID 的数据包并不代表该任务已获准激活。
+
+玩法代码应使用带玩家上下文的选择器重载。底层 `pickForProfile` 重载可能省略条件上下文，或使用 `Long.MAX_VALUE` 作为时间，因此不等同于正常玩家请求。`unlockRepeatableForTeam` 会修改持久化状态，但不会自行发送增量。
+
+激活时记录接取者 UUID 与开始时间，随后触发 `ON_QUEST_PICKED`，最后同步对应档案条目。已注册的监听器优先使用实际活动进度，执行各目标的 `QUEST_PICKED` 内容。每个目标的异常会单独记录；外部事件监听器没有自动异常隔离。
+
+### 分发与结算
+
+`ObjectiveTracker` 按触发器建立活动团队与目标索引。这些索引不持久化，定义加载器修订号变化时重建，档案变化时刷新。已完成目标会退出进度、失败与手动内容索引。即使条件变化导致重新扫描，同一次触发也最多处理每个目标 ID 一次。
+
+| 输入 | 运行时来源与边界 |
+| --- | --- |
+| 击败实体 | Fabric 战斗回调；归属可解析为服务端玩家、其投射物、跟随中的 NPC 或该 NPC 的投射物。 |
+| 方块或实体交互 | 服务端使用回调；返回 `PASS`，观察此次使用本身不会消耗交互。 |
+| 玩家逐刻更新 | 仅在索引中有目标需要时，于服务端刻末分发。 |
+| 自动 NPC 交付 | 每名玩家每 `5` 刻检查一次，按实体 ID 错开；先检查交付谓词，再扣除物品。 |
+| 玩家受伤 | 玩家伤害调用成功返回时触发；载荷包含传入的伤害量。 |
+| 配方合成 | 配方钩子默认发送一次合成事件，不按产物数量计数。 |
+| 进度 | 成功授予判据时发送一次事件，载荷包含判据及整个进度此时是否已完成。 |
+| NPC 对话 | 匹配的绑定对话开始时触发，无需等到对话结束。 |
+| 拍照 | Exposure 桥接提供画面与摄影者元数据；曝光捕获由依赖模组负责。 |
+| 地牢完成 | 地牢会话完成时发送任务触发器。 |
+| 手动内容 | 显式调用 `triggerManualForPlayer` 或 `triggerManualForTeam`；空白 ID 被忽略，档案不存在时不会创建。 |
+
+有玩家归属的事件选择该玩家的档案。无法确定负责玩家时，可以在 `64` 格内查找附近档案，但普通目标推进仍要求上下文玩家非空。因此，无归属击杀不会自动增加附近其他团队的击败计数。
+
+失败规则先于目标进度执行，且不会继承目标的事件条件筛选。失败规则匹配时，系统移除活动任务、记录失败并发送增量，不发奖励。否则，匹配的数值增量最高饱和到 `2147483647`；布尔目标匹配后置为真。只有当前定义中的全部目标完成，任务才会结算。
+
+完成流程先移除活动进度并记录完成，再执行奖励。奖励按声明顺序执行，逐项捕获异常；前一项失败后仍会执行后续奖励。`ON_QUEST_COMPLETED` 接收执行结果，随后同步变化的任务 ID。进度、物品扣除、生成实体与奖励之间没有事务、自动重试或回滚。各项行为见[任务目标](/zh-cn/wiki/quest-objectives/)与[任务奖励](/zh-cn/wiki/quest-rewards/)。
+
+手动分发在未完成目标上执行匹配的内容；触发 ID 匹配本身不会增加目标计数。内容动作将档案变化与世界副作用分开报告。例如，生成动作可以创建实体，却不报告档案变化。
+
+### 公会悬赏流程
+
+方块实现统一放在 `net.kzeroko.isekaiexpansion.block.bounty`：包括 `BountyBoardBlock`、`BountyBoardBlockEntity`、共享的 `BountyBoardLayout`、仅客户端使用的 `BountyBoardModel`，以及 `GuildReceptionistAnchorBlock`、`GuildReceptionistAnchorBlockEntity` 和仅客户端使用的 `GuildReceptionistAnchorBlockEntityRenderer`。注册仍由 `BountySystem` 负责。任务权限、次数限制、相连告示板查询和账册归还处理保留在 `internal.quest.bounty`；方块生命周期通过 `BountyAPI.restoreReturnedNotices(board)` 委托内部 `BountyBoardReturns` 执行归还。本次包整理不改变注册 ID 或存档字段。
+
+`QuestTier.BOUNTY` 共用目标追踪器、团队档案、条件与奖励执行器。`BountySystem` 注册告示板、委托书、规则加载器、接待员标记与过期扫描，移动背包物品不会授予权限。`BountyLedger` 在 `isekaiexpansion_bounties.dat` 中保存按 UUID 索引的 `BountyNotice` 预留、有效 `BountyContract`、归还队列，以及分别记录玩家和队伍的取阅、签约次数。
+
+`RequestPickBountyPacket` 携带方块坐标与所见告示 UUID。`BountyService.takeNotice` 复核已加载告示板、保护权限、`2` 格正面射线、当前排布和精确告示身份。移除纸张前检查重复预留、在办任务、配置冷却和任务要求。取阅只移除一份告示，建立独立预留并插入新物品，不替换已有告示；默认预留期限为 `12000` 刻。签约另行检查阶级、副手自有铭牌、队长权限、次数与原生资格，再移除对应预留，以新的契约 UUID 激活原生任务。契约固定签约人、原队伍、任务、任务池、开始刻、期限、轮次与声望奖励。
+
+普通及手动进度事件均检查 `(team, quest)` 契约索引，目标完成后仍保持活动，直到接待员办理汇报。每 `20` 刻的扫描也会处理离线契约过期。服务端启动与成功重载时清理失去契约的悬赏进度，不构造替代权限。删除任务、任务池、悬赏元数据或改变任务所属池，都会关闭受影响的契约。
+
+汇报先校验接待会话、签约人、签发池与原队伍。`BountyDeliveryObjectiveLogic` 仅能在服务建立的 `ThreadLocal` 提交作用域中扣物，并在 `finally` 中清理；单独手动触发不会交付。条件上下文使用 `INTERACT_ENTITY`，目标实体为接待员。分批交付会保留进度。结算先移除权限并记录完成，再发放 Core 声望与原生奖励，沿用奖励执行器的部分失败语义，不对不同存档文件增加崩溃事务。
+
+补发、归还待签告示和撤回已签契约均按服务端委托簿 UUID 定位，不依赖手持物品。归还待签告示先移除预留权限与匹配的随身副本，再加入归还队列。原告示板可将其放回自身或相连板的空位，并生成新的告示 UUID，不覆盖其他纸张。满榜或区块未加载时等待，公会日结束后丢弃队列中的旧告示。告示板身份、源坐标、维度与任务池校验可防止重新放置的告示板接收旧归还。待签预留过期也走同一流程。撤回已签契约仅结案，不重新张贴，也不退次数或已交物资。汇报要求原队伍与签发池，但不要求纸质副本。
+
+每块告示板每 `20` 刻检查主世界累计时钟。保存的 `nextRestock` 使用任务池范围内的随机间隔；普通补榜填补至多 `2` 个空位，满榜时更换 `1` 份告示。每个 `24000` 刻公会日清空全部槽位并重选排布。按权重抽取时优先选择相连墙面未张贴的任务，再退回仅要求本板未张贴的候选。重载只校验当前告示，不强制重抽。替换告示板与换日均不更改玩家簿中已有的预留。
+
+告示板存档字段为 `Pool`（标识符）、`Board`（UUID）、`GuildDay` 与 `NextRestock`（长整数）、`Variant`（字节）、`Position`（打包方块坐标）、`Dimension`（标识符）及 `Offers`（包含 `Slot`、`Posting` UUID 和 `Quest` 的复合列表）。仅 `Pool` 用于配置。源坐标或维度变化会重新生成告示板身份。委托簿的 `notices` 与 `returns` 保存 `id`、`reader`、`team`、`quest`、`pool`、`expires_at`、`dimension`、`source`、`board`、`slot` 与 `guild_day`；`contracts` 保存已签记录，`quotas` / `take_quotas` 按键保存 `day`、`count` 和 `last`。归还队列按告示板 UUID 索引，换日时清理。这些原型存档结构不提供旧版迁移。
+
+### 接待员 API 与对话
+
+`api.bounty.BountyAPI` 将 NPC 操作委托给 `BountyReception`。公共初始化时登记实体类型解析器，返回服务的任务池或 `null`。`greet(player, npc)` 启动绑定父对话，`open(player, npc)` 在该对话内打开委托簿。`connectedBoards(world, origin)` 委托给 `BountyBoardCluster`，返回按坐标排序的不可变列表，最多包含 `64` 块已加载、边缘相接、同平面、同朝向且同池的告示板。所有调用均在服务端线程执行；连接发现不强制加载区块，也不缓存世界引用。
+
+```java
+BountyAPI.registerReceptionist(MY_RECEPTIONIST_TYPE, npc -> npc.guildPool());
+BountyAPI.greet(player, receptionist);
+```
+
+Blabber 动作 `isekaiexpansion:open_guild_bounties` 为当前已登记的说话者打开委托簿。回调保留原会话 UUID、NPC UUID、任务池和定义修订号，并重新检查双方存活、同维度、视线、`4` 格距离、NPC 对话资格及非战斗状态。重载条款或切换说话者后，旧回调失效。
+
+`BountyDialogue` 使用 Blabber 的 `DialoguePanel` 与服务端持有的 `DialogueScreenObject` 选项。目录可搜索，并按待签、在办、待领酬和队伍记录筛选；查看、确认和结果分成独立步骤。内部 `BountyDialogueSummary` 将目录预览限制为汇总完成数与期限，将对白限制为一条按状态选择的简短办理提示，不把描述、目标名称或奖励清单序列化进对话。记录选项紧接提示显示，不再追加提示页；完整详情保留在任务簿与羊皮纸中。
+
+确认时重新解析记录并点明委托名称，区分归还待签告示与撤回已签契约。仅在签发公会且仍属原队伍时提供汇报选项，确认后仍进行服务端检查。预览只统计已完成目标，不创建进度条目。NPC 文案位于 `language_assemble/categories/dialogues`，继续复用 Blabber 的 ModernUI 目录过渡、控件与手柄支持。屏幕负载不提供公会权限或奖励金额。
+
+`GuildReceptionistEntity` 使用共用的默认人形外观、渲染器和驻留模式。`GuildReceptionistAnchorBlockEntity` 保存已部署实体的 UUID，不会因实体卸载而补生。岗位标记复制到不同位置或维度时清除部署身份。绑定实体被销毁后清除关联；启用岗位每 `40` 刻检查一次。标记编辑器复用开发者检查器及主题偏好。配置包要求创造模式、权限等级 `2`、`8` 格内已加载且允许修改的位置、有效任务池与有限朝向值。命令与编辑器设置见[悬赏数据](/zh-cn/wiki/bounty-data/)。
+
+验证遗失流程时，删除纸质委托书，再打开委托簿分别检查补发、汇报和撤回。还应检查换队、满背包、`/reload` 后的旧确认、重复汇报回答、分批物资、服务器重启、岗位区块卸载重载及复制公会结构。持久化、次数与提交作用域的自动检查由 `tools/bounty/verify.gradle` 执行。
+
+`BountyHudOverlay` 将不可变的本地化展示数据通过合并消息队列交给 ModernUI。`BountyAssets` 管理图集区域，`BountyTypeface` 将 MedievalSharp 与 LongCang 放在字体回退链前。仅此物品使用的提示组件与原版绘制钩子共用该浮层。正文溢出时每 `10` 秒翻页，四张纸共用有边界的排版区域。接取后可使用普通任务追踪 HUD；在空中使用有效委托书可切换追踪。
+
+编写格式见[悬赏数据](/zh-cn/wiki/bounty-data/)，玩家流程见[公会悬赏](/zh-cn/wiki/bounty-quests/)。
+
+告示纸使用 `textures/gui/screen/bounty/board_contents.png`，这张 `256 × 256` 图集由 `assets/minecraft/atlases/blocks.json` 纳入方块图集。`BountyBoardLayout.Paper` 定义五个紧贴纸张的裁切区，共用的预计算几何提供 `32` 种排布，打乱纸型、位置与轻微倾角；命中的反向旋转采用同一排布。服务器每块告示板仅存一个排布字节，整榜换日时重新选择。
+
+`BountyBoardModel` 包装烘焙方块模型，按朝向、排布与槽位缓存 cutout 网格。纸张禁用环境遮蔽与漫反射，保留世界光照。`BountyBoardBlockEntity.getRenderData()` 将六个占用位与排布打包为不可变整数，变化时请求重建区块。告示不使用物品模型，也没有逐帧告示板渲染器；已接取和已完成的委托书保留背包模型。
+
+世界预览通过 `HudAPI.suppress` 续期 `350` 毫秒的隐藏请求，复用方式见 [HUD 显隐](/zh-cn/dev/hud-visibility/)。标题按字体实际高度缩放并放入下移后的标题区，与副标题和分隔线留出间距；在告示之间切换时不会重新播放纸张入场动画。
+
+### 持久化存储
+
+`ServerQuestState` 通过弱键映射按服务端缓存，并使用主世界持久化状态管理器。分片选择公式为 `Math.floorMod(teamKey.hashCode(), shardCount)`。当前分片数为 `64`，文件位于 `data/isekaiexpansion/quest/shards/`，从 `state_00_v2.dat` 到 `state_3f_v2.dat`；元数据与世界标记位于同一模组目录下的 `quest/meta_v2.dat` 和 `quest/world_flags_v2.dat`。
+
+下表描述存档 NBT，并非数据包格式。空复合标签列表读为空集合。档案内无效的标识符或枚举名称可能抛出异常；分片加载并不会逐个捕获并跳过所有损坏的档案。
+
+| 记录 / 字段 | NBT 类型 | 缺失或无效输入；写入行为 |
+| --- | --- | --- |
+| 元数据 `version` | `int` | 缺失读为 `0`；不支持的版本发出警告；当前值设为 `2`。 |
+| 元数据 `shard_count` | `int` | 缺失或非正数使用 `64`；状态初始化也会将其他数量重置为 `64`，不会执行重新分片迁移。 |
+| 元数据 `storage_format` | `string` | 写入 `sharded_v2`；读取器不使用此标记。 |
+| 分片 `version` | `int` | 接受缺失、`0` 或 `2`；其他版本发出警告并返回空分片。 |
+| 分片 `shard_index` | `int` | 保存的索引不符时发出警告；仍以请求的文件索引为准。 |
+| 分片 `profiles` | `compound` | 团队键到档案复合标签的映射；容器缺失或类型错误时为空，跳过空白键与非复合标签条目。 |
+| 档案 `active_quests` | `list<compound>` | 使用下述活动记录；重复任务 ID 以后面的条目覆盖前面的条目。 |
+| 档案 `completed_quests`、`failed_quests` | `list<compound>` | 使用下述结算记录；跳过缺少 `quest_id` 的条目。 |
+| 档案 `unlocked_repeatables` | `list<compound>` | 每项包含 `quest_id`；跳过缺少 ID 的条目，标识符以集合保存。 |
+| 活动记录 `quest_id` | `string` | 需要有效标识符；无效输入可能抛出异常。 |
+| 活动记录 `tier` | `string` | 精确枚举名 `MAINSTORY`、`IMPORTANT_MAINSTORY`、`MISC` 或 `BOUNTY`；无效输入抛出异常。 |
+| 活动记录 `started_at` | `long` | 游戏时间，单位为刻；缺失读为 `0`。 |
+| 活动记录 `cycle` | `int` | 下限钳制为 `1`。 |
+| 活动记录 `picker_player_uuid` | UUID 整数数组 | 仅在有接取者时写入；缺失或无法识别的 UUID 表示没有接取者。 |
+| 活动记录 `objective_progress` | `list<compound>` | 每项包含 `id`、`numeric`、`flag`；跳过空白 ID，重复 ID 会覆盖。 |
+| 目标 `id` | `string` | 目标局部 ID，并非带命名空间的任务 ID。 |
+| 目标 `numeric` | `int` | 缺失为 `0`；负数钳制为 `0`。 |
+| 目标 `flag` | `byte` 布尔值 | 缺失为假。 |
+| 活动记录 `condition_sequences` | `list<compound>` | 每项包含 `id` 和 `value`；跳过空白 ID。 |
+| 序列 `id` | `string` | 当前活动任务内的序列状态键。 |
+| 序列 `value` | `int` | 缺失或负数变为 `0`；只写入正值。 |
+| 结算记录 `quest_id` | `string` | 标识已完成或已失败的任务。 |
+| 完成记录 `completion_count` | `int` | 缺失或负数变为 `0`。 |
+| 完成记录 `first_completed_at`、`last_completed_at` | `long` | 游戏刻；已保存记录缺少字段时读为 `0`，查询不存在的记录则返回 `-1`。 |
+| 失败记录 `failure_count` | `int` | 缺失或负数变为 `0`。 |
+| 失败记录 `first_failed_at`、`last_failed_at` | `long` | 已保存记录与不存在记录的区别同完成记录。 |
+| 世界标记 `flags` | `compound` | 非空白标记名映射到布尔值；容器缺失时为空，未设置的标记为假。假值仍会保存。 |
+
+元数据修复不会迁移旧文件名，也不会重新分配档案。世界标记使用带版本的文件名，但载荷没有 `version` 字段。客户端档案包装层添加 `team_key` 和 `profile`；空白团队键读为 `client:unknown`，缺少档案复合标签时，则将包装层本身按旧版平铺档案读取。
+
+状态 getter 可能返回可变的实际对象。应通过 `updateProfile`、`updateProfileIfChanged` 或 `updateExistingProfileIfChanged` 修改，确保刷新索引并标记分片需要保存。条件版本依赖回调返回真；仅更新现有档案的版本不会创建档案。快照方法会深拷贝档案。`consumeDirtyTeams()` 只清除变更记录，不会发送网络同步。
+
+### 数据包与客户端状态
+
+以下通道均使用 `isekaiexpansion:` 命名空间。IsekaiCore 的 C2S 包装层解码后通过 `server.executeSync` 调度处理器；任务 S2C 处理器通过 `client.execute` 应用状态。
+
+| 通道后缀 | 方向 | 载荷与效果 |
+| --- | --- | --- |
+| `open_quest_pick_screen` | C2S | 无载荷；打开关联容器界面。打开时不发送新的定义快照。 |
+| `request_pick_mainstory_quest` | C2S | 任务标识符；由权威主线选择器检查。 |
+| `request_pick_misc_quest` | C2S | 任务标识符；由权威杂项任务选择器检查。 |
+| `request_pick_random_misc_quest` | C2S | 任务池枚举、是否包含章节的布尔值与可选章节标识符；交给权重选择器。 |
+| `sync_quest_full` | S2C | 包含 `definitions` 与 `profile` 的压缩 NBT；替换客户端定义和档案。 |
+| `sync_quest_delta` | S2C | 包含 `entries` 列表的压缩 NBT；更新单个任务记录。空增量不发送。 |
+
+完整同步只包含标记为客户端可见的定义，并将档案筛选为这些 ID。连接和成员关系变化时会发送；调试重置全部任务时，也会向受影响的在线玩家发送。定义加载器本身不广播完整同步。编辑定义后，应重新连接，或在服务端工具中显式调用 `QuestSyncService.sendFullSync`，再检查客户端视图。
+
+定义投影包含 ID、章节、层级、可重复性、任务池、前置条件、接取条件、冷却、目标与奖励，不包含主线选择范围或随机选择权重。目标 `clientData` 是展示用投影，有目标条件时会追加条件，并非可执行内容和失败配置的副本。
+
+进度增量包含 `quest_id`、`has_active`、可选的 `active_progress`、完成与失败次数、重复接取解锁状态，以及首次和最后结算时间；不含定义修订号或团队键。`ClientQuestManager` 将其应用到档案副本，保留原定义。计数增加时先发送结算事件，再协调追踪状态；完整快照不会重播历史结算通知。
+
+### 界面、追踪与反馈
+
+任务键默认为 **J**。界面提供章节和类别列表、概览、要求与奖励页，以及状态、排序和高级筛选。高级筛选默认关闭，任务池筛选默认未设置。接取需要确认；随机接取使用当前章节及所选任务池，未选择时使用 `DEFAULT`。
+
+客户端要求预览使用当前客户端世界可见的玩家，服务端团队条件则使用跨维度的在线成员。客户端无法识别的条件类型不能作为符合资格的权威依据。服务端会重新检查请求，且客户端定义投影不含主线范围。
+
+追踪对象是客户端可见的活动任务。通过普通任务界面接取后，同步进度确认任务已激活时，界面仅在尚未追踪其他任务的情况下自动追踪。公会签约不写入此钉选项。`ClientTrackedQuestState` 对照定义与活动进度协调固定项，并移除无效固定项。
+
+「公会委托」类别沿用原有列表、目标面板及概览、要求、奖励页，仅收录随身文书与当前队伍的原生契约，不列出完整委托目录。同一任务只占一行，当前契约优先于旧副本。此界面不能签约或结算；遗失契书的有效任务仍可查看与钉选，结案收据不能接取或钉选。普通任务的章节与分类路径保持原状。
+
+内部实现 `ClientBountyJournal` 每五个客户端刻、或任务修订号变化时，在 Minecraft 线程采样文书身份字段，不解码内嵌定义与进度。`BountyJournalModel` 按队伍、签约者、任务、开始时间、轮次、状态与期限核对同步档案。不可变条目保留绝对到期刻及整分钟分档，普通任务簿无需每秒刷新。断线清空快照；ModernUI 读取不可变展示数据，被动刷新不重播入场动画。
+
+追踪窗口的手动钉选与最多两份自动随身契约都使用 `TrackedQuestHudPanel`。全部目标沿用同样的原生进度格式，不另设简略渲染器。期限行每秒更新，显示分秒，最后 `60` 秒使用警示色。完成后追加返回公会提示，多余条目提示任务簿。自动面板排除手动钉选，背包变化不写入钉选缓存。移走文书会淡出自动面板，有效契约仍留在簿中。整个窗口保留 `HudAPI` 淡出控制与手动钉选结算动画。
+
+任务卡片从固定的随从组下方向下排列，遇到可见聊天内容前移到随从右侧继续排。移动后的 Chat Plus 窗口也参与范围检查。卡片逐张测量，空间不足时改为任务簿提示。绘制作用域与验证步骤见 [HUD 显隐与布局](/zh-cn/dev/hud-visibility/)。
+
+`ClientQuestCache` 在游戏目录下的 `isekaiexpansion-quests.txt` 中保存 `format 1` 与固定任务。此文件跨世界和服务器共用，不属于世界存档。格式无效时重置文件；固定任务标识符无效时移除该项。写入先使用同目录临时文件，支持时进行原子替换，否则退回普通替换，并记录 I/O 错误。
+
+打开界面、关闭 HUD 或不存在世界/玩家时，追踪 HUD 隐藏。正在显示的追踪任务完成或失败后，其结算展示保留 `2.6` 秒。独立的结算通知会播放相应声音，并将 ModernUI 展示加入队列。NPC 标记表示尚未完成的活动对话或交付目标，并非可接取新任务目录；只有距相机 `48` 格以内且满足正常 HUD 可见性检查时才渲染。
+
+## 约定
+
+权威状态修改应在服务端线程执行。弱映射、并发解析器注册表和复制的数据包载荷，并不代表可变任务档案可以在任意工作线程安全使用。`ObjectiveTriggerContext` 在构造和访问时复制 NBT；不要依赖调用方随后修改原复合标签。
+
+`ServerQuestEvents.ON_QUEST_PICKED` 与 `ON_QUEST_COMPLETED` 是通知，并非可取消的准入检查。上下文携带服务端、世界、操作者、团队键、定义和状态；接取上下文还含活动进度副本与接取位置，完成上下文则含完成时间与奖励结果。监听器依序执行，没有通用异常屏障，因此某个监听器抛出异常可能中断后续监听器或之后的同步。
+
+客户端通知为 `ON_FULL_SYNC`、`ON_PROGRESS_UPDATE` 与 `ON_QUEST_RESOLUTION`。玩法决策应留在服务端。ModernUI 浮层将展示工作转交 UI 线程，不直接在数据包回调中修改视图。
+
+## 扩展方式
+
+在相关定义加载前，于通用初始化阶段注册带命名空间的解析器。`ObjectiveLogicRegistry`、`QuestConditionRegistry`、`ObjectiveConditionRegistry`、`ObjectiveContentActionRegistry`、`ObjectiveFailureRegistry` 和 `QuestRewardRegistry` 会拒绝重复 ID 与未知类型，也不接受空注册参数。这些是内部扩展入口，并非稳定的外部 API。
+
+扩展目标时，需要定义触发器类型、匹配与数值增量行为、客户端投影，以及所需的内容或失败钩子。注册解析器不会自动创建玩法事件源：还需将相应服务端钩子接入 `ObjectiveTracker.trigger`。明确实体归属、事件位置和载荷。扩展奖励时，应如实报告结果并考虑部分应用；抛出异常无法撤销已经记录的任务完成。
+
+项目代码可以直接分发手动内容 ID，无需伪造玩法触发器：
+
+```java
+ObjectiveTracker.triggerManualForPlayer(player, "gate_opened");
+```
+
+对应数据应写入目标的手动内容触发器。此调用不会创建任务、修改数值计数，也不保证仅发生世界副作用时会发送客户端增量。
+
+### 调试命令
+
+这些命令要求执行者为玩家，且权限等级为 `2`。根命令为 `/isekaiexpansion`，别名为 `/ise`。将 `<questId>` 替换为已加载的任务标识符。
+
+| `/ise dev quest` 后的命令后缀 | 行为 |
+| --- | --- |
+| `pick <questId>` | 要求接取权限、开始资格与冷却通过；绕过正常的主线范围和接取条件选择。 |
+| `pick force <questId>` | 仍要求接取权限；激活前移除活动进度，并清除完成、失败与重复接取解锁状态。 |
+| `picklook <questId>` | 调试检查同 `pick`；以最远 `64` 格的方块射线结果作为内容锚点，未命中时使用玩家位置。 |
+| `picklook force <questId>` | 强制重置并激活，使用视线锚点。 |
+| `reset <questId>` | 清除当前档案中该已加载任务的活动、完成、失败与重复接取解锁条目，并发送其增量。 |
+| `resetAll` | 移除当前非空档案，并向对应在线玩家发送完整快照。 |
+| `screen` | 打开任务选择器，不刷新定义。 |
+
+调试重置不会收回已发放奖励，也不会删除已生成实体。调试接取不能代替普通选择器资格测试。
+
+## 验证
+
+- 连接无团队玩家及队长、成员组合；尝试直接和随机接取，再加入/离开团队，确认档案保持独立且没有合并。
+- 分别重载有效和无效定义集；检查保留的进度、重建的触发器索引，以及完整同步前后的客户端状态。
+- 覆盖全部目标钩子，包括无归属击杀、NPC 与投射物归属、跨维度成员、手动内容及已完成目标。
+- 在同一事件中同时满足失败规则与最终目标，确认失败优先。令一项奖励失败，检查完成记录与后续奖励结果。
+- 保存并重启，检查活动、完成、失败记录、序列状态与世界标记。在隔离测试存档中往返读写缺失或损坏的 NBT，包括不支持的分片版本。
+- 追踪任务，断开连接、重新连接并结算；检查固定项协调、完整同步不重播历史通知，以及 UI 线程分发。
+- 对比普通接取与调试接取，避免被绕过的条件让玩法测试误判为通过。
+
+## 相关页面
+
+- [任务数据](/zh-cn/wiki/quest-data/)——定义布局与选择规则。
+- [任务目标](/zh-cn/wiki/quest-objectives/)——谓词、内容动作与失败规则。
+- [任务奖励](/zh-cn/wiki/quest-rewards/)——发放与接收者约定。
+- [持久化状态存储](/zh-cn/dev/persistent-state/)——共享存储辅助类与版本化路径。
+- [NPC 对话](/zh-cn/dev/npc-dialogue/)——对话与交付集成。

@@ -1,0 +1,147 @@
+---
+title: "状态效果"
+description: "完整注册效果目录、清除规则、持续伤害和法术易伤的实际行为。"
+category: combat
+order: 15
+updated: 2026-09-26
+---
+
+状态效果可以修改属性、限制动作、保存战斗层数，或执行自身更新。清除规则与增益同样重要：牛奶、有害效果净化和自然到期并不采用同一种约定。
+
+## 如何阅读目录
+
+表格按等级 I 列出注册效果，对应放大器 0。“基础乘算”和“总量乘算”区分比例属性修饰符的运算方式；无百分号的数值为加法。灵力缠身明确让所有放大器使用相同修饰符。效果持续时间通常由施加它的武器、药水、能力或命令决定。
+
+“可用牛奶清除”描述本模组的牛奶钩子。标为“否”的效果仍可能自然结束，或被所属玩法系统移除。星脉枯竭还带有持久标记，因此能保留在通用全部清除路径中。有害效果净化会排除有益、不可清除及持久效果。
+
+## 已注册效果
+
+### 战斗与武器效果
+
+| 效果与 ID | 可用牛奶清除 | 等级 I 的修饰符与行为 |
+| --- | --- | --- |
+| 灵力缠身 · `isekaiexpansion:spirit_mantle` | 是 | 以太能量 +20% 总量乘算; 攻击伤害 +15% 总量乘算; 攻击速度 +10% 总量乘算; 移动速度 +10% 总量乘算; 韧性 +20; 星能回复速率 -50% 总量乘算. 固定强度姿态：修饰符不随放大器缩放。 |
+| 天咒 · `isekaiexpansion:tenju` | 否 | 攻击速度 +0.05; 攻击伤害 +0.5; 击退抗性 +0.25; 护甲韧性 +0.5; 护甲 +1. 服务端玩家双手均未持折纸武器时移除。 |
+| 潘朵拉之视 · `isekaiexpansion:pandoras_vision` | 是 | 移动速度 +0.03. 成对潘朵拉武器根据此状态选择命中分支。 |
+| 潘朵拉之舞 · `isekaiexpansion:pandoras_dance` | 是 | 攻击速度 +0.15. 与潘朵拉之视同时存在时改变双武器的命中分支。 |
+| 力量增强 · `isekaiexpansion:enhanced_strength` | 是 | 攻击伤害 +150% 总量乘算; 攻击击退 +2.2 |
+| 恶魔加护 · `isekaiexpansion:demonic_power` | 是 | 移动速度 +0.05; 攻击伤害 +5 |
+| 重生之火 · `isekaiexpansion:fire_of_rebirth` | 否 | 每次恢复已损生命的五分之一；间隔由 50 ticks 按放大器右移计算。 |
+| 失衡 · `isekaiexpansion:stagger` | 是 | 状态钩子阻止挥手。 |
+| 无暇回归 · `isekaiexpansion:ego_return` | 否 | 武器特殊箭矢授予的层数标记；效果本身没有周期更新逻辑。 |
+| 渐入佳境 · `isekaiexpansion:groove` | 否 | 攻击速度 +0.1. 服务端玩家双手均未持渡鸦时移除。 |
+| 适应 · `isekaiexpansion:adapt` | 否 | 施加时，服务端玩家获得相当于当前护甲 25% 的额外护甲；保持效果需任一手持渡鸦。 |
+| 一刀修罗 · `isekaiexpansion:ittou_shura` | 否 | 移动速度 +100% 基础乘算; 攻击伤害 +150% 基础乘算; 攻击速度 +30% 基础乘算. 免疫摔落；需主手持阴铁。移除后施加星脉枯竭，持续 24000 ticks（1200 秒），放大器为 2。 |
+| 未来视 · `isekaiexpansion:foresight` | 否 | 闪避效果；需任一手持符合条件的常驻魔剑。攻击或一次伤害调用返回后移除；非创造玩家移除时后撤。 |
+| 挑衅 · `isekaiexpansion:provoke` | 否 | 周期性吸引符合条件的生物攻击受影响玩家，创造与旁观玩家除外；仇恨倍率缩放搜索范围。 |
+| 遁影 · `isekaiexpansion:shadow_phase` | 否 | 强制隐身并阻止被动侦测；敌对生物进入向外扩展 2 格的搜索箱时解除。 |
+| 魅惑 · `isekaiexpansion:charm` | 是 | 为生物安装魅惑选敌和移动控制，初始选择 16 格内最近玩家。 |
+| 恐惧 · `isekaiexpansion:fear` | 是 | 移动速度 -20% 总量乘算. 安装逃离控制并记录施加者；更高等级使用更强恐惧参数。 |
+| 伤害追击 · `isekaiexpansion:bonus_damage` | 是 | 服务端玩家攻击产生放大器 + 1 次追加结算，每次为钩子伤害量的 10% ×（1 + 伤害追加等级）。 |
+| 心眼 · `isekaiexpansion:minds_eye` | 是 | 近战暴击率 +0.05 |
+| 破势 · `isekaiexpansion:shatter_strike` | 是 | 近战暴击伤害 +0.1 |
+| 看破 · `isekaiexpansion:lock_on_weakness` | 是 | 远程暴击率 +0.05 |
+| 贯通 · `isekaiexpansion:fatal_pierce` | 是 | 远程暴击伤害 +0.1 |
+| 聚星 · `isekaiexpansion:astral_concentration` | 是 | 魔法暴击率 +0.05 |
+| 星灭 · `isekaiexpansion:astral_annihilation` | 是 | 魔法暴击伤害 +0.1 |
+| 魔域 · `isekaiexpansion:magic_field` | 是 | 星能回复速率 +0.2; 最大星界能量 +20 |
+| 沉默 · `isekaiexpansion:silence` | 否 | 应用已注册的沉默动作限制。 |
+| 破甲 · `isekaiexpansion:armor_break` | 是 | 护甲 -10% 总量乘算 |
+| 呼吸反转 · `isekaiexpansion:inversed_breathing` | 是 | 允许水下呼吸；陆地上消耗玩家空气，耗尽时造成按比例计算的伤害。 |
+| 灼烧 · `isekaiexpansion:burning` | 是 | 周期火焰伤害；详见持续伤害表。 |
+| 流血 · `isekaiexpansion:bleeding` | 是 | 周期通常伤害；详见持续伤害表。 |
+| 中毒 · `isekaiexpansion:poisoned` | 是 | 周期魔法伤害；详见持续伤害表。 |
+| 已探知 · `isekaiexpansion:searched` | 是 | 为探查魔法展示标记实体，并同步其立场分类。 |
+| 不屈根性 · `isekaiexpansion:death_defiance` | 是 | 强制通过受支持的致命伤生存检查，保留 1 点生命；虚空及疾病可绕过。 |
+
+### 炼金效果
+
+| 效果与 ID | 可用牛奶清除 | 等级 I 的修饰符与行为 |
+| --- | --- | --- |
+| 生命药水疲劳 · `isekaiexpansion:health_potion_fatigue` | 否 | 达到 5 层时阻止开始饮用同类生命药水；持续 1500 ticks（75 秒）。 |
+| 星能药水疲劳 · `isekaiexpansion:energy_potion_fatigue` | 否 | 达到 5 层时阻止开始饮用同类星能药水；持续 1200 ticks（60 秒）。 |
+| 幻影之纱 · `isekaiexpansion:phantom_veil` | 是 | 隐蔽效能 +60; 闪避率 +0.15; 移动速度 +10% 总量乘算. 阻止被动侦测；敌对生物进入向外扩展 3 格的搜索箱时解除。渲染透明度为 0.30。 |
+| 圣盾护佑 · `isekaiexpansion:aegis_ward` | 是 | 护甲 +8; 护甲韧性 +4; 击退抗性 +0.35; 韧性 +25; 护盾强效 +20; 通用魔法抗性 +30; 护甲 +20% 总量乘算; 护甲韧性 +15% 总量乘算; 通用魔法抗性 +20% 总量乘算 |
+| 战斗狂热 · `isekaiexpansion:battle_frenzy` | 是 | 攻击伤害 +25% 总量乘算; 攻击速度 +20% 总量乘算; 背水 +30; 护甲 -20% 总量乘算 |
+| 疾风之足 · `isekaiexpansion:fleetfoot` | 是 | 移动速度 +28% 总量乘算; 闪避率 +0.1; 技能急速 +20; 浑身 +15 |
+| 奥术回涌 · `isekaiexpansion:arcane_replenish` | 是 | 星能回复速率 +0.6 |
+
+### 起源效果
+
+| 效果与 ID | 可用牛奶清除 | 等级 I 的修饰符与行为 |
+| --- | --- | --- |
+| 绝境求生 · `isekaiexpansion:human_brink_of_survival` | 是 | 韧性 +45; 背水 +10; 护盾强效 +10; 移动速度 +25% 总量乘算 |
+| 英雄轨迹 · `isekaiexpansion:human_heroic_trail` | 是 | 奥义伤害 +15 |
+| 能量过载 · `isekaiexpansion:energy_overload` | 否 | 服务端玩家获得浊以太 +10，效果移除时撤销；放大器不改变此增益。 |
+| 上位魔血 · `isekaiexpansion:demon_ancient_blood_regen` | 否 | 服务端玩家获得星能回复速率 +1.5 + 0.5 × 放大器，效果移除时撤销。 |
+| 岩石架势 · `isekaiexpansion:dwarf_stone_form` | 否 | 移动速度 -55% 总量乘算; 击退抗性 +1. 还会阻止开始疾跑。 |
+| 酣战沸血 · `isekaiexpansion:dwarf_drunken_battle_blood` | 是 | 韧性 +45 |
+| 磐石之怒 · `isekaiexpansion:dwarf_stone_rage` | 是 | 攻击伤害 +3% 总量乘算; 土属性法强 +4% 总量乘算 |
+| 精灵风引 · `isekaiexpansion:elf_wind_guidance` | 否 | 移动速度 +60% 基础乘算 |
+| 灵魂迟滞 · `isekaiexpansion:kitsune_soul_snare` | 是 | 移动速度 -35% 总量乘算. 符合条件的移除会施加失神，持续 40 ticks（2 秒），增加至少放大器 + 1 层，上限 5 层。 |
+| 失神 · `isekaiexpansion:kitsune_loss_of_spirit` | 是 | 移动速度 -100% 总量乘算. 注册高级沉默。玩家会踉跄，并在 40 ticks（2 秒）内无法使用物品、移动或跳跃；该动作限制本身仍允许攻击。 |
+| 残像余波 · `isekaiexpansion:kitsune_afterimage_wound` | 是 | 有害攻击类别标记；此定义未附加属性修饰符或周期更新。 |
+| 空蝉灵步 · `isekaiexpansion:kitsune_spiritual_step_haste` | 是 | 施法急速 +0.2 |
+| 彼岸杀意 · `isekaiexpansion:kitsune_soul_burn` | 是 | 魔法贯通 +0.03; 法术暴击伤害 +0.06 |
+| 遁影 · `isekaiexpansion:feline_umbral_stealth` | 是 | 隐蔽效能 +80; 移动速度 +30% 总量乘算. 渲染透明度为 0.35；效果本身不强制隐身，也不完全阻止侦测。 |
+| 影刃 · `isekaiexpansion:feline_shadow_contract` | 是 | 全能吸血 +2 |
+| 罗刹 · `isekaiexpansion:oni_rakshasa_form` | 是 | 攻击速度 +20% 总量乘算 |
+| 渴血战狂 · `isekaiexpansion:oni_bloodthirst_war_madness` | 是 | 罗刹战斗使用的层数资源；起源处理器限制为 8 层，并沿用形态的剩余时间。 |
+| 鬼神体魄 · `isekaiexpansion:oni_kishin_physique` | 是 | 近战暴击伤害 +0.15; 全能吸血 +20 |
+| 潮汐复苏 · `isekaiexpansion:mermaid_tidal_rejuvenation` | 是 | 生命增幅 +100. 另每 40 ticks（2 秒）恢复 max(0.1, 最大生命的 1.5%)，随后受生命增幅影响。 |
+| 退潮庇护 · `isekaiexpansion:mermaid_tidal_escape` | 是 | 韧性 +25; 移动速度 +20% 总量乘算 |
+| 高压酸液 · `isekaiexpansion:slime_acid_pressure` | 是 | 护甲贯通 +50; 异常命中率 +200; 伤害追加等级 +2 |
+| 史莱姆强酸 · `isekaiexpansion:slime_strong_acid` | 否 | 每 20 ticks（1 秒）造成 2 + 1.2 × 放大器的处决伤害，并使每件可损耗的已装备物品失去 2 + 放大器耐久。 |
+| 天羽 · `isekaiexpansion:wingedspirit_celestial_feather` | 是 | 闪避率 +0.25; 技能急速 +65. 另免疫摔落伤害。 |
+
+### 家园效果
+
+| 效果与 ID | 可用牛奶清除 | 等级 I 的修饰符与行为 |
+| --- | --- | --- |
+| 安歇 · `isekaiexpansion:home_rested` | 是 | 最大生命 +5%；通过符合条件的家园睡眠获得。 |
+| 炉边眷顾 · `isekaiexpansion:hearthbound` | 是 | 每层最大生命 +2%、移动速度 +1%；条件见我的家园。 |
+
+## 持续伤害
+
+下列公式采用 `a = max(0, amplifier)`。普通周期更新不归属攻击者，并将伤害标记为周期性、无普通受击冷却。
+
+| 效果 | 每次伤害 | 间隔 |
+| --- | --- | --- |
+| 灼烧 | `1 + 0.5 × a`，火焰 | `max(10, 40 >> min(a, 4))` ticks |
+| 流血 | `1 + 0.35 × a`，通常 | `max(10, 40 >> min(a, 4))` ticks |
+| 中毒 | `1 + 0.4 × a`，魔法 | `max(12, 50 >> min(a, 4))` ticks |
+| 史莱姆强酸 | `2 + 1.2 × a`，处决；装备耐久损失 `2 + a` | 20 ticks（1 秒） |
+
+右移每次将基础间隔减半，再应用最小间隔。是否更新取决于剩余持续时间能否被间隔整除。中毒使用普通魔法伤害调用，没有实现“保留 1 点生命”的规则。
+
+## 魔法易伤与枯竭
+
+以下额外注册的效果采用 Spell Power 易伤实现。依赖行为已在本地官方源码快照 `9cdd503` 中检验，其构建声明 Minecraft `1.20.1`、模组版本 `1.6.0`，对应项目配置的 `1.6.0+1.20.1` 依赖。这属于源码验证，不代表二进制等价性验证。
+
+当前每个定义调用易伤设置器两次。该源码中的设置器只保存一个学派，后一次会替换前一次，因此实际仅保留**最后一个**学派：
+
+| 效果与 ID | 保留的学派 | 被替换的学派 |
+| --- | --- | --- |
+| 通电 · `isekaiexpansion:electrified` | 水 | 冰 |
+| 霜结 · `isekaiexpansion:iced` | 雷 | 水 |
+| 引燃 · `isekaiexpansion:ignite` | 雷 | 风 |
+| 潮湿 · `isekaiexpansion:wet` | 冰 | 土 |
+| 光耀 · `isekaiexpansion:luminous` | 奥秘 | 暗 |
+| 暗影 · `isekaiexpansion:shadowed` | 奥秘 | 光 |
+
+保留的参数组为 `(1.15, 0, 0.10)`，依次表示基础法强附加倍率、附加暴击率和附加暴击伤害。Spell Power 先乘以 `amplifier + 1`，再汇总适用效果，使用 `base × (1 + added multiplier)` 计算。因此放大器为 0 且仅有一个匹配效果时，结果为 `2.15 × base`，并非 `1.15 × base`；附加暴击率为 0，附加暴击伤害为 0.10。被替换的 `(1.30, 5, 0.20)` 不会成为第二个生效学派增益。霜结在等级 I 时还附带移动速度 -10% 总量乘算。
+
+星脉枯竭 · `isekaiexpansion:energy_inefficiency` 在等级 I 时提供移动速度 -15% 总量乘算、以太能量 -25% 总量乘算；还会阻止正常星能检查和开始疾跑，并在已注册伤害管线中使承受伤害乘以 1.3。它既不可清除，也带有持久标记。
+
+## 药水持续时间与叠层
+
+生命和星能药水疲劳上限均为 5 层。达到上限时，药水使用检查阻止继续饮用；疲劳并不是逐层降低恢复量的倍率。
+
+G 型药水分别施加幻影之纱 900 ticks（45 秒）、圣盾护佑 1800 ticks（90 秒）、战斗狂热 1200 ticks（60 秒）、疾风之足 1800 ticks（90 秒）。对应效果尚在时再次饮用，会提高放大器，最高为 1。战斗狂热药水还请求相当于最大生命 15% 的药物疾病伤害，进入伤害管线前先限制为不超过当前生命减 1。该效果没有吸血修饰符。
+
+## 相关页面
+
+- [属性与状态效果](/zh-cn/wiki/attributes-and-effects/)
+- [战斗运行时](/zh-cn/dev/combat-runtime/)
+- [我的家园](/zh-cn/wiki/my-home/)
+- [身份与成长](/zh-cn/wiki/identity/)

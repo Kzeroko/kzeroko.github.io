@@ -1,0 +1,125 @@
+---
+title: "Bounty Data"
+description: "Author weighted guild commissions using native quest objectives, rewards and board policies."
+category: data
+order: 93
+updated: 2026-09-26
+---
+
+A bounty is a quest with `tier: bounty` and a `bounty` metadata object. Its objectives, conditions, cooldowns and rewards use the [ordinary quest format](/en/wiki/quest-data/); a board supplies unsigned notices, and a guild receptionist confirms signatures and reports.
+
+## Where the files live
+
+Use `data/<namespace>/quests/**/*.json` for commissions and `data/<namespace>/bounty_pools/**/*.json` for board policies. A policy's resource ID is its pool ID. Normal data-pack priority resolves shared file paths. Quests refer to a policy through `bounty.pool`; a policy needs no list of quests.
+
+The board block and item are `isekaiexpansion:bounty_board`; signed receipts are `isekaiexpansion:bounty`. A board's authorable block-entity NBT key `Pool` is a string identifier, defaulting to `isekaiexpansion:guild` when absent or malformed. Set it with the standard block-data command. It determines the pool of posted notices; other board NBT is server save state. The receptionist must serve that pool to sign or settle its commissions.
+
+## Minimal example
+
+Save this as `data/example/quests/bread.json`, then provide its title, description and objective title translations using [quest translation keys](/en/wiki/quest-data/). It joins the bundled guild pool and consumes bread on submission.
+
+```json
+{
+  "tier": "bounty",
+  "prerequisites": [],
+  "bounty": {"pool": "isekaiexpansion:guild", "kind": "supply", "grade": 1},
+  "objectives": [{
+    "id": "bread", "progress_type": "numeric", "required": 16,
+    "type": "isekaiexpansion:bounty_delivery", "data": {"item": {"item": "minecraft:bread"}}
+  }],
+  "rewards": []
+}
+```
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `tier` | `string` | required | Use `bounty`; the quest is repeatable, read-only in the journal’s Bounties category and signed only at a receptionist. |
+| `prerequisites` | `array<object>` | required | Native quest prerequisites; `[]` imposes none. |
+| `bounty` | `object` | required | Required only for `bounty`; rejected on other tiers. |
+| `bounty.pool` | `identifier` | required | Exact board policy ID; missing policies issue no offers. |
+| `bounty.kind` | `string` | required | Case-insensitive icon category from the list below. |
+| `bounty.grade` | `integer` | required | `1–5`; minimum adventurer ranks are respectively `1`, `2`, `4`, `6`, `7`. |
+| `bounty.weight` | `integer` | `1` | Relative posting weight, `1–1000000`; never bypasses signing requirements. |
+| `bounty.duration_ticks` | `integer` | `48000` | Signing-to-settlement deadline: `1200–1680000` ticks (`60–84000` seconds). Default `2400` seconds. |
+| `bounty.reputation` | `integer` | `1` | Base adventurer standing, `0–100`. Each grade below the signer's eligible grade halves it, rounding down. |
+| `objectives` | `array<object>` | required | Non-empty native objective list. |
+| `objectives[].id` | `string` | required | Unique nonblank objective ID. |
+| `objectives[].progress_type` | `string` | required | `bounty_delivery` requires `numeric`. |
+| `objectives[].required` | `integer` | `1` | Positive total item count for delivery. |
+| `objectives[].type` | `identifier` | required | Native objective type; `isekaiexpansion:bounty_delivery` is an explicit supply report to the receptionist. |
+| `objectives[].data` | `object` | required | Objective payload. |
+| `objectives[].data.item` | `object` | required | Delivery item predicate; item/tag alternatives and optional typed NBT follow [quest predicates](/en/wiki/quest-objectives/). |
+| `objectives[].data.item.item` | `item id` | required in this example | Bread is matched by registry ID. Unknown explicit item IDs reject reload. |
+| `rewards` | `array<object>` | required | Native reward list; `[]` grants only the configured adventurer standing. |
+
+Icon categories are `hunt`, `cull`, `supply`, `expedition`, `gather`, `defense`, `track`, `scout` and `research`. They choose presentation only; objectives determine gameplay.
+
+For this tier, `client_visible` defaults to `true` and cannot be `false`. The default chapter is `isekaiexpansion:side_stories`. `misc_picker_weight`, `misc_pools` and `mainstory_progress` are rejected. Native prerequisites, pick conditions and completion cooldowns remain available. Delivery is authorized only inside a confirmed receptionist report. It consumes matching inventory supplies up to each remaining requirement; partial deliveries are retained. The paper need not be held or present. Objective entity conditions receive the receptionist as their target.
+
+### Board policy
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `offers` | `integer` | `6` | Maximum distinct postings, `1–6`. Fewer candidates leave slots empty. |
+| `restock_min_ticks` | `integer` | `1200` | Minimum random restock delay, `200–24000` ticks (`10–1200` seconds). Default `60` seconds. |
+| `restock_max_ticks` | `integer` | `2400` | Maximum random restock delay, from `restock_min_ticks` through `24000` ticks (`1200` seconds). Default `120` seconds. |
+| `daily_limit` | `integer` | `3` | Signatures per `24000` elapsed-world-tick day (`1200` seconds), `1–20`. |
+| `active_limit` | `integer` | `2` | Outstanding contracts per signer or party, `1–6`, across pools. |
+| `signing_cooldown_ticks` | `integer` | `1200` | Delay between signatures, `0–24000` ticks (`0–1200` seconds). Default `60` seconds. |
+| `notice_limit` | `integer` | `2` | Unsigned reservations per reader or party, `1–6`. |
+| `notice_duration_ticks` | `integer` | `12000` | Reservation lifetime, `1200–24000` ticks (`60–1200` seconds). Default `600` seconds. |
+| `notice_daily_limit` | `integer` | `6` | Papers taken per guild day; from `notice_limit` through `40`. Returns do not refund it. |
+| `notice_pick_cooldown_ticks` | `integer` | `200` | Delay between taking papers, `0–1200` ticks (`0–60` seconds). Default `10` seconds. |
+
+Taking and signing use separate world-global counters for the player and original party. The board policy supplies taking limits; the desk policy supplies signing limits. Counters persist across board replacement, dimension travel, return, withdrawal and party changes. Random restocks fill up to 2 vacancies, or replace 1 posting on a full board. A complete refresh occurs each 24000-tick (1200-second) guild day. Weighted selection avoids duplicates on the same board and prefers commissions absent from up to 64 loaded, coplanar, connected boards of the same facing and pool.
+
+## Full example
+
+The bundled policy at `data/isekaiexpansion/bounty_pools/guild.json` explicitly declares its defaults:
+
+```json
+{
+  "offers": 6,
+  "restock_min_ticks": 1200,
+  "restock_max_ticks": 2400,
+  "daily_limit": 3,
+  "active_limit": 2,
+  "signing_cooldown_ticks": 1200,
+  "notice_limit": 2,
+  "notice_duration_ticks": 12000,
+  "notice_daily_limit": 6,
+  "notice_pick_cooldown_ticks": 200
+}
+```
+
+The eleven bundled commissions live under `data/isekaiexpansion/quests/bounty/`. Their reward lists pay emeralds, experience and faction reputation through the ordinary reward executor. They use guild quotas without an additional quest-specific repeat cooldown. Data packs may still author native completion cooldowns. No Bountiful data is read or migrated.
+
+## Validation
+
+Missing required metadata, invalid identifiers, unknown kinds, out-of-range values, a delivery objective on a non-bounty quest or non-numeric delivery progress reject the entire quest catalogue reload. Invalid policy values reject the policy catalogue reload. Each retains its previous valid catalogue. Unknown JSON fields are ignored. Empty policy objects use defaults; duplicate file paths follow resource-pack priority, and duplicate explicit quest IDs reject the quest catalogue.
+
+A syntactically valid but absent pool is not a quest-load error: it issues nothing. Bounty definitions must be visible to clients so posted notices can be read. Administrators cannot activate bounty quests through the ordinary debug picker; take a board notice and confirm it at a receptionist to create the authoritative contract.
+
+## Reloading
+
+Both catalogues reload with server data. Boards revalidate postings within 20 ticks (1 second), retaining valid papers and their identities. Reload does not force a new draw; it may shorten the next restock delay to the new maximum. A changed board pool starts a new display. Active deadlines, signer, party and standing award remain fixed, while objectives and ordinary rewards follow the current catalogue. Removing a quest, its bounty metadata or policy, or changing its pool, closes affected contracts without payment and discards affected unsigned reservations.
+
+## Guild placement
+
+Use `/ise dev npc receptionist marker` to receive `isekaiexpansion:guild_receptionist_anchor`. Place it at the receptionist's feet inside the guild and right-click as a creative operator with permission level 2. The shared developer inspector edits these fields:
+
+| Field | Default | Rule |
+| --- | --- | --- |
+| Bounty pool | `isekaiexpansion:guild` | Existing pool identifier; invalid or missing pools reject a save. |
+| Facing | `0` degrees | Finite angle, normalized to the usual yaw range; `0` faces south, `90` west. |
+| Staff this post | Disabled | Save enabled to deploy, disabled to dismiss the assigned receptionist. |
+
+The marker is invisible and has no collision. Its authoring glyph appears while holding its item or editing it. Settings can be saved within 8 blocks. An enabled marker checks every 40 ticks (2 seconds), keeps one persistent receptionist and never treats an unloaded entity as missing. Removing the marker dismisses its bound receptionist when that location is loaded. Copying a marker to another position or dimension creates an independent post. Runtime entity IDs are not authoring fields.
+
+For a standalone persistent test NPC, use `/ise dev npc receptionist spawn <pos> [pool]`; omitting the pool uses `isekaiexpansion:guild`. The position must be loaded and inside the world border. `/ise dev npc receptionist edit <pos>` opens an existing nearby marker. All three commands require permission level 2; editing also requires creative mode. The test entity is `isekaiexpansion:guild_receptionist` and uses the default humanoid appearance.
+
+## Related
+
+See [Guild bounties](/en/wiki/bounty-quests/), [Quest objectives](/en/wiki/quest-objectives/), [Quest rewards](/en/wiki/quest-rewards/) and the [quest runtime](/en/dev/quest-system/).

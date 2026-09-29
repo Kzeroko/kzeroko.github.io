@@ -1,0 +1,127 @@
+---
+title: "持久化状态存储"
+description: "版本化存档路径、世界作用域、键验证与共享持久化工具。"
+category: systems
+order: 130
+updated: 2026-09-24
+---
+
+项目的大多数世界存档记录通过内部工具 `IsekaiPersistData` 保存到 `data/isekaiexpansion/` 下的版本化文件。作用域由所选持久化状态管理器决定；文件名带版本号并不意味着旧数据会自动迁移。
+
+## 它做什么
+
+`internal.persiststate.IsekaiPersistData` 继承 Minecraft 的 `PersistentState`，创建父目录，再将加载与缓存交给 `PersistentStateManager.getOrCreate`。它是内部存储约定，不是公共 API 门面，也不协调跨记录事务。
+
+服务器重载始终使用主世界管理器；管理器重载则使用传入的具体管理器。因此，从下界访问服务器级记录仍会落到主世界数据中，而世界级城市或住房记录保存在对应世界的数据目录。
+
+## 运行时模型
+
+### 当前文件清单
+
+以下路径相对于所选管理器的数据目录。记录按需加载，列出路径不代表对应文件已经存在。
+
+| 作用域 | 相对文件路径 | 所属系统 |
+| --- | --- | --- |
+| 服务器 | `isekaiexpansion/blacksmith/commissions_v1.dat` | 铁匠委托 |
+| 服务器 | `isekaiexpansion/dungeon/runtime_v2.dat` | 地牢会话、入口分配与参与者进度 |
+| 服务器 | `isekaiexpansion/faction/reputation_v1.dat` | 玩家声望 |
+| 服务器 | `isekaiexpansion/faction/relations_v1.dat` | 阵营关系覆盖 |
+| 服务器 | `isekaiexpansion/humanoid/paint_v1.dat` | 共享人形绘制数据 |
+| 服务器 | `isekaiexpansion/npc/graves_v2.dat` | NPC 墓地快照 |
+| 服务器 | `isekaiexpansion/npc/unique_marriage_v1.dat` | 唯一 NPC 婚姻绑定 |
+| 服务器 | `isekaiexpansion/quest/meta_v2.dat` | 任务存储元数据 |
+| 服务器 | `isekaiexpansion/quest/world_flags_v2.dat` | 任务世界标志 |
+| 服务器 | `isekaiexpansion/quest/shards/state_00_v2.dat` 至 `state_3f_v2.dat` | 64 个任务档案分片 |
+| 服务器 | `isekaiexpansion/scene/trigger_memory_v2.dat` | 持久化演出触发重播记忆 |
+| 服务器 | `isekaiexpansion/taming/companions_v1.dat` | 全服驯养名额与离线主人待收取的死亡通知 |
+| 所选世界 | `isekaiexpansion/city/cities_v1.dat` | 城市及子结构 |
+| 所选世界 | `isekaiexpansion/structure/limited_structures_v1.dat` | 结构生成限制 |
+| 所选世界 | `isekaiexpansion/structure/spaces_v2.dat` | 住房空间与成员 |
+
+阵营和演出状态也提供管理器重载，直接调用时可选择其他作用域。表中的服务器作用域描述正常运行时调用方。任务分片使用服务器任务状态传入的管理器，不随玩家当前维度变化。
+
+### 伙伴名额账本
+
+通过 `api.taming.TamedCompanionsAPI` 的 `limit(player)` 和 `occupied(player)` 查询上限与已用名额，也可预留或释放所有权记录。所有权变更须在服务器线程执行；`reserve(entity, owner)` 返回拒绝时，调用方必须取消所有权赋值。该接口支持 `TameableEntity` 与 `AbstractHorseEntity` 及其子类。
+
+`internal.taming.TamedCompanionLedger` 通过主世界的共享存储记录保存数据，维护实体 UUID → 主人 UUID 与主人 UUID → 已占用实体两个索引。`TamedCompanionsComponent` 只向所属玩家同步计数，不负责判定剩余名额。服务器线程在所有权改变前检查并预留名额；重复设置同一所有权不会多占名额。
+
+死亡会移除存活名额，并将带名字的通知加入待处理记录。主人在线时立即刷新组件并发送通知；主人离线时，队列随存档保留。登录后从账本刷新组件、发送通知，再清除该主人的死亡记录。存活实体的区块卸载或跨维度移动不会释放名额；显式丢弃实体或解除所有权才会释放。从存档加载的死亡实体不会重新占用存活名额。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Reservations` | `array<object>` | `[]` | 存活名额列表。列表缺失或类型不符时按空列表读取。 |
+| `Reservations[].Entity` | `array<integer>` | required | 以 4 个整数编码的实体 UUID；UUID 数据无效时加载失败。 |
+| `Reservations[].Owner` | `array<integer>` | required | 以 4 个整数编码的主人 UUID。重复实体条目以后出现的所有权为准。 |
+| `Graves` | `array<object>` | `[]` | 等待主人上线的死亡通知；重复死亡回调不会追加同一通知。 |
+| `Graves[].Entity` | `array<integer>` | required | 以 4 个整数编码的死亡实体 UUID。 |
+| `Graves[].Owner` | `array<integer>` | required | 以 4 个整数编码的接收者 UUID。 |
+| `Graves[].Name` | `string` | empty text | JSON 序列化的 Minecraft 文本。解码为 null 时使用空文本；不迁移格式错误的文本。 |
+| `Occupied` | `integer` | `0` | 玩家组件计数，读取时最低为 0，登录时按全服账本刷新。 |
+
+### 世界树例外
+
+`world.terrain.placement.WorldTreeState` 直接继承 `PersistentState`，在管理器数据根目录使用 `isekaiexpansion_world_tree.dat`，没有走共享工具的版本化路径。其内容具有独立的版本与几何验证。
+
+接入时会恢复有效预留位置，或选定并记录新位置，然后显式保存管理器。解码后的预留数据无效会中止接入，不会悄悄重新选址。不要把此文件移动到共享工具目录，也不要认为所有项目持久化状态都遵循该工具。
+
+## 约定
+
+| 输入或操作 | 约定 |
+| --- | --- |
+| 域 | 非空、以斜杠分隔；每段满足 `[a-z0-9][a-z0-9_-]*`。支持 `quest/shards` 等嵌套域。 |
+| 名称 | 满足同一表达式的单段名称。拒绝点号、空格、大写字符和路径分隔符。 |
+| 版本 | 至少为 `1` 的整数；无效键抛出 `IllegalArgumentException`。 |
+| 域末尾斜杠 | Java 默认 split 丢弃末尾空段，因此会被规范化移除；中间空段被拒绝。 |
+| 生成的 ID | `isekaiexpansion/<domain>/<name>_v<version>`，文件后缀由 Minecraft 添加。 |
+| 目录创建 | 通过 `PersistentStateManagerAccessor` 取得实际管理器目录，再创建模组/域目录。 |
+| 目录失败 | 记录 `IOException` 或 `SecurityException`，随后仍调用 `getOrCreate`；不能据此认为之后保存一定成功。 |
+| 加载和修改 | 读取器、工厂与存储格式由所属系统负责。共享工具不提供通用 NBT 验证、锁、脏标记追踪或客户端同步。 |
+| 格式变化 | 新键选择不同文件。工具不会读取旧文件名或转换旧内容；迁移必须由所属系统显式实现。 |
+
+相关世界存在后，在服务器线程修改状态。持久数据发生变化时标记为脏；修改 getter 返回的对象不会自动通知此工具。区分实体组件、客户端缓存和服务器持久记录，游戏逻辑应调用所属服务，而非直接修改运行中的 NBT。
+
+## 扩展方式
+
+项目内部状态可以采用以下模式。示例保存计数器，仅在修改时标记为脏：
+
+```java
+final class ExampleState extends IsekaiPersistData {
+    private static final Key KEY = key("example", "counter", 1);
+    private int count;
+
+    static ExampleState get(MinecraftServer server) {
+        return IsekaiPersistData.get(server, KEY, ExampleState::read, ExampleState::new);
+    }
+    private static ExampleState read(NbtCompound nbt) {
+        var state = new ExampleState();
+        state.count = nbt.getInt("Count");
+        return state;
+    }
+    void increment() { count++; markDirty(); }
+    @Override public NbtCompound writeNbt(NbtCompound nbt) {
+        nbt.putInt("Count", count);
+        return nbt;
+    }
+}
+```
+
+选择键之前先确定服务器级或世界级作用域。兼容格式保持键不变，并明确读取器对缺失/无效字段的处理。所属系统自行增加的缓存也必须遵循服务器或世界生命周期。
+
+## 验证
+
+- 从不同维度加载并修改服务器级状态，确认解析到同一主世界记录。
+- 在不同世界修改同一世界级键，重启后确认记录相互独立。
+- 测试无效域/名称/版本及不可用存储目录，区分目录错误日志与持久化成功。
+- 对所属 NBT 格式进行往返测试，涵盖缺失和无效字段。在一次性存档中测试版本变化，确认迁移或新建状态策略符合预期。
+- 对已保存的世界树预留位置分别测试恢复和无效几何；接入过程不得静默搬移地标。
+
+## 相关页面
+
+- [地形生成](/zh-cn/dev/terrain-generation/)——完整世界树载荷与绑定失败规则。
+- [地下城运行时](/zh-cn/dev/dungeons/)——聚合 NBT、分配校验与重启恢复。
+- [NPC 复活](/zh-cn/dev/npc-revival-api/)：墓地快照与支付约定。
+- [城市 API](/zh-cn/dev/city-api/)：世界级城市记录。
+- [声望运行时](/zh-cn/dev/reputation-runtime/)：阵营存储与覆盖。
+- [蓝图研究](/zh-cn/dev/blueprint-research/)：委托存储与事务。
+- [人形运行时](/zh-cn/dev/humanoid-runtime/)：绘制数据和配置归属。

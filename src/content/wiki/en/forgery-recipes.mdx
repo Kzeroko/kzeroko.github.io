@@ -1,0 +1,77 @@
+---
+title: "Forgery recipe data"
+description: "Ordered ingredients, step strength, output NBT and validation limits for forgery recipes."
+category: data
+order: 182
+updated: 2026-09-26
+---
+
+A forgery recipe turns ordered groups of materials into an output stack. An anvil resolves it through a bound blueprint; adding a recipe does not automatically unlock a plan for players.
+
+## Where the files live
+
+Use `data/<namespace>/recipes/<path>.json` with type `isekaiexpansion:forgery`. The path determines the recipe ID; `ise_forgery/` is the bundled content's convention, not a required prefix. Minecraft recipe resource loading resolves same-ID overrides: the higher-priority pack replaces the lower-priority recipe without merging steps.
+
+The bundled example is `src/main/generated/data/isekaiexpansion/recipes/ise_forgery/minecraft_diamond_sword.json`. The example below reduces its ingredient structure to a single step.
+
+## Minimal example
+
+```json
+{
+  "type": "isekaiexpansion:forgery",
+  "result": { "item": "minecraft:diamond_sword" },
+  "steps": [
+    {
+      "ingredients": [
+        { "item": "minecraft:iron_ingot", "count": 2 },
+        { "item": "minecraft:stick" }
+      ]
+    }
+  ]
+}
+```
+
+Omitted step strength defaults to 200. Saved as `data/example/recipes/demo_blade.json`, this recipe is referenced by a blueprint as `example:demo_blade`.
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `string` | Required | Exactly `isekaiexpansion:forgery`. |
+| `group` | `string` | `""` | Recipe grouping label; does not select or unlock a blueprint. |
+| `result` | `object` | Required | Output stack read after all steps. |
+| `result.item` | `string` | Required | Registered item identifier. |
+| `result.count` | `integer` | 1 | Output count. No positive-count or stack-size check in this reader; use a positive count that fits the item. |
+| `result.set_nbt` | `string or object` | Absent | SNBT compound string or JSON object parsed as a compound and assigned to the output. Invalid SNBT throws; empty output skips parsing. Use SNBT for explicit numeric tag types. |
+| `steps` | `array<object>` | Required | Ordered steps. No reader-side length limit; use at least 1. A bound empty list is unsafe when the anvil indexes its current step. |
+| `steps[].ingredients` | `array<object>` | Required | Ordered ingredient entries. At most 9 usable stacks fit the anvil. Each entry is an object, not an alternatives array. |
+| `steps[].ingredients[].item` | `string` | One of item/tag | A registered item, resolved through Minecraft ingredient parsing. |
+| `steps[].ingredients[].tag` | `string` | One of item/tag | An item tag instead of `item`; do not specify both. Matching tests membership, not NBT. |
+| `steps[].ingredients[].count` | `integer` | 1 | Required stack count, matched exactly. No local range validation; keep within 1–the selected item’s maximum stack size. |
+| `steps[].display_item` | `string` | Absent: empty | Registered item identifier rendered after the first step. Count is always 1; it is not a material or output. |
+| `steps[].should_render_ingredients` | `boolean` | true | Whether later steps render placed materials. The first step renders them even when false. |
+| `steps[].forgery_progress` | `integer` | 200 | Required accumulated hammer strength, not ticks. No range check: 0 or a negative value can complete as soon as ingredients match. |
+
+
+## Validation
+
+Missing required objects, arrays or strings, incompatible structural types, and unresolvable output or display items throw during reading. This reader has no catch-and-retain-old-recipe branch; Minecraft's surrounding recipe loader handles failures. Unknown extension fields are not checked by the local reader and do not change forging.
+
+Ingredient objects delegate to Minecraft's ingredient parser; empty ingredients are skipped. This layer does not validate sensible step counts, ingredient counts, quantities or strength, so a recipe that parses may still be impossible to finish.
+
+- **Inventory capacity**: use at most 9 actual stacks per step, with exactly the requested counts; excess material prevents matching.
+- **Ingredient order**: initial matching skips empty slots, but the completion check compares consecutive slots from the start. Insert in order without gaps.
+- **Repeated materials**: compatible stacks merge automatically. Do not split a stackable requirement into separate adjacent entries; requirements above the item's stack limit are also unusable through normal insertion.
+- **Empty step list**: reading accepts it, but a bound anvil's current-step lookup fails. There is no reader rule limiting a recipe to 10 steps.
+- **Nonpositive strength**: matching materials can advance the step without a strike. Use positive strength for ordinary forging.
+- **Output NBT**: `set_nbt` accepts a compound; a parse failure rejects the recipe. JSON numbers cannot explicitly represent every NBT numeric type.
+
+## Reloading
+
+This type joins Minecraft's standard recipe system and updates with server recipe reloads. Recipe synchronisation sends the group, steps, ingredient counts, display stacks, strength and full output stack to clients. An anvil stores its recipe ID and current step rather than a snapshot of the old recipe.
+
+Do not shorten a recipe's steps underneath an active batch. Reloading does not reset or migrate the anvil's step; reset the batch before trying the new recipe. Removing a bound recipe prevents normal forging from matching while the blueprint remains stored.
+
+## Related
+
+[Forgery](/en/wiki/forgery/) covers controls; [blueprint data](/en/wiki/blueprint-data/) connects plans to recipes. [Forgery runtime](/en/dev/forgery-runtime/) covers saved state and developer contracts.

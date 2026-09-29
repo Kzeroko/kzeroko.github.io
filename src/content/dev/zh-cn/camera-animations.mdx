@@ -1,0 +1,143 @@
+---
+title: "镜头动画资源"
+description: "制作 Gecko 镜头轨道，明确单位、命名、关键帧字段与重载检查。"
+category: assets
+order: 73
+updated: 2026-09-19
+---
+
+镜头动画是包含 `camera` 骨骼的 Gecko 动画。位置按每方块 16 个模型单位换算，旋转则转换为以度为单位的俯仰、偏航和滚转；同一资源可用于客户端镜头 API，也可作为服务端过场的镜头轨道。
+
+## 你要做的东西
+
+将 UTF-8 JSON 放在 `assets/<namespace>/camera_animations/*.json`。加载器也会发现子目录中的资源。这里不要求几何文件、贴图或可见方块模型：加载器读取动画数据，并选择名称完全匹配的 `camera` 骨骼。
+
+本地加载器将烘焙交给本仓库锁定的第三方 GeckoLib **4.8.4**。下文的关键帧格式、缓动名称及推算时长均已核对该依赖的源码；资源发现、ID 转换和镜头采样由本模组负责。
+
+## 前置要求
+
+`camera` 至少要有一个位置或旋转关键帧。缺少骨骼、名称大小写不符，或只有缩放轨道时，都不会注册镜头动画。其他骨骼的姿态不参与镜头采样，但其关键帧仍可能影响推算出的动画时长。
+
+注册 ID 取自动画名：
+
+| 动画名 | 资源命名空间 | 注册 ID |
+| --- | --- | --- |
+| `boss_intro` | `isekaiexpansion` | `isekaiexpansion:boss_intro` |
+| `animation.boss_intro` | `isekaiexpansion` | `isekaiexpansion:boss_intro` |
+| `animation.example.intro` | `isekaiexpansion` | `example:intro` |
+| `animation.example.intro.closeup` | `isekaiexpansion` | `example:intro.closeup` |
+
+解析器先去掉开头的 `animation.`，再用第一个内部句点分隔命名空间与路径。没有这种分隔时，使用资源的命名空间。转换后的标识符若不合法会抛出异常，资源加载器会静默捕获。不同资源注册同一 ID 时，后发现的覆盖先发现的，加载器不对发现顺序排序。应为每个动画分配唯一 ID。
+
+## 步骤
+
+1. 在动画制作工具中建立名为 `camera` 的骨骼，添加位置或旋转动画。静态位置也足以生成注册项。
+2. 使用 XYZ 位置与 XYZ 旋转数组。位置相对于播放时选定的锚点：朝北参考方向下，+X 向右、+Y 向上、−Z 向前。位置每 16 个单位对应一个方块。旋转依次为以度为单位的俯仰、偏航和滚转。
+3. 显式设置有限且为正数的 `animation_length`，单位为秒。加载器不会强制这项制作约束；显式时长可避免受其他骨骼影响，也可避免所有帧均位于零时刻时推算出无界时长。
+4. 将动画 JSON 导出到资源目录。文件内的时间戳应按升序排列：Gecko 烘焙器按条目顺序处理，不会排序。
+5. 重载客户端资源，用下方检查确认 ID 已注册，再按实际使用的锚点和播放模式测试动作。
+
+采样器为 MoLang 表达式提供以秒为单位的 `query.anim_time`。它不建立动画实体上下文，也不派发 Gecko 的声音、粒子或时间线事件。缩放和资源中的 FOV 不会改变采样姿态；采样器返回的 FOV 为 null。需要 FOV 节点和定时事件时，使用[过场场景格式](/zh-cn/wiki/cinematic-scene-data/)。
+
+## 声明它
+
+下面是内置 `boss_intro.json` 的精简形式。放在相应命名空间后，注册为 `isekaiexpansion:boss_intro`：
+
+```json
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "boss_intro": {
+      "loop": "hold_on_last_frame",
+      "animation_length": 4,
+      "bones": {
+        "camera": {
+          "position": {
+            "0.0": { "vector": [0, 0, 0] },
+            "4.0": { "vector": [0, 24, -72] }
+          },
+          "rotation": {
+            "0.0": { "vector": [0, 0, 0] },
+            "4.0": { "vector": [-10, 35, 0] }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### 资源与动画字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `format_version` | `string` | 不读取 | 导出元数据；镜头加载器不校验此值，也不据此选择解析方式。 |
+| `animations` | `object` | 不注册任何动画 | 动画名映射。根值不是对象时忽略；缺少映射时忽略，映射类型错误则抛出异常。 |
+| `animations.<name>` | `object` | 无条目 | 一个 Gecko 动画，映射键决定注册 ID。未知动画字段不会增加镜头行为。 |
+| `animations.<name>.loop` | `boolean` 或 `string` | `false` | `true`、`"true"` 或 `"loop"` 循环；`"hold_on_last_frame"` 保持末帧；`false`、`"false"` 或 `"play_once"` 播放一次。未知值、数字或非基本类型均按播放一次处理。字符串区分大小写。 |
+| `animations.<name>.animation_length` | `number` | 推算 | 秒，按 ×20 转换为刻。省略时取所有骨骼各通道的最大结束时间，包括缩放；推算结果为零时改用 `Double.MAX_VALUE` 刻。不限制为正数。 |
+| `animations.<name>.bones` | `object` | `{}` | 骨骼名映射；缺少镜头骨骼时不生成镜头注册项。 |
+| `bones.camera` | `object` | 无条目 | 被选中的精确骨骼名。至少一个位置或旋转轴必须有关键帧。 |
+| `bones.camera.position` | 通道 | 空，采样为零 | XYZ 模型单位位移，除以 16 后得到方块距离。 |
+| `bones.camera.rotation` | 通道 | 空，采样为零 | 制作时使用度数 XYZ。烘焙器执行的 Gecko 符号与弧度转换会由镜头采样器还原。 |
+| `bones.camera.scale` | 通道 | 空 | Gecko 会烘焙，并计入推算时长，但镜头采样忽略它。 |
+
+通道可写成复制到 XYZ 的数字或 MoLang 字符串、零时刻的 XYZ 数组、零时刻含 `vector` 的对象，或有序时间戳映射。向量应恰有三个分量：烘焙器读取前三项，少于三项会失败，多出的项会被忽略。
+
+### 关键帧字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `<seconds>` | `string` 映射键 | 时间戳映射中必填 | 以秒为单位的时间戳。数字键会被解析，非数字键按零处理。已有条目后再出现零时刻会被拒绝。不排序，也不限制时间范围。 |
+| `vector` | `array<number>`，也接受 MoLang 字符串 | 向量对象形式中必填 | XYZ 分量。时间戳对应的值也可直接写成 XYZ 数组。 |
+| `easing` | `string` | `linear` | 应用于以本帧为终点的片段。未知值或非字符串按线性处理；字符串转为小写，但不删除分隔符或空格。 |
+| `easingArgs` | `array<number>` | `[]` | 所选 Gecko 曲线的参数；普通含参曲线读取首项。无效数字会使烘焙失败。 |
+| `pre` | XYZ 数组或向量对象 | 不插入前帧 | 不含 `vector` 的 Bedrock 关键帧形式：在时间戳 −0.001 秒处插入值，零时刻仍保持为零。 |
+| `post` | XYZ 数组或向量对象 | 不插入后帧 | 在实际时间戳处插入值。此形式至少需要 `pre` 或 `post` 之一。 |
+| `lerp_mode` | `string` | `linear` | 作为 Bedrock 后帧的缓动方式，不改变只有前帧的关键帧。 |
+
+内置缓动名称包括 `linear`（别名 `none`）、`step`、`catmullrom` 及下表各组。Gecko 允许注册额外曲线；这里列出其内置名称。
+
+| 曲线组 | 接受的名称 |
+| --- | --- |
+| 正弦 | `easeinsine`、`easeoutsine`、`easeinoutsine` |
+| 二次 | `easeinquad`、`easeoutquad`、`easeinoutquad` |
+| 三次 | `easeincubic`、`easeoutcubic`、`easeinoutcubic` |
+| 四次 | `easeinquart`、`easeoutquart`、`easeinoutquart` |
+| 五次 | `easeinquint`、`easeoutquint`、`easeinoutquint` |
+| 指数 | `easeinexpo`、`easeoutexpo`、`easeinoutexpo` |
+| 圆形 | `easeincirc`、`easeoutcirc`、`easeinoutcirc` |
+| 回退 | `easeinback`、`easeoutback`、`easeinoutback` |
+| 弹性 | `easeinelastic`、`easeoutelastic`、`easeinoutelastic` |
+| 弹跳 | `easeinbounce`、`easeoutbounce`、`easeinoutbounce` |
+
+`step` 默认为 2 阶，首项参数小于 2 时在求值阶段抛出异常。弹性默认为 1，弹跳默认为 0.5；回退省略参数时使用 1.70158，提供参数时则将该常量乘以参数。烘焙器从相邻帧填充 Catmull-Rom 的邻点参数。通道只有一帧时强制使用线性。这些是 Gecko 的约定，与过场场景较小的缓动枚举彼此独立。
+
+### 重载与注册检查
+
+资源重载会先清空注册表。JSON 无效、类型错误或 ID 不合法时，动画可能直接缺失，且本地加载器不记录日志。Gecko 会逐动画记录 MoLang 错误；其他烘焙异常可能在开始本地注册前拒绝整个资源。若在后续注册阶段失败，同一资源中较早注册的条目可能保留下来。重载不会保留旧注册表作为回退。
+
+资源加载后在客户端运行以下检查，可验证注册而不开始播放：
+
+```java
+var id = new Identifier("isekaiexpansion", "boss_intro");
+var animation = CameraAnimationRegistry.get(id);
+if (animation == null) {
+    throw new IllegalStateException("Camera animation was not registered: " + id);
+}
+```
+
+`CameraAnimationRegistry` 位于 `client.camera.anim`，是客户端内部实现类型，不是公共门面。播放请使用[镜头场景 API](/zh-cn/dev/camera-api/)。已有播放在重载后仍持有先前捕获的动画对象；检查修改后的资源时需重新开始播放。原生过场中的 Gecko 轨道将采样限制在资源时长内，并使用场景自身的总时长，不会自动采用资源的循环或保持模式。
+
+## 检查清单
+
+- 确认动画 ID、命名空间和 `camera` 骨骼名完全一致，重载后检查注册结果。
+- 使用实际锚点检查起始与结束姿态。确认一个方块的位移对应 16 单位，俯仰、偏航和滚转的符号符合预期。
+- 测试一份故意损坏的副本，再恢复有效文件并重载。确认能识别注册缺失，而不是误判为播放失败。
+- 测试所需的显式时长和播放模式。API 的 `GECKO` 使用资源模式；显式 API 模式会覆盖它。
+- 在目标模组组合的客户端中检查效果。本页验证的是源码约定，不代表已完成游戏内渲染测试。
+
+## 相关页面
+
+- [镜头场景 API](/zh-cn/dev/camera-api/) — 锚点、模式、输入与过渡所有权。
+- [过场场景数据](/zh-cn/wiki/cinematic-scene-data/) — 原生轨道、演员指令、效果与世界事件。

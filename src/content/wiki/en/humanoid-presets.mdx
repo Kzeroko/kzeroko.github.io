@@ -1,0 +1,221 @@
+---
+title: "Humanoid and NPC presets"
+description: "The complete shared appearance format, player gallery presets and NPC outfit rules."
+category: data
+order: 100
+updated: 2026-09-27
+---
+
+Player presets store a reusable appearance. NPC presets store a base character and selectable outfit overlays. They share appearance fields but have different application and unlock rules.
+
+## Where the files live
+
+| Path | Meaning |
+| --- | --- |
+| `data/<namespace>/humanoid_presets/<path>.json` | Player gallery preset `<namespace>:<path>`. |
+| `data/<namespace>/npc_presets/<path>.json` | NPC preset `<namespace>:<path>`; the NPC must use this preset ID. |
+
+These are server data-pack resources. Models and textures are separate client resources. A file is a complete definition, not a patch to another preset.
+
+Player titles use `humanoid_preset.<namespace>.<path>`, descriptions add `.desc`, and outfit titles use `npc_outfit.<namespace>.<preset_path>.<outfit_id>`. Slashes in preset paths become dots.
+
+## Minimal example
+
+A player gallery entry at `data/example/humanoid_presets/simple.json`, using bundled parts:
+
+```json
+{
+  "gender": "female",
+  "parts": {
+    "body": "isekaiexpansion:body/feminine",
+    "eyes": "isekaiexpansion:eyes/default"
+  },
+  "sort": 1000
+}
+```
+
+For the bundled citizen wardrobe, save this at `data/isekaiexpansion/npc_presets/citizen.json`. It leaves citizen appearance generation in place and adds an explicitly rewarded overlay:
+
+```json
+{
+  "outfits": [
+    { "id": "default", "default": true },
+    {
+      "id": "without_hair",
+      "category": "hair",
+      "unlock": { "type": "granted" },
+      "parts": { "hair": "none" }
+    }
+  ]
+}
+```
+
+The reward record is per player and keyed by preset ID plus outfit ID, so it applies to every NPC sharing that preset.
+
+## Fields
+
+### Shared root and preset metadata
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `gender` | `string` | `female` | `female` or `male`, trimmed and case-insensitive; unknown uses the default. |
+| `age` | `integer` | `18` | Clamped to 12–400; identity metadata, independent of body height. |
+| `nickname` | `string` | `""` | Removes formatting/control characters, keeps at most 48 UTF-16 units without splitting code points, then trims. Unicode control/format characters and section signs are removed. A nonempty result enables nickname use. |
+| `preset_name` | `identifier` | `absent` | Translated full-name ID from [name pools](/en/wiki/name-pools/), at most 256 characters. Mutually exclusive with `nickname`; invalid syntax rejects the preset. Enables name display. |
+| `origin` | `identifier` | `absent` | Origin hint; invalid syntax clears it. Applying a player preset preserves the player's actual origin. |
+| `build` | `object` | `neutral` | Body values below; omitted members keep their defaults. |
+| `face` | `object` | `neutral` | Face values below; omitted members keep their defaults. |
+| `palette` | `object` | `channel defaults` | RGB values for the channels below. Unknown channels are ignored. |
+| `parts` | `object` | `{}` | Slot-to-part map. Empty does not create models; player validation can supply required parts. |
+| `parts.<slot>` | `string / object / null` | `absent` | Part ID, `{part, style}`, or no part. Slots and overlay semantics are listed below. |
+| `parts.<slot>.part` | `identifier` | `required in object` | Invalid or missing ID removes this reference; existence is checked later. |
+| `parts.<slot>.style` | `string` | `default` | Trimmed lowercase `a-z`, `0-9`, `_`, `-`, at most 64 characters. Invalid becomes `default`. |
+| `sort` | `integer` | `1000` | Gallery order; player presets sort by this value, then full identifier. |
+| `tags` | `array<string>` | `[]` | Trimmed lowercase, empty entries removed and duplicates collapsed. Keep player-preset tags within 48 characters for network sync. |
+| `unlock` | `object` | `always` | Player-preset rule metadata; currently not enforced by the preset gallery. NPC presets gate individual outfits. |
+| `fixed_gender` | `boolean` | `false` | NPC preset only; forces the preset gender when an NPC profile is assigned. Unique NPCs also impose their own fixed gender. |
+| `outfits` | `array<object>` | `fallback default outfit` | NPC preset only. Missing or empty gives an always-available `default` outfit with no overlay or bonuses. |
+
+A player preset can load as an empty object, but it then contains the default profile with no explicit parts. Applying the whole preset replaces build, face, palette and parts, changes gender, and preserves the player's age, character name and origin. Applying selected part kinds overlays only those slots; body selection also copies build, face selection copies face, and **every partial application copies the entire palette**.
+
+For NPCs, the presence of any profile field marks the preset authored, even an empty `parts` object. Base NPCs use that authored profile. Citizens override initial profile resolution with generated appearances; their presets chiefly supply wardrobes. See [NPC assets](/en/dev/npc-assets/) for generation and entity wiring.
+
+### Body shape
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `build.height` | `number` | `1.8` | 1.20–2.05. Height in blocks. |
+| `build.torso_width` | `number` | `1` | 0.85–1.20. Torso width multiplier. |
+| `build.arm_length` | `number` | `1` | 0.90–1.10. Arm length multiplier. |
+| `build.arm_thickness` | `number` | `1` | 0.85–1.15. Arm thickness multiplier. |
+| `build.leg_length` | `number` | `1` | 0.90–1.10. Leg length multiplier. |
+| `build.leg_thickness` | `number` | `1` | 0.85–1.15. Leg thickness multiplier. |
+| `build.head_scale` | `number` | `1` | 0.90–1.10. Head scale multiplier. |
+| `build.chest_size` | `number` | `1` | 0–2. Chest scale; zero is valid. |
+| `build.chest_lift` | `number` | `0` | -1–1. Signed chest adjustment. |
+| `build.chest_spread` | `number` | `0` | -1–1. Signed chest spread adjustment. |
+
+Height and all multipliers except `chest_size` require a positive finite value: zero, negative and nonfinite values reset to the default; other values clamp to the stated range. `chest_size`, `chest_lift` and `chest_spread` clamp finite values, with nonfinite values resetting to their defaults. Wrong JSON types can fail the whole file.
+
+### Face shape
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `face.eye_spacing` | `number` | `0` | -1–1. Horizontal eye spacing. |
+| `face.eye_height` | `number` | `0` | -1–1. Vertical eye offset. |
+| `face.eye_depth` | `number` | `0` | -1–1. Eye depth offset. |
+| `face.eye_scale` | `number` | `1` | 0.82–1.24. Eye scale multiplier. |
+| `face.eye_tilt` | `number` | `0` | -1–1. Signed eye tilt. |
+
+Signed face values clamp to -1–1 and nonfinite values become 0. Eye scale requires a positive finite value; otherwise it becomes 1. These values adjust the shared rig, so a part must use the matching bones to show the adjustment.
+
+### Palette
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `palette.skin` | `RGB` | `#FFFFFF` | Tint for `skin`. |
+| `palette.eye_left` | `RGB` | `#4F8FC0` | Tint for `eye_left`. |
+| `palette.eye_right` | `RGB` | `#4F8FC0` | Tint for `eye_right`. |
+| `palette.eye_sclera` | `RGB` | `#F6F3EE` | Tint for `eye_sclera`. |
+| `palette.hair_base` | `RGB` | `#2B2B33` | Tint for `hair_base`. |
+| `palette.hair_tip` | `RGB` | `#3A3A46` | Tint for `hair_tip`. |
+| `palette.eyebrow` | `RGB` | `#2B2B33` | Tint for `eyebrow`. |
+| `palette.lip` | `RGB` | `#C97A78` | Tint for `lip`. |
+| `palette.blush` | `RGB` | `#E39C96` | Tint for `blush`. |
+| `palette.trait_primary` | `RGB` | `#FFFFFF` | Tint for `trait_primary`. |
+| `palette.trait_secondary` | `RGB` | `#CCCCCC` | Tint for `trait_secondary`. |
+| `palette.outfit_primary` | `RGB` | `#FFFFFF` | Tint for `outfit_primary`. |
+| `palette.outfit_secondary` | `RGB` | `#FFFFFF` | Tint for `outfit_secondary`. |
+| `palette.outfit_accent` | `RGB` | `#FFFFFF` | Tint for `outfit_accent`. |
+| `palette.underwear_primary` | `RGB` | `#FFFFFF` | Tint for `underwear_primary`. |
+| `palette.underwear_secondary` | `RGB` | `#FFFFFF` | Tint for `underwear_secondary`. |
+| `palette.accessory_primary` | `RGB` | `#FFFFFF` | Tint for `accessory_primary`. |
+| `palette.accessory_secondary` | `RGB` | `#CCCCCC` | Tint for `accessory_secondary`. |
+| `palette.accessory_accent` | `RGB` | `#FFFFFF` | Tint for `accessory_accent`. |
+
+Colours accept integers or hexadecimal strings with optional `#` or `0x`; even an unprefixed string is hexadecimal. Only the low 24 bits are kept; alpha is discarded. A missing channel keeps the table default, while explicit null or invalid hexadecimal text becomes `#FFFFFF`. Arrays or objects in a colour field can fail parsing.
+
+### Part slots and overlays
+
+| Kind | Slots |
+| --- | --- |
+| `body` | `body` |
+| `face` | `face`, `eyes`, `eyebrows`, `facial_hair` |
+| `trait` | `trait_ear`, `trait_horn`, `trait_tail`, `trait_wing`, `trait_other` |
+| `hair` | `hair` |
+| `underwear` | `underwear_top`, `underwear_bottom` |
+| `outfit` | `socks`, `outfit_top`, `outfit_bottom`, `gloves`, `shoes` |
+| `accessory` | `ear_accessory`, `face_accessory`, `neck_accessory`, `head_accessory`, `back_accessory` |
+
+Slot names are trimmed and case-insensitive. Unknown slots are ignored. A reference can be an identifier string or an object with `part` and optional `style`. Preset JSON does not import custom paint data.
+
+In the base profile, null, a blank string, `none`, or an invalid part ID leaves that slot empty. In an outfit overlay, an absent slot, null or an invalid ID inherits the base; the explicit string `none` clears the slot. This applies to every slot, including `body`. Changing outfits restores whatever the underlying profile supplies.
+
+Some parts are chained: one garment spread across several slots, such as the default male briefs `isekaiexpansion:underwear_top/default_male` and `isekaiexpansion:underwear_bottom/default_male`. An outfit that names one member wears the whole chain, and `none` on one member clears all of it. A player preset that names only one member receives the rest when the profile is validated, provided their slots are empty; otherwise the chain is dropped. See [part chains](/en/dev/humanoid-parts/).
+
+A valid identifier does not prove a part, model or texture exists. An unavailable style falls back only to `default`; if that is unavailable too, the renderer skips the part.
+
+### NPC outfits
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `outfits[].id` | `string` | `required` | Trimmed lowercase ID, nonblank; keep within 128 characters for the wardrobe packet. |
+| `outfits[].category` | `enum` | `outfit` | `outfit`, `hair`, `accessory`; unknown becomes `outfit`. UI grouping only. |
+| `outfits[].default` | `boolean` | `false` | Forces `always` unlock; only the first declared default keeps the flag. |
+| `outfits[].unlock` | `object` | `always` | Same rule fields below. Declare `granted` explicitly for a rewarded outfit. |
+| `outfits[].sort` | `integer` | `1000` | Wardrobe sorts by category, then this value, then ID. Does not select the initial outfit. |
+| `outfits[].parts` | `object` | `{}` | Slot overlay; missing inherits the base, `none` clears it. Can replace `body` too. |
+| `outfits[].attributes` | `array<object>` | `[]` | Temporary attribute modifiers while equipped. |
+| `outfits[].attributes[].attribute` | `identifier` | `required` | Registered attribute; malformed fails the preset, unknown registry entry logs and skips this bonus. |
+| `outfits[].attributes[].value` | `number` | `0` | Modifier amount; no loader range or finite-value check. |
+| `outfits[].attributes[].operation` | `enum` | `addition` | `addition`, `multiply_base`, `multiply_total`; trimmed and case-insensitive, unknown becomes `addition`. |
+
+The initial outfit is the first retained default, otherwise the first `always` outfit, otherwise the first outfit whose rule is not `locked`, otherwise the first entry. This fallback does not evaluate a particular player's progress. An empty list supplies the fallback `default` outfit.
+
+Repeated IDs keep the last definition but retain the first insertion position. Only the first declared default keeps its flag; later declared defaults have already been made `always` before their flags are removed. Use unique IDs and a single explicit default to avoid these interactions.
+
+Attribute bonuses require the NPC to expose the target attribute. Missing attributes are skipped with a warning. Use each attribute only once in an outfit: the modifier identity includes preset, outfit and attribute, but not operation, so repeated entries are not independent stackable bonuses. Lowering maximum health clamps current health to the new maximum.
+
+### Unlock rules
+
+The following keys live inside player `unlock` or NPC `outfits[].unlock`:
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `enum` | `always` | `always`, `level`, `advancement`, `progression`, `granted`, `locked`; unknown means `always`. |
+| `id` | `identifier` | `absent` | Advancement ID or progression graph ID; invalid syntax becomes absent and those gates fail. |
+| `node` | `string` | `""` | Progression node; trimmed, must be nonempty for that gate. Network limit 64 characters. |
+| `level` | `integer` | `0` | Minimum adventurer level; negative becomes 0. Only used by `level`. |
+
+| Rule | Selection condition |
+| --- | --- |
+| `always` | Always available. Also the JSON default when the rule is omitted. |
+| `level` | Player's adventurer level from IsekaiCore meets `level`; a failed level lookup uses 0. |
+| `advancement` | The server knows the advancement and that player has completed it. |
+| `progression` | That player has unlocked `node` in graph `id`. |
+| `granted` | NPC outfit: the player's wardrobe grant exists. Generic player preset/part checks have no grant source and return false. |
+| `locked` | Unavailable for player selection; does not prevent direct scripted NPC outfit assignment. |
+
+**Omitting an NPC outfit's rule means `always`, not `granted`.** An outfit marked `default: true` also forces `always`, regardless of its supplied rule.
+
+The current player preset gallery does not evaluate a preset's `unlock` rule: all loaded presets get selectable cards. Submission contains a profile rather than a preset ID, and the server validates the resulting parts individually. A preset rule therefore does not restrict access to that template; part rules and NPC outfit rules have their own checks.
+
+## Validation
+
+Unknown keys are ignored. A malformed field that throws during conversion rejects the entire preset, including all of its outfits. The loader logs that file and replaces the catalogue with the successful files; a failed definition does not retain its previous version. Missing optional fields use the defaults above. Identifier syntax is checked separately from whether the referenced content exists.
+
+Player-preset tags longer than 48 characters, unlock nodes longer than 64 characters and outfit IDs longer than 128 characters can load but exceed their network writers. These bounds are not enforced by the JSON loaders.
+
+The current NPC exporter omits explicit `granted` unlock rules, while the reader treats omission as `always`. Restore that rule after exporting a rewarded outfit before using the output in a pack. Profile export also omits paint, writes nondefault shape values rounded to 3 decimal places and emits colours as hexadecimal RGB.
+
+## Reloading
+
+After a successful server data-pack reload, online players receive the part catalogue and player preset gallery, their profiles are revalidated, and loaded NPCs refresh from their presets. This is separate from reloading client models and textures.
+
+Player presets are templates: changing one does not reapply it to every player who previously selected it. Revalidation checks their saved profiles against the current part catalogue and unlocks. Authored NPCs reread their initial profiles; generated citizens still run their generation override. Removed outfit IDs fall back to the current default selection.
+
+There is a current attribute-cleanup limitation: refresh removes modifiers described by the **new** outfit catalogue. Deleting an old outfit or attribute declaration can therefore leave its temporary modifier on an already loaded NPC. Verify existing NPC attributes as well as newly spawned NPCs when editing these definitions.
+
+## Related
+
+[NPC asset authoring](/en/dev/npc-assets/), [NPC runtime](/en/dev/npc/) and [Identity](/en/wiki/identity/).

@@ -1,0 +1,99 @@
+---
+title: "队伍保护"
+description: "玩家归属、随从所有权、伤害来源归因与非增益效果过滤。"
+category: systems
+order: 140
+updated: 2026-09-19
+---
+
+队伍保护比较每个战斗实体背后的玩家。有效随从与其主人属于同一方；伤害来源可将投射物或带所有者的实体解析到直接所有者，使伤害、效果和目标筛选共用同一判断。
+
+## 它做什么
+
+内部类 `TeamAllegiance`、`TeamDamageGuard`、`TeamStatusEffectGuard` 位于 `internal.team`，不是公共 API 门面。同队关系委托给 IsekaiCore 的 `TeamLogic.server().areOnSameSide`；当前仓库使用 `isekaicore_version=0.4.0-build61`。
+
+集成不维护另一套队伍名册，也不保存联盟状态。NPC 跟随归属仍由有效随从会话管理，正式队伍语义归 IsekaiCore 所有。
+
+## 运行时模型
+
+### 归属玩家与阵线比较
+
+| 实体 | 归属玩家 |
+| --- | --- |
+| 玩家 | 自身 UUID。 |
+| 服务器上的 NPC | 仅当 `hasActiveFollowerOwnership()` 成立时使用跟随 UUID。 |
+| 客户端上的 NPC | 仅在 FOLLOW 模式使用追踪的跟随 UUID，不验证服务器会话。 |
+| 其他实体或 null | 无。 |
+
+输入为空、同一实体引用或任一方没有归属时，`areAllied` 返回 false。归属 UUID 相同则立即为 true；不同归属需要可用服务器并委托队伍比较。默认重载传入 `includeAllies=false`，调用方必须显式开启正式盟队处理。
+
+因此，客户端表现可以通过追踪状态识别同一主人，但不能在没有服务器时推断权威跨队关系。`arePlayersOnSameSide` 同样拒绝空值或相同玩家引用，并始终以 `includeAllies=false` 委托。
+
+### 伤害与效果
+
+`responsibleFor` 只解析一层所有权：优先取投射物所有者，否则取 `Ownable` 所有者，否则返回原实体。所有者为空时也返回原实体。不会递归遍历嵌套所有权，`areAllied` 本身也不执行来源解析。
+
+伤害先检查 `DamageSource.getAttacker()` 的责任实体，再在直接来源解析结果不同时检查该来源。任一方与受害者同盟就判定友军伤害。事件监听器对小于等于 `0` 的伤害原样返回；正伤害若为友军伤害则返回 `0`。
+
+| 来源解析后的组合 | 队伍保护结果 |
+| --- | --- |
+| 玩家 → 队友 | 委托队伍检查通过时阻止。 |
+| 玩家 → 自己的随从 | 阻止。 |
+| 玩家 → 队友的随从 | 双方主人同队时阻止。 |
+| 随从 → 主人、主人的队友或同队主人的随从 | 使用相同的归属/队伍规则。 |
+| 玩家/随从 → 无归属或会话过期的 NPC | 此解析器不提供队伍保护。 |
+| 责任实体 → 自己 | 此次比较不匹配同盟。 |
+| 来源无法识别为玩家/随从归属 | 此解析器不提供队伍保护。 |
+
+普通自伤来源因此会通过此检查，但代码没有统一的“自伤直接放行”：若伤害来源另一端独立解析到其他友军，仍可由那一端阻止。其他战斗规则也可能拒绝本检查允许的伤害。
+
+状态效果包装在服务器运行，并以 `!effect.getEffectType().isBeneficial()` 定义“有害”，因此也包含中性效果。队伍检查早于减益命中掷骰、韧性调整及原始效果应用。增益跳过队伍过滤；空来源没有归属，不会被阻止。调用方希望获得保护时必须提供来源归因。
+
+`TeamStatusEffectGuard.isBlocked` 自身只在一层所有权解析后判断同盟，不接收效果参数；非增益分类由包装器负责。不能把此方法当作能区分增益和减益的通用接口。
+
+### 接入点
+
+| 入口 | 约定 |
+| --- | --- |
+| `LivingEntityEvents.SHOULD_DAMAGE` | 注册的伤害监听器修改伤害量。 |
+| `BaseNpcEntity.damage` | 服务器友军伤害拒绝早于 NPC 尝试钩子、闪避检查和 `super.damage`。 |
+| `BaseNpcEntity.tryAvoidProjectilePassThrough` | 友军伤害在避让处理前返回 false，本身并不请求投射物穿透。 |
+| `LivingEntity.addStatusEffect(effect, source)` 包装 | 服务器非增益效果可在应用前返回 false。 |
+| `EntityUtil.areBroadAllies` | 委托给 `TeamAllegiance.areAllied`，转交调用方的盟队标志。 |
+| `NpcTargetDamageGuard` | 独立的对玩家输出目标约束；解析 NPC 来源，并询问该 NPC 是否允许伤害该玩家。 |
+
+NPC 的提前拒绝避免进入普通受伤流程。全局伤害量监听是另一接入点，不能描述成取消所有可能的受伤副作用。旁观者保护也不同于队伍保护：即使不属于同队，NPC 没有与某玩家战斗时也可能放过该玩家。
+
+## 约定
+
+通过所属系统在服务器修改跟随/队伍归属。这些工具查询当前状态，不提供缓存、注册生命周期或线程切换。从网络工作线程调用不会自动转入服务器线程。
+
+创建伤害时保留攻击者和直接来源。嵌套召唤物或投射物经当前单层解析后仍可能停在无归属实体。扩展遍历需要明确的循环/深度策略，现有解析器没有此策略。
+
+## 扩展方式
+
+项目内部目标筛选可共用默认保护规则：
+
+```java
+static boolean canConsiderTarget(LivingEntity attacker, LivingEntity candidate) {
+    return candidate != attacker
+            && candidate.isAlive()
+            && !TeamAllegiance.areAllied(attacker, candidate);
+}
+```
+
+这只是候选筛选，不是完整伤害许可。判断具体命中时使用伤害来源保护，并保留 NPC 对旁观者的目标意图检查。
+
+## 验证
+
+- 使用近战、箭和带来源效果测试玩家、自有随从及队友随从。
+- 通过断线、解散和加载旧存档使跟随归属过期，确认仅有追踪 UUID 不足以保护服务器 NPC。
+- 比较直接自伤、增益、中性效果、空来源非增益效果及嵌套所有权来源。
+- 使用攻击者与直接来源不同的伤害，确认两条解析路径均被考虑。
+- 观察伤害、击退、仇恨和投射物行为时，区分 NPC 提前拒绝、全局伤害量监听与输出旁观者保护。
+
+## 相关页面
+
+- [NPC 随从](/zh-cn/dev/npc-followers/)：有效归属和会话规则。
+- [NPC 战斗](/zh-cn/dev/npc-combat/)：目标选择和旁观者约束。
+- [声望运行时](/zh-cn/dev/reputation-runtime/)：独立的阵营关系系统。

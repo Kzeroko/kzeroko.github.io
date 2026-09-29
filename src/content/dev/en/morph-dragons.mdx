@@ -1,0 +1,207 @@
+---
+title: "Saints Dragons morph bridge"
+description: "Native species simulation, rider bindings, damage scaling, transport and replicated presentation for dragon forms."
+category: systems
+order: 116
+updated: 2026-09-24
+---
+
+The Saints Dragons bridge runs selected native controllers on the unspawned morph form while the player remains the world entity. This page describes the integration in this repository, checked against the pinned dependency `maven.modrinth:saints-dragons:Zn44yGbo`; native ability timings, seat offsets, variants and flight configuration remain owned by Saints Dragons.
+
+## What it does
+
+Common and client bootstraps run only with mod ID `saintsdragons` present and log linkage/runtime failures. Initialisation is sequential, with no rollback of earlier registrations if a later one fails.
+
+The common bridge registers native overrides for both morph ability slots, display IDs, form-skill actions, travel, mounts, tick ownership and variants. Supported runtime species are Raevyx, Stegonaut, Cindervane, Varasuchus, Ignivorus, Volitans, Nulljaw and Atroxiia. The progression species list excludes Nulljaw. These are internal compatibility types, not public facades.
+
+## Runtime model
+
+### One host, selected native ticks
+
+`SaintsDragonMorphLifecycle` binds the native form to its host, clears sitting and initialises animation once. Runtime state is attached to the form; it is not a separately saved dragon. The lifecycle advances at most once per host age tick and preserves native rotation when synchronising host state.
+
+Combat and sound controllers tick on both sides. World effects tick only on the server. The server and owning client advance ability upkeep, animation, flight counters, takeoff locks and dive/water-entry state; observers apply replicated visual state before medium-specific smoothing. Scoped native-context mixins permit selected untracked-form methods to advance without changing the world's actual side.
+
+Ability displacement of at least 2 blocks (squared distance 4) requests a server teleport. Smaller nontrivial displacement uses player collision movement; changed native velocity copies to the host. The motion epsilon is squared distance `1.0E-8`. This is separate from travel's own movement path.
+
+Detach ends the active native ability, clears input and held bindings, removes attached runtime and unbinds the host. It does not save an in-progress native ability for reconnect.
+
+### Travel and landing
+
+All supported dragons handle ordinary travel; only flying dragons support special-travel activation and client prediction. Activation mode is `PRESS`. The handler calls native rider controllers under the host rider context, then transfers native displacement/velocity to the real player. Grounded movement returns a speed override: zero stays zero, otherwise it is the larger of native ridden speed and the form's movement-speed attribute.
+
+Raevyx, Cindervane and Ignivorus share flight/swim/ground dispatch. Volitans has separate flight/swim handling and automatic breach probing. Nulljaw uses its own flight routine. Varasuchus and Atroxiia use dedicated swimming controllers; Stegonaut returns grounded rider speed. Native configuration supplies those speeds and flight impulses.
+
+Takeoff entry checks surface breach, then fall recovery, then ordinary takeoff. Landing or landed recovery blocks activation. A pending request retries for 30 ticks (1.5 seconds), then releases special travel. The fallback touchdown check requires at least 2 aerial ticks and 3 consecutive ground-contact ticks. Landing recovery lasts at least 1 tick, otherwise the native configured cooldown; it stops horizontal and upward velocity, clears input and releases special travel. Water handoff clears takeoff bookkeeping separately.
+
+An already aerial native form can adopt special travel even when the component did not request it. Deactivation requests the native landing sequence; it does not simply zero flight flags. See [client input](/en/dev/morph-client/) for the distinction between press activation and double-tap deactivation.
+
+### Native ability bindings
+
+Morph primary reads the native attack binding; morph secondary reads the native primary binding. They both route through `isekaiexpansion:saints_dragons_native_rider`. Display IDs use the native ability's explicit namespace when present, otherwise `saintsdragons:`; a missing binding displays no ability.
+
+Repeated held-input packets are rejected. A press counts as accepted only if the native callback leaves the requested ability active, including an overlay ability. `HOLD`, an infinite section track, or a `CANCEL` repress policy requires release.
+
+Accepted native cooldowns have a minimum of 4 ticks (0.2 seconds). A finite cycle sums nonnegative duration sections, counts other sections as 1 tick, and adds recovery. Recovery is the maximum of native cooldown, recovery ticks and interrupt-recovery ticks, with the same minimum. A held/infinite start uses the minimum; release uses recovery.
+
+Repress defaults to `IGNORE`. Raevyx lightning beam, Ignivorus fire breath and Volitans breath use `CANCEL`; Volitans burrow uses `NATIVE`. Cancellation first tries native held release, then force-ends a still-active ability. Native repress calls the native entry point again. Eligible repress can bypass the morph display cooldown.
+
+Form-skill actions use the following bindings. Slot names refer to native rider slots, not morph primary/secondary. Named bindings resolve the listed `ModAbilities` constant through the native registry.
+
+| Action ID (`isekaiexpansion:` prefix) | Native source |
+| --- | --- |
+| `cindervane_dragon_ultimate` | `SECONDARY` |
+| `cindervane_dragon_ember_body` | `TERTIARY` |
+| `volitans_dragon_ultimate` | `SECONDARY` |
+| `volitans_dragon_breath` | `VOLITANS_BREATH` |
+| `volitans_dragon_venom` | `VOLITANS_POISON_BALL` |
+| `varasuchus_dragon_ultimate` | `SECONDARY` |
+| `ignivorus_dragon_ultimate` | `SECONDARY` |
+| `ignivorus_dragon_breath` | `TERTIARY` |
+| `ignivorus_dragon_fireball` | `IGNIVORUS_FIREBALL` |
+| `atroxiia_dragon_ultimate` | `SECONDARY` |
+| `atroxiia_dragon_gungnir` | `TERTIARY` |
+| `atroxiia_dragon_precise_strike` | `ATROXIIA_PRECISE_STRIKE` |
+| `stegonaut_dragon_ultimate` | `SECONDARY` |
+| `stegonaut_dragon_boulder` | `TERTIARY` |
+| `raevyx_dragon_ultimate` | `SECONDARY` |
+| `raevyx_dragon_beam` | `TERTIARY` |
+| `raevyx_dragon_rend` | `RAEVYX_GROUND_REND` |
+
+The declared progression power catalogue must exactly match this bound action set; startup throws on mismatch, and duplicate action IDs also throw. Nulljaw has no form-skill action in this catalogue.
+
+Held form skills schedule release using `native_hold_ticks`, default 30 ticks (1.5 seconds), minimum 1. The callback checks active phase, morph revision and form object identity. A repress cancellation removes the held action; an old scheduled callback then does nothing if that binding is absent.
+
+## Contracts
+
+### Damage and attribution
+
+Native direct, spawned-projectile and ray damage resolve back to the player and originating species/ability. Resolution prefers captured ray/projectile origin before the currently active form ability. Moving native sounds are also redirected to the host entity ID and UUID for tracking viewers and the host.
+
+For positive incoming damage, the bridge computes:
+
+```text
+total = nativeAmount × nativeFactor + flatBonus
+      + meleePower × meleeFactor + spellPower × spellFactor
+```
+
+Nonpositive totals become zero. Exact identity scaling returns the original amount without an added critical roll. Other scaling uses the host's normalised magic critical attributes when spell factor is strictly greater than melee factor, otherwise melee critical attributes. Critical damage multiplies by `1 + max(0, normalisedBonus)`.
+
+Spell power uses the noncritical value of the explicit scaling school, otherwise the species school. Melee power uses live attack damage plus positive additive main-hand item damage suppressed by modular equipment handling. When that item contribution is positive, the current implementation multiplies the **whole sum** by live attack damage divided by base-plus-additive attack damage; a nonpositive denominator/scale falls back to 1. This can apply proportional scaling again to the live portion.
+
+| Species | School |
+| --- | --- |
+| Nulljaw | `IsekaiSpellSchools.ASTRAL` |
+| Cindervane | `SpellSchools.FIRE` |
+| Volitans | `SpellSchools.SOUL` |
+| Varasuchus | `IsekaiSpellSchools.WATER` |
+| Ignivorus | `SpellSchools.FIRE` |
+| Atroxiia | `IsekaiSpellSchools.DARK` |
+| Stegonaut | `IsekaiSpellSchools.EARTH` |
+| Raevyx | `SpellSchools.LIGHTNING` |
+
+Unlisted abilities use native factor 1, flat bonus 0, melee factor 0.5 and spell factor 0. The table lists local bridge coefficients per native damage call, including repeated beam/breath calls; native damage amounts and hit cadence are external.
+
+| Native ability constant | Native factor | Flat bonus | Melee factor | Spell factor |
+| --- | --- | --- | --- | --- |
+| `NULLJAW_BITE` | 1.0 | 0.0 | 1.1 | 0 |
+| `NULLJAW_FORWARD_TELEPORT` | 1.0 | 0 | 0 | 0 |
+| `CINDERVANE_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `CINDERVANE_SLASH_GRAB` | 1.0 | 0.0 | 1.2 | 0 |
+| `CINDERVANE_DOUBLE_BITE` | 1.0 | 0.0 | 0.6 | 0 |
+| `CINDERVANE_MAGMA_VOLLEY` | 1.0 | 4.0 | 0 | 1.1 |
+| `CINDERVANE_FIRE_BODY` | 1.0 | 0.4 | 0 | 0.1 |
+| `VOLITANS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `VOLITANS_CLAW` | 1.0 | 0.0 | 0.95 | 0 |
+| `VOLITANS_HORN_GORE` | 1.0 | 0.0 | 1.3 | 0 |
+| `VOLITANS_BURROW` | 1.0 | 0.0 | 1.4 | 0 |
+| `VOLITANS_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `VOLITANS_POISON_BALL` | 1.0 | 5.0 | 0 | 1.15 |
+| `VOLITANS_BREATH` | 1.0 | 0.5 | 0 | 0.12 |
+| `VOLITANS_ULTIMATE` | 1.0 | 6.0 | 0.6 | 1.5 |
+| `VARASUCHUS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `VARASUCHUS_BITE2` | 1.0 | 0.0 | 1.3 | 0 |
+| `VARASUCHUS_CLAW` | 1.0 | 0.0 | 0.95 | 0 |
+| `VARASUCHUS_HORN_GORE` | 1.0 | 0.0 | 1.25 | 0 |
+| `VARASUCHUS_TAIL_ATTACK` | 1.0 | 0.0 | 1.1 | 0 |
+| `VARASUCHUS_SLASH_BARRAGE` | 1.0 | 0.0 | 0.55 | 0 |
+| `VARASUCHUS_TAILGUARD` | 1.0 | 0 | 0 | 0 |
+| `VARASUCHUS_PHASE_SHIFT` | 1.0 | 0 | 0 | 0 |
+| `IGNIVORUS_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `IGNIVORUS_BODY_SLAM` | 1.0 | 0.0 | 1.5 | 0 |
+| `IGNIVORUS_WING_SWIPE` | 1.0 | 0.0 | 1.1 | 0 |
+| `IGNIVORUS_STOMP` | 1.0 | 0.0 | 1.35 | 0 |
+| `IGNIVORUS_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `IGNIVORUS_FIRE_BREATH` | 1.0 | 0.6 | 0 | 0.12 |
+| `IGNIVORUS_FIREBALL` | 1.0 | 6.0 | 0 | 1.25 |
+| `IGNIVORUS_ULTIMATE` | 1.0 | 14.0 | 0 | 2.6 |
+| `ATROXIIA_SLAM` | 1.0 | 0.0 | 1.4 | 0 |
+| `ATROXIIA_SWIPE` | 1.0 | 0.0 | 1.05 | 0 |
+| `ATROXIIA_UNDERWATER_BITE` | 1.0 | 0.0 | 1.15 | 0 |
+| `ATROXIIA_DEVASTATING_SWEEP` | 1.0 | 0.0 | 1.5 | 0 |
+| `ATROXIIA_PRECISE_STRIKE` | 1.0 | 0.0 | 0.55 | 0 |
+| `ATROXIIA_GUNGNIR_STAB` | 1.0 | 3.0 | 1.2 | 0.5 |
+| `ATROXIIA_HELHEIM_QUAKE` | 1.0 | 5.0 | 0 | 1.6 |
+| `ATROXIIA_SLITHER` | 1.0 | 0 | 0 | 0 |
+| `STEGONAUT_BITE` | 1.0 | 0.0 | 1.0 | 0 |
+| `STEGONAUT_CHIN_SLAM` | 1.0 | 0.0 | 1.3 | 0 |
+| `STEGONAUT_GROUND_SLAM` | 1.0 | 3.0 | 0.8 | 1.0 |
+| `STEGONAUT_GROUND_EATING` | 1.0 | 2.0 | 0.8 | 0.8 |
+| `RAEVYX_BITE` | 1.0 | 0.0 | 0.9 | 0 |
+| `RAEVYX_HORN_GORE` | 1.0 | 0.0 | 1.35 | 0 |
+| `RAEVYX_GROUND_REND` | 1.0 | 0.0 | 0.9 | 0.45 |
+| `RAEVYX_ROAR` | 1.0 | 2.0 | 0 | 0.5 |
+| `RAEVYX_SUMMON_STORM` | 1.0 | 3.0 | 0 | 1.4 |
+| `RAEVYX_LIGHTNING_BEAM` | 1.0 | 0.5 | 0 | 0.12 |
+
+### Upkeep and muzzle origin
+
+Raevyx advances beam energy and beam look. Ignivorus advances fire-breath energy and phase state, with its breath stream ticking on the server. Volitans similarly advances breath-gauge energy and its server breath stream. Varasuchus advances phase-two linger. Other profiles have no extra upkeep/effect override here.
+
+Raevyx uses `beamBoneOrigin` and Volitans uses `breathBoneOrigin`. Ignivorus inherits the default null locator, so this bridge neither samples nor applies a client muzzle offset for it. The owning client samples a rendered locator, converts its world offset into body-yaw-local space, and sends only changed quantised samples, no more often than every 2 ticks. Change detection quantises at 256 units per block; the packet still carries floating-point offsets.
+
+The server accepts the sample only for the active matching morph revision and a dragon form, then reprojects it using current position/body yaw before effects. **The receiver does not check finite values or bound the offset's magnitude.** Treat this as the current trust boundary, not server-reconstructed bone geometry. Samples have no age expiry in this runtime; absent samples leave the native fallback in charge.
+
+### Replication
+
+| Packet / state | Fields | Ownership and acceptance |
+| --- | --- | --- |
+| `saints_dragon_morph_state` | host entity ID, morph revision, raw form type ID, visual state | Tracking observers only. Future matching state can wait; stale revision drops. Apply requires revision and form type match. |
+| Visual state | ground move state, flight mode, rider forward/strafe, going up/down, accelerating, flying, takeoff, hovering, landing, flight pitch, accumulated roll, yaw, pitch, body yaw, head yaw | Move/mode are bytes, input and angles are floats, booleans pack into a flag byte. Reapplied to observer form before native visual smoothing. |
+| `saints_dragon_morph_ability_state` | host entity ID, morph revision, active/overlay ability names; empty name means none | Tracking observers and host. Requires active matching revision; no pending queue. Reconciles mismatched local abilities, allowing a short completion window as described below; never starts or seeks one. |
+| `saints_dragon_morph_muzzle` | morph revision and local X/Y/Z float offsets | Owning client's C2S sample; checks described above. |
+
+Visual state sends on change and every 20 ticks (1 second). Ability correction sends only when the active/overlay names change. Starting to track sends a visual snapshot only. Therefore an observer joining during an existing ability is not guaranteed its start animation from these packets; the generic preview also has no replay history.
+
+A mismatched registered local ability with more than 40 ticks (2 seconds) left, or an unbounded remaining section, ends immediately. A finite ability within that window can finish naturally: its remaining track time receives 10 extra ticks (0.5 seconds) of grace. The countdown advances after the local ability tick. An empty slot or a changed ability name clears the wait; otherwise expiry forces the end. Matching or unregistered abilities are left alone.
+
+### Passengers, camera and variants
+
+The bridge accepts one real passenger on an adult form when host and rider are alive, nonspectating and not already riding, and the host has no passenger. The synthetic controlling rider remains a separate identity.
+
+Client `passengerLocator` can supply an animated seat; the server uses native species seat offsets, with a separate Nulljaw height path. Dismount probes radii 2.5, 3.5 and 1.8 at angles 0, 30, −30, 60, −60, 90, −90 and 180, passing search depth 10 and clearance parameter 2 to the native radial helper. Carried riders are considered native allies. Passenger orientation uses the native cached rider matrix/spec and seat offsets; absent/stale native data can leave the pose unapplied.
+
+The camera samples the native ride-camera controller only during active morphs. Native client configuration can suppress banking lateral shift; zoom, vertical shift and pitch still come from its output. Generic clipping/perspective rules remain in [morph client presentation](/en/dev/morph-client/).
+
+Variant options and default IDs come from `SaintsDragonVariantRegistry`, for the native `Dragons` catalogue. Applying a variant sets the native texture variant ID. This provider owns form textures, so the generic morph PNG override does not replace them. Selection ownership and persistence remain in [morph lifecycle](/en/dev/morphing/).
+
+## Extending it
+
+Keep species scaling, form-skill bindings, repress policy and upkeep in its `SaintsDragonProfile`. Register a native action in both the declared power catalogue and species profile. Add movement handling only where the native controller requires it, and keep simulation ownership distinct from render smoothing.
+
+Dependency updates require checking accessor/mixin targets, section and recovery semantics, rider controllers, locator names, sound packets, camera output and seat caches. The dependency pin identifies the integration target; this page does not assert stable third-party APIs.
+
+## Verifying
+
+Use a dedicated server with owner, existing observer and late observer. Exercise each species on ground, in water, on takeoff, during landing and after teleport. Check recovery locks, momentum, native rotation and absence of double advancement.
+
+For every catalogue action, compare press, hold, release and repress, including release after changing forms. Test overlay plus primary activity and delayed packets. Compare native damage with the coefficient table using known melee/spell attributes, crit disabled, then enabled; include a main-hand weapon while its normal equipment contribution is suppressed.
+
+Check muzzle origin while turning and after delayed/missing reports, inspect malformed-offset handling separately, and verify projectile damage attribution after the original ability ends. Board and dismount one passenger, check friendly-hit rejection, eye/camera obstruction, perspective changes and resource-reloaded native variants.
+
+## Related
+
+- [Morph services](/en/dev/morph-api/)
+- [Morph lifecycle](/en/dev/morphing/)
+- [Morph client presentation](/en/dev/morph-client/)
+- [Morph data](/en/wiki/morph-data/)

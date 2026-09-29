@@ -1,0 +1,334 @@
+---
+title: "任务目标"
+description: "目标参数、谓词、交付规则、内容触发器与生成动作的完整字段。"
+category: data
+order: 91
+updated: 2026-09-24
+---
+
+任务目标将符合条件的服务端事件转为数值进度或完成标志。类型自身的检查先于事件过滤树执行；任务中的全部目标完成后才会发放奖励。悬赏任务还需向接待员确认汇报后结算，见[悬赏数据](/zh-cn/wiki/bounty-data/)。
+
+## 文件放在哪里
+
+目标位于 `data/<namespace>/quests/**/*.json` 的 `objectives` 数组中，不是独立资源。[任务数据](/zh-cn/wiki/quest-data/)说明外层文件、资源优先级、标识及整体目录校验。下文所有内置目标类型都使用 `isekaiexpansion` 命名空间。
+
+## 最小示例
+
+将此条目放入任务的 objectives 数组，并补齐任务数据页要求的根字段。它采用示范文件中的 visit-location 结构，不需要类型专用字段。没有事件过滤时，首个合格玩家刻即可完成。
+
+```json
+{
+  "id": "visit",
+  "progress_type": "boolean",
+  "type": "isekaiexpansion:visit_location",
+  "data": {}
+}
+```
+
+## 字段
+
+### 目标外层结构
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `id` | `string` | 必填 | 非空白 ID，在任务内唯一。 |
+| `progress_type` | `string` | 必填 | numeric 或 boolean；后者使用完成标志。 |
+| `required` | `integer` | 1 | 正整数目标；boolean 必须为 1。 |
+| `type` | `identifier` | 必填 | 下表中已注册的目标类型。 |
+| `data` | `object` | 必填 | 类型参数与 content_triggers；支持失败规则的类型还解析 failures。 |
+| `conditions` | `object / array<object>` | [] | 目标事件过滤树；省略或空数组表示只需满足目标自身检查。 |
+
+数值进度累加类型给出的非负增量，上限为 2147483647。布尔进度在首个匹配事件变为 true，不取决于该类型的数值增量。完成的目标不再接收常规进度、手动内容或失败检查。普通追踪路径要求存在归属玩家才能推进；附近无玩家归属的死亡不会提供击杀进度。
+
+| 目标类型 | 事件与数值增量 |
+| --- | --- |
+| `isekaiexpansion:defeat_entities` | 有归属的击杀，+1 |
+| `isekaiexpansion:interact_block` | 方块使用回调，+1 |
+| `isekaiexpansion:interact_entity` | 实体使用回调，+1 |
+| `isekaiexpansion:npc_talk` | 绑定的 NPC 任务对话开始，+1 |
+| `isekaiexpansion:npc_delivery` | 交付完整批次，+1 |
+| `isekaiexpansion:bounty_delivery` | 向公会接待员确认汇报，消耗不超过剩余需求的物品，无需携带文书；仅限悬赏的数值型目标。 |
+| `isekaiexpansion:recipe_crafted` | 匹配的制作事件，增加非负 crafted_amount |
+| `isekaiexpansion:advancement` | 匹配的进度事件，+1 |
+| `isekaiexpansion:visit_location` | 玩家刻，增加 progress_per_tick |
+| `isekaiexpansion:photograph` | 有归属的 Exposure 照片，增加 progress_per_photo |
+| `isekaiexpansion:complete_dungeon` | 原生地牢完成，+1 |
+
+### 类型参数
+
+以下字段位于目标的 `data` 中。其他类型的字段通常没有效果，除非解析器明确拒绝。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `target` | `object` | 必填 | defeat_entities、interact_entity 的实体谓词；{} 匹配任何存在且未被移除的实体。 |
+| `credit` | `string` | party | defeat_entities：party、player、picker。player 只接受直接或投射物归属；picker 要求归属玩家是记录中的领取者。 |
+| `weapon` | `object` | 不过滤 | defeat_entities：在击杀事件发生时检查归属玩家当前手持堆叠的物品谓词。 |
+| `weapon_hand` | `string` | either | defeat_entities：either、main_hand、off_hand；出现此字段必须同时提供 weapon。 |
+| `damage_type` / `damage_types` | `string / array<string>` | [] | defeat_entities：允许的伤害 ID，两个键合并。 |
+| `damage_type_tag` / `damage_type_tags` | `string / array<string>` | [] | defeat_entities：允许的伤害标签，不带 #；ID 与标签之间为或关系。 |
+| `block` | `object` | 必填 | interact_block：下文的方块谓词。 |
+| `held_item` | `object` | 不过滤 | 交互目标：检查本次事件实际使用的手；either 不会遍历双手。 |
+| `hand` | `string` | either | 交互目标：either、main_hand、off_hand。 |
+| `sneaking` | `boolean` | 不过滤 | 交互目标：期望的潜行状态。 |
+| `npc` | `object` | 必填 | npc_talk、npc_delivery：下文的 NPC 身份及位置选择器。 |
+| `dialogue` | `identifier` | 必填 | npc_talk：精确对话 ID；绑定的任务对话开始时推进，不等待最后一句关闭。 |
+| `item` | `object` | 必填 | npc_delivery：物品谓词加 count，描述一次交付批次。bounty_delivery 仅使用物品谓词，外层 required 是物品总数。 |
+| `delivery` | `object` | 必填 | npc_delivery：下文的携带者、来源和交付方式。 |
+| `recipe_id` | `identifier` | 必填 | recipe_crafted：非空白配方 ID，精确匹配事件参数，不是产物 ID。 |
+| `recipe_type` / `recipe_serializer` / `source` | `identifier` | 不过滤 | recipe_crafted：额外精确过滤，空白字符串被拒绝。来源包括 `minecraft:recipe_crafted`、`isekaiexpansion:alchemy`、`isekaiexpansion:forgery`。 |
+| `advancement_id` | `identifier` | 必填 | advancement：非空白进度 ID。 |
+| `criterion` | `string` | 不过滤 | advancement：单个准则名称，去除首尾空白，空值被拒绝。 |
+| `criteria` | `array<string>` | [] | advancement：与 criterion 合并为或关系；去除首尾空白后空值被拒绝，重复项合并。 |
+| `complete_only` | `boolean` | false | advancement：还要求事件报告整个进度已完成。 |
+| `progress_per_tick` | `integer` | 1 | visit_location：每个合格玩家刻增加的正整数进度。 |
+| `progress_per_photo` | `integer` | 1 | photograph：每个有归属的 Exposure 照片事件增加的正整数进度。 |
+| `dungeon` | `identifier` | 不过滤 | complete_dungeon：可选的原生地牢精确 ID。 |
+| `minimum_difficulty` | `string` | 不过滤 | complete_dungeon：按稀有度递增为 common、uncommon、rare、epic、legendary、unique；去除首尾空白且忽略大小写，未知或空值被拒绝。 |
+
+击杀归属会将直接玩家、玩家投射物、跟随 NPC 及其投射物解析到责任玩家。`party` 接受该归属玩家对共享档案的贡献，不会给周围所有队伍发放进度。`player` 排除伙伴归属；`picker` 将责任玩家与保存的领取者比较。武器谓词检查事件发生时该玩家的双手，不检查投射物或伙伴上保存的武器。
+
+交互回调报告使用尝试，随后交还常规交互处理；目标不等待方块或实体交互成功。手部及归属选项去除首尾空白并忽略大小写，未知名称拒绝定义。配方和进度目标响应激活后的事件，不扫描历史制作或已经取得的进度。
+
+### 实体、物品与方块谓词
+
+单数和复数字段合并；两者均可接收字符串或数组，去除首尾空白、忽略空项并合并重复值。此处的实体类型、物品、方块及伤害标签均使用**不带 # 的纯 ID**，下文位置标签例外。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `entity_type` / `entity_types` | `string / array<string>` | [] | 实体谓词：合并实体类型 ID；未注册类型被拒绝。 |
+| `entity_type_tag` / `entity_type_tags` | `string / array<string>` | [] | 实体谓词：合并不带 # 的类型标签，与类型 ID 为或关系。 |
+| `entity_tag` / `entity_tags` | `string / array<string>` | [] | 实体谓词：命令标签，要求全部存在；与实体类型标签不同。 |
+| `item` / `items` | `string / array<string>` | [] | 物品谓词：合并物品 ID；未注册物品被拒绝。 |
+| `item_tag` / `item_tags` | `string / array<string>` | [] | 物品谓词：合并不带 # 的物品标签，与物品 ID 为或关系；至少提供一个 ID 或标签。 |
+| `block` / `blocks` | `string / array<string>` | [] | 方块谓词：合并方块 ID；未注册方块被拒绝。 |
+| `block_tag` / `block_tags` | `string / array<string>` | [] | 方块谓词：合并不带 # 的方块标签，与方块 ID 为或关系；至少提供一个 ID 或标签。 |
+| `state` | `object` | {} | 方块谓词：属性名到字符串的映射；每项属性必须存在，值忽略大小写比较。 |
+| `nbt` | `object` | 不过滤 | 实体或物品谓词：启用列表比较的部分 NBT 匹配；容器类型错误被拒绝。 |
+| `block_entity_nbt` | `object` | 不过滤 | 方块谓词：部分方块实体 NBT；无方块实体时此过滤失败。 |
+| `count` | `integer` | 1 | 仅交付物品要求：每批 1–4096 个，超出范围被拒绝。 |
+
+实体身份匹配任一类型 ID 或类型标签后，还须满足全部命令标签及 NBT 过滤。空实体谓词用作目标时，仍要求实体存在且未移除。空物品或方块谓词在加载时被拒绝。未知标签通常无法匹配；与显式物品、方块、实体 ID 不同，谓词解析器不检查这些标签引用是否存在。
+
+NBT 过滤分别对比实体数据、物品堆叠自身 NBT 或方块实体数据，使用下文的类型化 NBT JSON 对象，不接受 SNBT 字符串。
+
+### 位置与 NPC 身份
+
+通用位置谓词同时应用维度、球形坐标、群系及结构条件组。群系组内或结构组内的候选之间为或关系。空位置对象仍要求存在世界与事件位置。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `dimension` | `identifier` | 不过滤 | 精确世界 ID。 |
+| `x` / `y` / `z` | `number` | 不限制位置 | 世界坐标，单位方块，必须有限；出现任意一项即要求三项齐全及正数 radius。 |
+| `radius` | `number` | 0 | 有坐标时必须有限且大于 0，使用包含边界的球形距离；无坐标时出现 radius 即被拒绝，即使值为 0。 |
+| `biome` / `biomes` | `string / array<string>` | [] | 通用位置谓词：合并群系 ID。 |
+| `biome_tag` / `biome_tags` | `string / array<string>` | [] | 通用位置谓词：合并群系标签，允许开头带 #，与群系 ID 为或关系。 |
+| `in_structure` | `boolean` | false | 通用位置谓词：要求位于某个结构内。 |
+| `structure` / `structures` | `string / array<string>` | [] | 通用位置谓词：允许的包含结构 ID。 |
+| `structure_tag` / `structure_tags` | `string / array<string>` | [] | 通用位置谓词：结构标签，允许带 #；与结构 ID 为或关系，任意列表非空都会要求存在结构。 |
+| `npc.identity` | `string` | 必填 | NPC 选择器：去除首尾空白后非空的身份、类型 ID、类型路径或 NPC 类型翻译键；转小写并将连续非字母数字转为下划线。 |
+| `npc.location` | `object` | {} | NPC 选择器：仅 dimension、x/y/z/radius，检查存活 NPC 的位置，不支持通用群系或结构过滤。 |
+
+位置选择器的单复数字段同样合并、去除首尾空白并忽略空项。结构匹配使用异界核心解析出的包含结构；查询失败即不能满足结构条件。NPC 选择器检查 NPC 位置，而目标的 `location` 条件检查事件位置，例如交互方块中心、NPC 位置、击杀位置或照片位置。
+
+NPC 身份别名可能匹配同类型通用 NPC 的多个实例。若任务要绑定某个区域，应添加位置范围；此选择器不强制要求唯一身份注册。
+
+### 交付
+
+以下字段位于 `data.delivery` 内。枚举字符串去除首尾空白并忽略大小写，未知选项拒绝定义。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `carrier` | `string` | 必填 | party_member 或 picker；后者要求原领取者 UUID。 |
+| `source` | `object` | 必填 | 库存来源对象。 |
+| `source.type` | `string` | 必填 | main_hand、inventory、niftycarts_cart。 |
+| `source.search_radius` | `number` | 该类型必填 | NPC 周围大于 0 且不超过 32 方块的有限距离，其他来源类型禁止此字段。 |
+| `source.allowed_cart_types` | `array<identifier>` | [] | 货车实体类型白名单；空数组接受所有受支持货车，非货车来源禁止此字段。 |
+| `completion` | `object` | 必填 | 交互或接近完成对象。 |
+| `completion.type` | `string` | 必填 | npc_interact 或 npc_proximity。 |
+| `completion.radius` | `number` | 该类型必填 | 携带者与 NPC 间大于 0 且不超过 32 方块的有限距离，npc_interact 禁止此字段。 |
+| `consume_on_complete` | `boolean` | true | 交付成功时消耗一个完整批次，false 保留物品。 |
+
+主手来源要求该堆叠含有完整批次；背包及货车来源可在同一个库存内合计多个匹配堆叠。货车模式在加载时要求安装可选模组 **Nifty Carts**，围绕 NPC 搜索最近的合格库存货车，不要求货车与携带者连接。
+
+自动接近检查每 5 刻执行一次，按玩家实体 ID 错开；每秒 20 刻时为 0.25 秒。一次检查只处理首个成功交付，不会处理全部待交批次。桥接先检查目标事件条件，再消耗物品，最后向指定任务和目标发送事件。
+
+**物品数量与目标进度不同**。一批 16 个物品增加 1 数值进度，因此 `required: 3` 需要成功交付 3 批。`consume_on_complete: false` 时，接近目标可在后续检查重复使用同一批物品。交付消耗与随后追踪器执行不是可回滚事务。
+
+已移除的 `delivery.constraints` 字段会被明确拒绝。受支持的失败规则应放在 `data.failures`。
+
+### 目标事件条件
+
+此条件树位于 `objectives[].conditions`，通过位置、实体或事件参数叶子过滤事件。玩家等级、队伍和 sequence 属于领取及内容触发器使用的另一套通用条件树。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `identifier` | 必填 | `isekaiexpansion:all`、`isekaiexpansion:any`、`isekaiexpansion:not`、`isekaiexpansion:location`、`isekaiexpansion:entity`、`isekaiexpansion:payload`。 |
+| `data` | `object` | 必填 | 叶子字段或分组 children；location 使用通用位置表，entity 也包含实体谓词字段。 |
+| `data.children` | `array<object>` | [] | all/any/not 的子条件；数组也表示 all。空 all 通过，空 any 失败，not 恰好要求 1 个子条件。 |
+| `data.role` | `string` | target | entity：target（别名 target_entity、focused、focused_entity）、source（source_entity）或 player。空白变为 target，未知值拒绝。 |
+| `data.require_present` | `boolean` | entity 按过滤项决定 | entity：存在谓词过滤或正数 max_distance 时强制 true。payload：false 时缺失键直接通过，即使配置了值过滤。 |
+| `data.max_distance` | `number` | 0 | entity：距事件玩家的有限非负方块距离；0 禁用，正数要求存在事件玩家。 |
+| `data.key` | `string` | 必填 | payload：去除首尾空白后的非空事件参数顶层键，不解析嵌套路径。 |
+| `data.string` / `data.strings` | `string / array<string>` | [] | payload：精确字符串候选，集合内为或关系；字符串列表参数只需任一成员匹配。忽略空白项，其余空白保留。 |
+| `data.boolean` | `boolean` | 不过滤 | payload：期望布尔值，与字符串和数值限制同时成立。 |
+| `data.min` / `data.max` | `number` | 无边界 | payload：包含边界的有限数值范围，max 低于 min 拒绝。 |
+| `data.value` | `string / number / boolean` | 不覆盖 | payload 简写：字符串追加候选，布尔值覆盖 boolean，数值同时覆盖 min 与 max；对象、数组或 null 不增加简写约束。 |
+
+分组采用短路计算。location 叶子直接将位置字段放入 `data`，没有额外 location 包装；entity 也直接包含实体谓词字段。只有不要求存在时，缺失或已移除实体才通过。payload 使用存储值的布尔或数值转换，不执行严格参数类型校验，因此应选择事件实际产生相应类型的键。
+
+非照片事件的常用参数键包括：交互的 `hand`、`sneaking`；击杀的 `credit`；对应 NPC 事件的 `npc_identity`、`dialogue_id`、`delivery_source`、`delivered_count`；制作的 `recipe_id`、`recipe_type`、`recipe_serializer`、`output_item_id`、`crafted_amount`、`source`；进度的 `advancement_id`、`criterion`、`complete`；地牢完成的 `dungeon`、`difficulty`。可选制作元数据可能缺失。
+
+### 摄影事件参数
+
+Exposure 桥接依次选择获奖服务端玩家、执行拍摄的服务端玩家、玩家持有者；均不存在时不发送任务照片事件。事件来源是相机持有者，目标是 Exposure 提供的照片实体列表中距照片位置最近、未移除的生物实体。
+
+这些键用于 `isekaiexpansion:payload`，属于生成的事件数据，不是 `photograph.data` 的额外字段。“有记录时”表示 Exposure 照片含有对应元数据。
+
+| 参数键 | 类型 | 何时存在 | 含义 |
+| --- | --- | --- | --- |
+| `exposure_id` | `string` | 始终 | Exposure 照片标识。 |
+| `exposure_type` | `string` | 始终 | Exposure 照片类型字符串。 |
+| `camera_item_id` | `identifier` | 始终 | 相机物品注册 ID。 |
+| `camera_id` | `string` | 始终 | 相机堆叠身份。 |
+| `photographer_name` | `string` | 始终 | 记录的摄影者名称。 |
+| `photographer_uuid` | `string` | 有记录时 | 记录的摄影者 UUID。 |
+| `photographer_is_player` / `photographer_is_npc` | `boolean` | 始终 | 摄影者元数据标志，不是归属玩家的身份检查。 |
+| `holder_entity_type` | `identifier` | 始终 | 相机持有实体类型。 |
+| `holder_entity_id` | `integer` | 始终 | 持有者的运行时实体 ID。 |
+| `frame_x` / `frame_y` / `frame_z` | `number` | 始终 | 照片位置，单位方块；缺失时回退到持有者或玩家位置。 |
+| `frame_dimension` / `frame_biome` | `identifier` | 有记录时 | 照片维度与群系元数据。 |
+| `frame_weather` | `string` | 有记录时 | Exposure 天气字符串。 |
+| `frame_pitch` / `frame_yaw` | `number` | 有记录时 | 照片俯仰角与偏航角元数据。 |
+| `light_level` / `day_time` | `integer` | 有记录时 | 记录的亮度与日内时间值。 |
+| `in_cave` / `underwater` / `flash` / `selfie` / `on_stand` / `chromatic` / `projected` | `boolean` | 有记录时 | Exposure 照片标志。 |
+| `color_channel` | `string` | 有记录时 | Exposure 通道名称。 |
+| `focal_length` | `integer` | 有记录时 | 记录的焦距值。 |
+| `shutter_speed` | `string` | 有记录时 | 快门标记字符串。 |
+| `shutter_ticks` | `integer` | 有记录时 | 快门时长，单位刻。 |
+| `shutter_milliseconds` | `number` | 有记录时 | 快门时长，单位毫秒。 |
+| `has_structure` | `boolean` | 始终 | 记录的结构列表是否非空。 |
+| `structure_ids` | `array<string>` | 仅非空时 | 记录的结构 ID。 |
+| `positions_in_frame` | `integer` | 始终 | Exposure 提供的位置数量，不是坐标列表。 |
+| `entities_in_frame` | `integer` | 始终 | 照片中非空且未移除的实体数。 |
+| `entity_types_in_frame` | `array<string>` | 仅非空时 | 去重后的实体类型 ID。 |
+| `entity_tags_in_frame` | `array<string>` | 仅非空时 | 这些实体的去重命令标签。 |
+| `entity_type_tags_in_frame` | `array<string>` | 仅非空时 | 实体类型、#、命令标签拼接的字符串，不是注册表中的实体类型标签。 |
+| `nearest_entity_type` / `nearest_entity_name` | `string` | 存在最近实体时 | 照片内最近有效实体的类型 ID 和显示名称。 |
+| `nearest_entity_distance` | `number` | 存在最近实体时 | 距照片位置的方块距离。 |
+
+照片实体列表汇总所有有效拍摄对象；普通实体过滤器只检查最近目标。要要求画面任意位置出现某种类型，应检查 `entity_types_in_frame`。空字符串列表不会写入参数，因此只有该参数条件设为 `require_present: false` 时，缺失列表才直接通过。
+
+### 内容触发器与序列状态
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `content_triggers` | `array<object>` | [] | 附加在目标生命周期上的动作，所有内置目标类型均支持。 |
+| `content_triggers[].event` | `string` | 必填 | quest_picked、objective_progressed、objective_completed、manual；去除首尾空白，忽略大小写，连字符转下划线。 |
+| `content_triggers[].manual_id` | `string` | 匹配任意手动触发 | 仅限 manual；去除首尾空白后不能为空，忽略大小写精确匹配；省略表示通配。 |
+| `content_triggers[].conditions` | `object / array<object>` | 恒真 | 使用任务数据页中的通用条件树，此处支持 sequence；不是目标事件过滤器注册表。 |
+| `content_triggers[].actions` | `array<object>` | 必填 | 有序动作列表，移除禁用动作后仍须非空。 |
+| `actions[].type` | `identifier` | 必填 | 内置动作：`isekaiexpansion:spawn_entities`。 |
+| `actions[].data` | `object` | 必填 | 下表中的生成动作字段。 |
+| `sequence.data.id` | `string` | 实际必填 | 去除首尾空白后非空的序列状态键，在活动任务内共享；省略会变为空值并被拒绝。 |
+| `sequence.data.children` | `array<object>` | 必填且非空 | 有序通用条件节点，每次回调只计算当前步骤。 |
+
+普通推进先修改数值，再执行 `objective_progressed`；若此次修改首次完成目标，随后执行 `objective_completed`。手动内容事件本身不增加目标进度。每次触发条件通过都会按编写顺序执行动作，没有隐式的仅一次标志，因此内置生成动作可能反复执行。
+
+序列进度按 `id` 存储在整个活动任务内，复用 ID 应有明确目的。序列记住已满足步骤，到达末尾后保持真；每次回调只计算当前子条件。嵌套有状态子条件报告状态变化时，会短路父序列的状态写入，父序列可能需要下一次回调才记录推进。嵌套序列不是原子的多步骤求值器。
+
+### 生成动作
+
+唯一内置内容动作是 `isekaiexpansion:spawn_entities`，其 `data` 使用下表字段。距离单位为方块，角度单位为度；数值超界时拒绝而非钳制，所有作者浮点值必须有限。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `enabled` | `boolean` | true | false 会在读取其他字段前移除此动作。 |
+| `entity_type` | `entity id` | 必填 | 要创建的已注册实体类型。 |
+| `count` | `integer` | 1 | 每次动作请求的实体数，1–64；实际生成可能更少。 |
+| `mode` | `string` | radius | radius 或 offset；去除首尾空白且忽略大小写，空值变为 radius。 |
+| `offset` | `object` | {} | 仅 offset 模式使用的世界轴向偏移。 |
+| `offset.x` / `offset.y` / `offset.z` | `number` | 0 | 相对事件锚点的有限方块偏移，不随朝向旋转。 |
+| `radius` | `number / object` | radius: 4–16; offset: 0–6 | 水平搜索范围，单位方块；标量使 min 为 0、max 为该值。 |
+| `radius.min` | `number` | radius: 4; offset: 0 | 有限下界，0–128。 |
+| `radius.max` | `number` | radius: 16; offset: 6 | 有限上界，介于 min 与 128 之间；范围倒置被拒绝。 |
+| `attempts` | `integer` | 96 | 搜索采样数，1–512。 |
+| `vertical_scan_depth` | `integer` | 6 | 垂直扫描索引上限，0–64；也检查索引 0。 |
+| `include_anchor` | `boolean` | offset 为 true，radius 为 false | 在候选搜索中包含锚点。 |
+| `vertical_search` | `string` | 室外为 surface_down，其余为 anchor_nearest | surface_down 从不含树叶的阻挡运动高度图向下扫描；anchor_nearest 交替检查锚点上下。未知值拒绝，显式空白变为 surface_down。 |
+| `require_outdoors` | `boolean` | true | 要求可见天空。 |
+| `strictly_outside` | `boolean` | true | require_outdoors 开启时，还要求世界表面高度不高于脚部高度 + 1。 |
+| `avoid_fluids` | `boolean` | true | 拒绝脚部、地板或净空检查位置含流体的候选。 |
+| `openness_weight` | `number` | 0.14 | 有限非负权重，偏向周围更开阔的位置。 |
+| `exact_offset_first` | `boolean` | offset 为 true，radius 为 false | offset 模式先校验精确偏移位置。 |
+| `fallback_to_search` | `boolean` | true | 精确偏移位置无效后允许继续搜索。 |
+| `target_source` | `boolean` | true | 有触发玩家时，生成生物以该玩家为目标。 |
+| `persistent` | `boolean` | true | 将生成生物设为持久存在。 |
+| `initialize_mob` | `boolean` | true | 应用作者 NBT 前按事件生成初始化生物。 |
+| `multi_spawn_layout` | `string` | spread | spread 或 cluster；忽略大小写，但非空白输入不去除首尾空格。空白变为 spread。 |
+| `cluster_radius` | `number` | 2.5 | 首个已解析簇位置周围的有限距离，0–32 方块。 |
+| `cluster_attempts` | `integer` | max(16, attempts / 2) | 整数除法；后续簇实体搜索次数，1–256。 |
+| `cluster_include_anchor` | `boolean` | true | 将簇基准位置纳入候选。 |
+| `cluster_openness_weight` | `number` | openness_weight | 簇搜索的有限非负开阔度偏好。 |
+| `same_room_as_source` | `boolean` | false | 要求与来源之间存在有界的可行走连通路径；这是局部搜索，不是命名房间。 |
+| `same_room_max_distance` | `number` | max(radius.max + 4, 12) | 房间搜索的有限水平范围，1–160 方块。 |
+| `same_room_max_nodes` | `integer` | 320 | 房间搜索展开上限，1–4096 个节点。 |
+| `same_land_as_source` | `boolean` | false | 要求与来源具有相同的局部干燥承托地面分类，不比较岛屿归属。 |
+| `visible_to_source` | `boolean` | false | 要求来源眼睛到候选身体的碰撞射线无遮挡。 |
+| `visible_to_source_respect_fov` | `boolean` | false | visible_to_source 开启时，还按来源视线方向限制。 |
+| `visible_to_source_fov` | `number` | 120 | 有限视锥角度，1–179 度。 |
+| `in_structure` | `boolean` | false | 要求存在包含该位置的结构。 |
+| `same_structure_as_source` | `boolean` | false | 要求与来源解析到同一个结构。 |
+| `max_vertical_delta` | `number` | 1.7976931348623157E308 | 相对搜索锚点的有限非负垂直方块差；用于候选搜索，不用于精确偏移快速路径。 |
+| `entity_tags` | `array<string>` | [] | 去除首尾空白后的命令标签；忽略空项，重复项合并。 |
+| `encounter_tag` | `string` | 空字符串 | 还会添加到生成实体上的命令标签，去除首尾空白；max_active 为正时必填。 |
+| `max_active` | `integer` | 0 | 0–4096；正数限制扫描盒内带 encounter_tag 的实体数。 |
+| `active_check_radius` | `number` | max(radius.max, cluster_radius) + 8 | 有限 1–256 方块的轴对齐扫描盒半边长，不是球形检查。 |
+| `nbt` | `object` | 不附加 | 作者实体 NBT；应用前移除 UUID、Pos、Motion、Rotation，随后恢复变换和速度。 |
+
+quest_picked 使用领取位置为锚点，进度或完成事件使用事件位置，手动触发使用传入的位置。radius 模式忽略 offset。spread 为每个实体独立搜索；cluster 先解析基准，再为后续实体搜索附近位置。搜索失败会记录警告，也可能只生成部分实体，不会撤销目标进度或奖励。
+
+候选搜索要求有承托且无碰撞的空间，并应用室外、流体、可见性、结构及局部连通规则。同房间搜索受来源垂直邻域 ±4 方块和节点预算限制。精确偏移路径检查空间与高级约束，但不应用 max_vertical_delta。依赖来源的策略在缺少同世界来源时失败。
+
+遭遇数量限制统计扫描盒内未移除且带指定标签的实体，包括其他动作复用此标签生成的实体；它不是全局数量上限，也不是任务所有权驱动的清除策略。生物初始化先于作者 NBT，之后设置命令标签、持久标志和目标。禁用动作会移除；若触发器所有动作均被禁用，该触发器无效。
+
+### 失败规则
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `failures` | `array<object>` | [] | npc_delivery 与 defeat_entities 解析；其他内置类型忽略此键。当前内置规则要求 npc_delivery。 |
+| `failures[].type` | `identifier` | 必填 | `isekaiexpansion:delivery_item_leaves_hand` 或 `isekaiexpansion:delivery_damage_while_carrying`；重复类型被拒绝。 |
+| `failures[].data` | `object` | 必填 | 没有内置参数，使用 {}；两种规则都要求来源 main_hand、携带者 picker。 |
+
+`delivery_item_leaves_hand` 在玩家刻检查尚未完成目标的原领取者；若其主手不再持有匹配的完整批次，整个任务失败。它没有“首次拿起后才启用”的阶段，也没有宽限时间。`delivery_damage_while_carrying` 在该领取者仍持有匹配完整批次时，因玩家受伤事件使任务失败。
+
+同一事件先执行失败检查，再执行进度检查；失败检查不复用目标事件条件树。完成的目标不再提供失败检查。严格携带的多批次目标消耗一批后，可能在下一刻因剩余物品不足而失败，因此目标尚未完成时仍需满足物品要求。
+
+### 类型化 NBT
+
+普通 JSON 对象变为 compound，布尔值变为 byte，整数字面量变为 int 或 long，其他有限数值变为 double。数组必须转为同一种 NBT 元素类型，null 被拒绝。要指定基本类型或基本类型数组，使用恰好含下列字段的嵌套包装对象：
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `$nbt_type` | `string` | 类型包装必填 | byte、short、int、long、float、double、string、byte_array、int_array、long_array；去除首尾空白且忽略大小写。 |
+| `value` | `number / string / array<number>` | 类型包装必填 | 声明类型对应的值。包装对象必须恰好包含这 2 个键；数值须在声明的有符号类型范围内，浮点数须有限。 |
+
+整数字面量首先必须位于有符号 64 位范围内；声明 byte、short、int 时范围更窄。float 包装还会拒绝溢出有限 float 表示的数值。类型包装含额外键、列表元素类型混合或类型名称未知时，任务定义被拒绝。
+
+## 校验
+
+未知类型、缺少必填对象、范围错误、空物品或方块谓词、不支持的交付组合、重复失败类型或无效内容触发器，均按[任务数据](/zh-cn/wiki/quest-data/)规则拒绝任务目录重载。未知键通常被忽略，因此把有效字段放在错误的目标类型下，可能静默失去预期限制。
+
+显式实体、物品及方块 ID 会检查注册表。配方、进度、对话、维度、地牢及许多标签引用主要检查标识语法，并在后续事件中匹配；语法正确但不存在的目标可能成功加载却永不推进。启用的生成动作要求实体类型已注册，但执行时仍可能找不到可用位置。
+
+## 重载
+
+目标随外层任务重载。活动进度按任务 ID 和目标 ID 保存；修改类型、目标、所需次数或序列 ID 时，不会自动迁移其含义。修改定义后，应同时检查已激活任务和新领取任务。
+
+服务端保持权威。客户端数据只是用于展示的投影，不包含完整可执行内容触发树。翻译及资源修改需要单独重载客户端资源。
+
+## 相关页面
+
+- [任务数据](/zh-cn/wiki/quest-data/) — 完整任务文件、领取及冷却。
+- [任务奖励](/zh-cn/wiki/quest-rewards/) — 接收者选择与奖励执行。
+- [任务运行时](/zh-cn/dev/quest-system/) — 事件钩子、存档状态与调试。
+- [NPC 对话](/zh-cn/dev/npc-dialogue/) — 对话及菜单集成。

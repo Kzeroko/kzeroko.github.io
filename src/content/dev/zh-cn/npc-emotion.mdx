@@ -1,0 +1,231 @@
+---
+title: "NPC 情绪运行时"
+description: "情绪强度、完整性格参数、事件公式、存档与身体表情动作的内部约定。"
+category: systems
+order: 65
+updated: 2026-09-19
+---
+
+情绪模拟属于 `UniqueNpcEntity`，由 `internal.ai.emotion.UniqueNpcEmotionManager` 实现。共享的 `NpcEmotionManager` 是内部接口，不是公开门面；其他 NPC 使用无操作管理器。玩家含义与对话字段见 [NPC 心情与性格](/zh-cn/wiki/npc-emotions/)。
+
+## 它做什么
+
+事件增加心情的即时反应与记忆，环境感知改变情境目标；管理器据此选出主心情和次心情。只有主心情序号通过实体跟踪数据同步，强度池留在服务器，对话另行获取快照。身体表情动作由 `NpcEmoteManager` 管理，与情绪数值独立，也不同于表情贴纸。
+
+## 运行时模型
+
+### 强度池与时间
+
+每种心情保存 `Impulse`、`Memory`、`Context`，各自限制在 0–100，显示总强度为 `min(100, Impulse + Memory + Context)`。刺激先将原始强度清理到有限的 0–100，再乘性格 `reactivity × responseScale(mood)`；随后按限制为 0–1 的 retention 分入记忆，其余加入即时反应，各池分别截断。安抚不应用性格乘数，按即时反应、情境、记忆的顺序扣除，最多使用清理后的 100 强度。
+
+每 20 tick 更新一次状态，另每 20 tick 判断主心情。恢复按经过的世界 tick 除以 20 换算秒数，上限为 7 天；时间倒退时先重置基准。情境变化每次最多使用 2 秒。即时反应和记忆的线性扣除量为 `seconds × 100 / lifetime × recoveryScale`；敏感心情还乘 resilience。低于 0.01 的残值清零。
+
+构造时将 composed 情境推进到 9。NBT 读取先清空所有池；缺少或不匹配版本时不会重新注入这个初始 9，而是在之后感知中逐渐趋近目标。闲置计数每次感知只增加一次，不按离线秒数补算。
+
+### 心情参数
+
+时长表示满 100 强度池在恢复乘数为 1 时归零所需秒数，不是每次刺激固定持续时间。情境速率单位为强度/秒；resilience 列为 true 的心情额外应用韧性恢复乘数。
+
+| 心情键 | 即时反应时长 | 记忆时长 | 情境上升 | 情境下降 | 激活门槛 | resilience |
+| --- | --- | --- | --- | --- | --- | --- |
+| `composed` | 55 | 300 | 8.0 | 12.0 | 0.0 | false |
+| `joyful` | 90 | 900 | 6.0 | 7.0 | 7.0 | false |
+| `affectionate` | 120 | 1800 | 5.0 | 5.0 | 8.0 | false |
+| `flustered` | 32 | 210 | 13.0 | 15.0 | 6.0 | false |
+| `excited` | 36 | 240 | 12.0 | 14.0 | 7.0 | false |
+| `focused` | 45 | 180 | 15.0 | 18.0 | 8.0 | false |
+| `bored` | 48 | 300 | 7.0 | 12.0 | 8.0 | false |
+| `uneasy` | 65 | 960 | 9.0 | 8.0 | 7.0 | true |
+| `hurt` | 135 | 2100 | 5.0 | 5.0 | 8.0 | true |
+| `angry` | 80 | 1350 | 10.0 | 7.0 | 8.0 | true |
+| `exhausted` | 210 | 2700 | 7.0 | 5.0 | 8.0 | true |
+
+主心情候选从 composed 开始，依枚举顺序选取达到自身门槛且严格更强的心情；同强度保留先前候选。切换到不同候选需满足任一条件：领先至少 3.5、当前低于门槛、距上次切换已满 60 tick。达到等待时间并不要求仍领先 3.5。次心情为主心情外最强且达到门槛的非 composed 心情，同强度同样保留先出现者。
+
+事件包装方法及 `stimulate(MoodImpulse)`、`soothe` 请求最迟下个服务器 tick 重新判断，不立即同步切换。内部三参数 `stimulate(Mood,float,float)` 不自行请求快速判断，供反应模型合并使用。
+
+### 情境目标
+
+每次感知先将所有目标清零，再取各来源最大值，并乘该心情 responseScale，限制为 0–100；reactivity 不参与。
+
+| 情况 | 原始目标 |
+| --- | --- |
+| 普通 / 睡眠 | composed 9.0 / 22.0 |
+| POI 忙碌 | focused 34.0 × energy |
+| 有目标或战斗阶段非 NONE | focused 16.0 × courage；excited 23.0 × energy × courage |
+| 未睡眠且生命比例低于 0.50 | exhausted 38.0 × danger；战斗时另有 uneasy 25.0 × danger × inverse(courage) |
+| 闲置超过 25 次采样 | bored 30.0 × clamp((idleSeconds - 25) / 100, 0, 1) × energy |
+
+此处 `danger = (0.50 - healthRatio) / 0.50`。闲置要求未睡眠、没有活动 POI、未战斗、无对话、未使用物品、导航空闲且总速度平方小于 0.0025；不满足则计数归零。`inverse(t) = clamp(2 - t, 0.45, 1.55)`。情境离开后按下降速率趋零，不能将目标清零误解为立即清除情境池。
+
+### 性格参数
+
+性格在管理器构造时从 NPC 配置取出并固定。下列参数必须为有限正数，心情缩放数组必须与心情数量一致，构造时复制数组；缺少任一性格配置会导致注册初始化失败。没有设置的 response/recovery 均为 1.00。
+
+| 参数 | 用途 |
+| --- | --- |
+| `temper` | 愤怒及攻击兴奋。 |
+| `resilience` | 敏感心情恢复，以及消耗品带来的疲惫缓解。 |
+| `energy` | 兴奋、工作专注与无聊。 |
+| `empathy` | 友好伤害或负赠礼信号造成的心伤。 |
+| `pride` | 敌对伤害或负赠礼信号引起的愤怒。 |
+| `bondAffinity` | 亲昵及其他正向赠礼反应、友好伤害造成的心伤。 |
+| `courage` | 战斗专注与兴奋，反向影响不安。 |
+| `composure` | 反向影响慌羞。 |
+| `reactivity` | 所有事件强度，不作用于情境目标。 |
+
+| 性格键 | temper | resilience | energy | empathy | pride | bondAffinity | courage | composure | reactivity |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `default` | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| `tsundere` | 1.30 | 0.95 | 0.95 | 0.95 | 1.25 | 1.10 | 1.05 | 0.82 | 1.12 |
+| `optimistic` | 0.90 | 1.30 | 1.08 | 1.00 | 0.90 | 1.05 | 1.15 | 1.05 | 0.95 |
+| `yandere` | 1.12 | 0.78 | 1.00 | 1.30 | 1.08 | 1.45 | 0.95 | 0.72 | 1.22 |
+| `gloomy` | 0.88 | 0.78 | 0.90 | 1.12 | 0.92 | 0.95 | 0.82 | 0.94 | 0.96 |
+| `kuudere` | 0.82 | 1.25 | 0.88 | 0.92 | 1.05 | 0.92 | 1.10 | 1.42 | 0.72 |
+| `genki` | 1.05 | 1.05 | 1.38 | 1.00 | 0.95 | 1.05 | 1.18 | 0.86 | 1.18 |
+| `loyal` | 1.08 | 1.18 | 1.05 | 1.18 | 1.08 | 1.35 | 1.22 | 1.05 | 1.05 |
+| `shy` | 0.78 | 0.92 | 0.82 | 1.15 | 0.82 | 1.22 | 0.78 | 0.72 | 1.08 |
+| `dojikko` | 0.92 | 0.92 | 1.08 | 1.08 | 0.88 | 1.12 | 0.84 | 0.68 | 1.18 |
+| `lazy` | 0.72 | 1.02 | 0.68 | 0.92 | 0.82 | 0.90 | 0.92 | 1.08 | 0.78 |
+| `tennen` | 0.78 | 1.28 | 1.12 | 1.00 | 0.78 | 1.08 | 1.02 | 0.76 | 0.92 |
+| `chatterbox` | 0.98 | 1.05 | 1.28 | 1.08 | 0.92 | 1.18 | 1.00 | 0.78 | 1.20 |
+| `mukuchi` | 0.72 | 1.24 | 0.78 | 0.95 | 1.02 | 0.82 | 1.08 | 1.48 | 0.62 |
+| `ojou_sama` | 1.18 | 0.88 | 1.05 | 0.92 | 1.42 | 0.98 | 1.02 | 0.82 | 1.18 |
+| `onee_san` | 0.78 | 1.32 | 1.00 | 1.30 | 0.92 | 1.15 | 1.18 | 1.30 | 0.88 |
+| `tomboy` | 1.22 | 1.12 | 1.28 | 0.92 | 1.08 | 0.98 | 1.34 | 0.88 | 1.08 |
+| `bookworm` | 0.75 | 1.12 | 0.76 | 1.08 | 0.92 | 0.92 | 0.92 | 1.28 | 0.78 |
+| `trickster` | 1.02 | 1.12 | 1.34 | 0.78 | 0.82 | 1.00 | 1.15 | 0.72 | 1.22 |
+| `cowardly` | 0.68 | 0.82 | 0.82 | 1.12 | 0.72 | 1.08 | 0.58 | 0.68 | 1.20 |
+| `justice` | 1.20 | 1.20 | 1.15 | 1.12 | 1.08 | 1.02 | 1.42 | 1.00 | 1.05 |
+| `workaholic` | 0.92 | 1.05 | 1.12 | 0.92 | 1.05 | 0.88 | 1.10 | 1.05 | 1.05 |
+| `chuunibyou` | 1.12 | 0.98 | 1.22 | 0.88 | 1.24 | 0.92 | 1.28 | 0.62 | 1.22 |
+
+| 性格键 | responseScale | recoveryScale |
+| --- | --- | --- |
+| `default` | — | — |
+| `tsundere` | `angry` 1.30, `flustered` 1.65, `affectionate` 0.78 | `angry` 0.90, `flustered` 1.15 |
+| `optimistic` | `joyful` 1.35, `hurt` 0.72, `uneasy` 0.75 | `hurt` 1.35, `uneasy` 1.30 |
+| `yandere` | `affectionate` 1.50, `hurt` 1.40, `angry` 1.20 | `affectionate` 0.72, `hurt` 0.68, `angry` 0.78 |
+| `gloomy` | `hurt` 1.45, `bored` 1.18, `joyful` 0.72 | `hurt` 0.62, `bored` 0.82 |
+| `kuudere` | `composed` 1.30, `flustered` 0.55, `excited` 0.65 | `angry` 1.30, `uneasy` 1.30 |
+| `genki` | `joyful` 1.25, `excited` 1.45, `bored` 1.35 | `bored` 1.30, `hurt` 1.15 |
+| `loyal` | `affectionate` 1.30, `hurt` 1.20, `focused` 1.20 | `uneasy` 1.20 |
+| `shy` | `flustered` 1.75, `affectionate` 1.20, `uneasy` 1.30, `angry` 0.62 | `flustered` 0.88 |
+| `dojikko` | `flustered` 1.55, `uneasy` 1.25, `joyful` 1.18 | `flustered` 1.15 |
+| `lazy` | `composed` 1.35, `bored` 0.72, `excited` 0.60, `exhausted` 1.38 | `exhausted` 0.78 |
+| `tennen` | `joyful` 1.45, `hurt` 0.62, `angry` 0.58 | `hurt` 1.42 |
+| `chatterbox` | `excited` 1.42, `bored` 1.35, `joyful` 1.20, `composed` 0.72 | `bored` 1.25 |
+| `mukuchi` | `composed` 1.42, `flustered` 0.42, `excited` 0.55, `angry` 0.70 | `angry` 1.30 |
+| `ojou_sama` | `angry` 1.38, `bored` 1.32, `flustered` 1.18 | `angry` 0.82 |
+| `onee_san` | `affectionate` 1.32, `focused` 1.18, `angry` 0.68, `uneasy` 0.72 | `hurt` 1.28 |
+| `tomboy` | `excited` 1.42, `focused` 1.18, `uneasy` 0.58, `flustered` 0.72 | `bored` 1.30 |
+| `bookworm` | `focused` 1.45, `composed` 1.22, `bored` 0.62, `excited` 0.58 | `focused` 0.85 |
+| `trickster` | `excited` 1.52, `joyful` 1.28, `bored` 1.42, `hurt` 0.62 | `bored` 1.35 |
+| `cowardly` | `uneasy` 1.75, `exhausted` 1.28, `angry` 0.52, `excited` 0.58 | `uneasy` 0.72 |
+| `justice` | `angry` 1.32, `focused` 1.28, `excited` 1.22, `uneasy` 0.55 | `hurt` 1.28 |
+| `workaholic` | `focused` 1.60, `exhausted` 1.32, `bored` 0.62, `composed` 0.62 | `focused` 0.78, `exhausted` 0.85 |
+| `chuunibyou` | `excited` 1.52, `focused` 1.20, `flustered` 1.20, `uneasy` 0.65 | `excited` 0.82 |
+
+### 内置事件公式
+
+下表列出性格通用反应乘数之前的刺激。`s = clamp(amount / max(1, maxHealth), 0, 1)`；`d = clamp((0.45 - healthRatio) / 0.45, 0, 1)`；`m = clamp(abs(favorGain) / 30, 0, 1)`。`R(x,a,b) = a + (b-a) × x² × (3-2x)`，inverse 定义见上。正常伤害路径仅在实际成功伤害后通知情绪；与战斗敌意的“尝试次数”分开。
+
+| 事件 | 心情 | 原始强度 | 记忆保留比例 |
+| --- | --- | --- | --- |
+| 友好或受信任玩家伤害 | `hurt` | `(8 + 48s) × empathy × bondAffinity` | `R(s, 0.35, 0.86)` |
+| 同上 | `angry` | `(2 + 17s) × temper` | `R(s, 0.12, 0.48)` |
+| 其他伤害 | `uneasy` | `(3 + 25s) × inverse(courage)` | `R(s, 0.10, 0.56)` |
+| 其他存活攻击者 | `angry` | `(5 + 31s) × temper × pride` | `R(s, 0.12, 0.64)` |
+| 受伤且有当前目标 | `excited` | `(2 + 10s) × energy × courage` | `R(s, 0.0, 0.20)` |
+| 受伤后生命比例低于 0.45 | `exhausted` | `5 + 22d` | `R(d, 0.18, 0.66)` |
+| 同一低生命事件 | `uneasy` | `(4 + 18d) × inverse(courage)` | `R(d, 0.16, 0.72)` |
+| 使用 eat/drink 类别或食物物品 | `joyful` | `5 × max(0.85, bondAffinity)` | `0.08` |
+| 同一次消耗 | `excited` | `2.4 × energy` | `0.0` |
+| 负赠礼信号 | `hurt` | `(5 + 14m) × empathy` | `R(m, 0.22, 0.62)` |
+| 同一负信号 | `angry` | `(2 + 10m) × pride` | `R(m, 0.08, 0.35)` |
+| 零赠礼信号 | `flustered` | `2 × inverse(composure)` | `0.0` |
+| 正赠礼信号 | `joyful` | `(7 + 15m) × bondAffinity` | `R(m, 0.08, 0.28)` |
+| 同一正信号 | `affectionate` | `(5 + 18m) × bondAffinity` | `R(m, 0.24, 0.66)` |
+| 同一正信号 | `flustered` | `(3 + 10m) × bondAffinity × inverse(composure)` | `R(m, 0.0, 0.20)` |
+| 执行攻击 | `excited` | `4 × energy × max(0.85, temper)` | `0.0` |
+| 同一次攻击 | `focused` | `2.5 × courage` | `0.0` |
+
+额外安抚：消耗品减少 bored 4、exhausted `3 × resilience`；零赠礼减少 bored 2；正赠礼减少 bored 6、hurt `2 + 4m`、angry `1 + 3m`；攻击减少 bored 4。负赠礼信号分支不安抚。是否接受礼物由交互层决定，情绪方法本身只接收整数信号，不作物品校验。
+
+## 约定
+
+### 接口与保存字段
+
+`BaseNpcEntity.getEmotionManager()` 返回内部统一接口。禁用实现的 currentMood 为 composed、各强度为 0、snapshot 无次心情、temperament 为默认配置；事件和保存方法无操作。具名 NPC 在角色 tick、成功受伤、物品使用及角色 NBT 钩子中调用真实管理器。
+
+| 接口 | 作用 |
+| --- | --- |
+| `serverTick` | 推进恢复、环境目标与主心情判断 |
+| `onDamageTaken`, `onItemConsumed`, `onGiftReceived`, `onAttackPerformed` | 内置反应公式包装 |
+| `stimulate(MoodImpulse)` | 应用性格缩放的刺激；空 payload 或空心情拒绝 |
+| `soothe(Mood,float)` | 安抚指定心情；空心情拒绝，非有限强度按 0 处理 |
+| `currentMood`, `intensity`, `snapshot`, `temperament` | 读取当前主心情、总强度、展示快照及固定性格配置 |
+| `writeToNbt`, `readFromNbt` | 保存或重置后恢复版本化状态 |
+
+`MoodImpulse` 的 intensity 限制为 0–100，retention 限制为 0–1，非有限数按 0；fleeting 使用 retention 0，lingering 使用传入比例。快照将两种强度除以 100 并限制为 0–1。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `NpcEmotion` | compound | 不存在 | 带版本的状态根。 |
+| `NpcEmotion.Schema` | integer | 0 | 必须为 1；缺失或不符时保留已清空状态。 |
+| `NpcEmotion.CurrentMood` | string | composed | 心情键忽略大小写；未知或空白回退，不移除首尾空格。 |
+| `NpcEmotion.LastChangeTick` | long | 0 | 上次主心情切换的世界 tick；不限制时间值。 |
+| `NpcEmotion.LastUpdateTick` | long | 0 | 上次恢复的 tick；根缺失或重置时改用未设置哨兵值。未来时间在 tick 时重置为当前时间。 |
+| `NpcEmotion.IdleSeconds` | integer | 0 | 非负闲置采样计数，不是离线经过秒数。 |
+| `NpcEmotion.States` | compound | 空 | 每个已知小写心情键对应一个复合标签，忽略未知项。 |
+| `NpcEmotion.States.<mood>.Impulse` | number | 0 | 有限数 0–100；越界限制，非数值或非有限数变为 0。 |
+| `NpcEmotion.States.<mood>.Memory` | number | 0 | 相同校验，保存事件记忆强度。 |
+| `NpcEmotion.States.<mood>.Context` | number | 0 | 相同校验，保存当前情境强度而非目标值。 |
+
+只有 Schema 1 被接受。缺失心情复合标签保持清零值；读取只枚举当前键，因此不保留未知字段供以后恢复，也不迁移旧情绪根。持久化使用键，客户端跟踪使用枚举序号；变更枚举顺序需要两端一起更新。加载同步不调用心情变化钩子，正常主心情切换才调用 `onMoodChanged`。直接 `setMood` 只改跟踪器，不改服务器情绪池，之后管理器可能覆盖它。
+
+### 身体表情动作
+
+定义由 NPC 的 `registerDefaultEmotes`、`registerEmotes` 收集，延迟构建并缓存。基础默认注册钩子为空。数组索引同步到客户端，注册顺序必须一致。重复 ID 不抛出异常：按 ID 查找取最后项，闲置池却保留所有标记项。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `id` | string | 必填 | 非空引用且非空字符串；允许纯空格。重复 ID 查找取最后注册项。 |
+| `animationKey` | string | 必填 | 非空引用且非空字符串的 Gecko 动画键；构造器不检查资源是否存在。 |
+| `durationTicks` | integer | 必填 | 至少为 1；循环与非循环播放都受此时长限制。 |
+| `loop` | boolean | 必填 | true 循环；否则播放并保持至时长结束。 |
+| `priority` | integer | 必填 | 限制为 0–1000；普通抢占要求不低于当前优先级。 |
+| `cooldownTicks` | integer | 必填 | 至少为 0；启动时同时作用于动作及全局冷却。 |
+| `flags` | integer bitmask | 必填 | 1 加入闲置池；2 导航锁；4 移动锁，且隐含导航锁。这些检查忽略未知位。 |
+| `interruptible` | boolean | 必填 | 普通请求能否替换该动作；强制请求绕过。 |
+
+`tryEmote` 遵守冷却、当前动作的可中断标记和优先级；`forceEmote` 绕过这些限制，但不绕过身体状态或普通对话锁。`queueEmote` 只保留一个待播 ID，新请求覆盖旧请求，未知 ID 清空队列。空闲时取出后仅尝试一次强制播放，失败也不会保留。
+
+可播放要求服务器端、存活未移除、未睡眠、未游泳、未飞行或悬停、未骑乘或攀爬、未使用物品、POI 不忙、无战斗阶段、无可攻击目标，且水平速度平方不超过 0.0001。播放期间条件失效会停止。导航锁还会清除 WALK_TARGET、PATH 并取消疾跑；移动锁清零前进/侧向输入，不清零速度。
+
+动作与全局冷却在开始时设置为已有值与定义值的最大值，并在对话暂停期间继续递减。循环动画仍受 durationTicks 限制。一般对话会清队列并停止非会话动作；`playDialogueEmote` 要求当前玩家对话确实指向 NPC，并绑定 session UUID，换会话或目标失效会停止。
+
+基础闲置调度参数为：至少闲置 80 tick，每次检查间隔随机 120–320 tick，播放概率 0.45。达到条件后的首轮可以立即检查，不保证先等完整间隔；从闲置池均匀抽取一次，抽到冷却中的动作不会换选。离开对话时重置随机检查间隔。动作状态、队列和冷却不由此管理器保存。
+
+## 扩展方式
+
+在服务器 tick 或服务器事件路径调用情绪接口；真实管理器不会替调用者将所有 mutation 自动路由到服务器。继承具名 NPC 并通过 `NpcConfig.Builder.personality` 选择性格。新增心情需同时更新 `Mood`、`MoodCatalog`、反应/情境逻辑、各性格数组及双语语言条目；新增性格需完整注册 `TemperamentProfiles`。这些表是代码配置，不参与数据包重载。
+
+身体动作通过定义注册，再由 `onEmoteStarted`、`onEmoteStopped` 响应。它与情绪管理器没有自动一一映射。变更动画键时同时检查 Gecko 资源；代码构造通过不代表动画存在。不要将内部情绪接口对外宣传为稳定公共 API。
+
+## 验证
+
+1. 对具名 NPC 与普通市民施加相同事件，确认只有前者改变情绪池，后者快照仍为 composed/0。
+2. 对同一心情分别施加低、高 retention 刺激，检查即时反应与记忆拆分、线性恢复和安抚顺序。
+3. 测试赠礼、实际伤害、被回避的伤害、进食、攻击、工作与对话；对话不得累计无聊。
+4. 测试 3.5 强度领先、60 tick 等待及当前跌破门槛三种切换条件，观察另一客户端的主心情。
+5. 保存后卸载并推进世界时间，检查恢复上限、情境步长及闲置计数；再测试时间倒退、未知心情、缺少字段、错误版本与非有限数。
+6. 测试重复动作 ID、强制与普通抢占、单槽队列、循环时长、冷却以及会话替换。检查移动或战斗使动作停止。
+7. 更新配置后运行语言组装与 Java 编译，并在双方使用相同注册顺序的客户端/服务器检查跟踪状态。
+
+## 相关页面
+
+- [NPC 心情与性格](/zh-cn/wiki/npc-emotions/)
+- [NPC 基础](/zh-cn/dev/npc/)
+- [NPC 战斗](/zh-cn/dev/npc-combat/)
+- [表情贴纸接口](/zh-cn/dev/emoji-api/)

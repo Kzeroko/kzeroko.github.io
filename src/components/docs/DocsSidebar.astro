@@ -1,16 +1,18 @@
 ---
 import { useTranslations, type LocaleCode, type UIKey } from '../../i18n';
-import { wikiPath, type WikiGroup } from '../../lib/content';
+import { docsPath, type DocsGroup, type DocsSection } from '../../lib/content';
 
 interface Props {
   lang: LocaleCode;
-  groups: WikiGroup[];
+  /** Picks both the `<section>.category.*` labels and the entry links. */
+  section: DocsSection;
+  groups: DocsGroup[];
   /** Current pathname, used to mark the active entry. */
   current: string;
   class?: string;
 }
 
-const { lang, groups, current, class: className } = Astro.props;
+const { lang, section, groups, current, class: className } = Astro.props;
 const t = useTranslations(lang);
 
 const normalised = current.replace(/\/+$/, '') + '/';
@@ -20,10 +22,10 @@ const normalised = current.replace(/\/+$/, '') + '/';
   {
     groups.map((group) => (
       <section class="sidebar__group">
-        <h2 class="sidebar__label">{t(`wiki.category.${group.category}` as UIKey)}</h2>
+        <h2 class="sidebar__label">{t(`${section}.category.${group.category}` as UIKey)}</h2>
         <ul role="list">
           {group.entries.map((entry) => {
-            const href = wikiPath(lang, entry);
+            const href = docsPath(section, lang, entry);
             return (
               <li>
                 <a href={href} aria-current={href === normalised ? 'page' : undefined}>

@@ -1,0 +1,108 @@
+---
+title: "Skill-tree Data"
+description: "Add unlock conditions to Puffish skill nodes and grant local learnable powers as rewards."
+category: data
+order: 84
+updated: 2026-09-19
+---
+
+Skill requirements add a condition to an existing skill-tree node. A separate reward bridge grants an Origins power when Puffish Skills updates that definition's unlock count; neither format creates the graph itself.
+
+## Where the files live
+
+Requirements load from `data/<namespace>/skill_requirement/*.json`, including subdirectories. A file contains category IDs, each mapping node IDs to conditions. The file's namespace does not choose the target category: the category key does.
+
+The same resource ID is selected through normal data-pack priority. Different files can contribute to the catalogue, but do not define the same category/node pair in several files: the registry does not merge conditions or provide a stable winner.
+
+Puffish Skills owns the graph format under `data/<namespace>/puffish_skills/categories/<category>/`. The bundled main tree is `isekaiskills:main`. This page documents the local requirement format and `isekaiexpansion:learnable_power` reward data; Puffish's category, definition and connection formats belong to that dependency, checked here against version `0.18.2+1.20`.
+
+## Minimal example
+
+This is the first condition from the bundled main requirement file:
+
+```json
+{
+  "isekaiskills:main": {
+    "aegis_t1_gate": {
+      "condition_type": "level",
+      "condition_value": 10
+    }
+  }
+}
+```
+
+As an override of `data/isekaiexpansion/skill_requirement/main.json`, this replaces that entire selected file and therefore removes its other bundled conditions. Keep the remaining entries when changing just this gate. In a new category, use its real category ID and node ID; requirement keys identify nodes, not reusable definition IDs.
+
+## Fields
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `<category-id>` | `object` | Entries optional; empty root accepted | Resource identifier of the Puffish category. The example uses `isekaiskills:main`. Invalid syntax stops that file. |
+| `<node-id>` | `object` | Entries optional | Exact node key in that category's skills data. The example uses `aegis_t1_gate`. No existence check is performed here. |
+| `condition_type` | `string` | Required | Exact lowercase name from the table below; unknown names fail. |
+| `condition_value` | `integer / number / string` | Required | Type depends on the condition. Numeric conversion does not impose gameplay ranges or a non-negative clamp. |
+| `identifier` | `string` | Required for `attribute` and `talent`; otherwise absent | Attribute or talent resource ID. If supplied for another condition it must still parse, but does not affect that condition. |
+
+| `condition_type` | `condition_value` | `identifier` | Check |
+| --- | --- | --- | --- |
+| `level` | Integer player level | Unused | Current IsekaiCore level is at least the threshold. |
+| `origin` | Origin identifier string | Unused | Current race-origin ID equals the value. |
+| `class` | Class identifier string | Unused | Current class ID equals the value. |
+| `profession` | Profession identifier string | Unused | Current profession ID equals the value. |
+| `xp_amount` | Integer experience amount | Unused | Stored vanilla total experience is at least the threshold. |
+| `xp_level` | Integer experience level | Unused | Current vanilla experience level is at least the threshold. |
+| `destiny` | Integer destiny value | Unused | Current destiny is at least the threshold. |
+| `adventurer_rank` | Integer rank value | Unused | IsekaiCore's rank check accepts the threshold. |
+| `attribute` | Numeric attribute threshold | Required attribute ID | Current attribute value is at least the threshold; an absent entity attribute fails. |
+| `talent` | Integer talent rank level | Required talent ID | Current talent rank level is at least the threshold. |
+
+A condition does not spend experience, destiny or attributes. It gates a new unlock, not continued possession of the node. Each entry contains a single condition; adding duplicate entries is not a supported way to express an AND or OR.
+
+### Learnable-power reward
+
+Place this reward entry inside a Puffish skill definition's rewards list. It is the same reward used by the bundled Appraisal definition:
+
+```json
+{
+  "type": "isekaiexpansion:learnable_power",
+  "data": {
+    "power": "isekaiskills:spassive_appraisal"
+  }
+}
+```
+
+| Field | Type | Default | Meaning and limits |
+| --- | --- | --- | --- |
+| `type` | `string` | Required | Reward type `isekaiexpansion:learnable_power`. |
+| `data` | `object` | Required | Local reward payload; unused keys inside it are rejected. |
+| `power` | `string` | Required | Syntactically valid Origins power ID; existence is resolved when applying the reward. |
+
+Puffish Skills counts unlocked nodes sharing a definition and supplies that count to the reward. The local bridge grants the power through `isekaiexpansion:learnables`; upgradeable powers use the count as their level, bounded by their declared maximum. At a count of 0 it removes that source. A missing power type is ignored by the bridge, so a successfully parsed reward can still grant nothing.
+
+The main tree's active powers use `meta.max_level`, `meta.cooldown` and `meta.energy`, not legacy top-level equivalents. [Skill-tree runtime](/en/dev/skill-tree/) covers their current authoring path; the current tree's active effects are described in [Wheel of Fate](/en/wiki/skill-tree/).
+
+## Validation
+
+| Input | Requirement-loader behaviour |
+| --- | --- |
+| Missing required field, wrong object shape, unknown condition name, malformed identifier | Logs an error for that resource and stops the rest of that file. Entries already registered from it remain. Other resources still load. |
+| Unknown condition-object field | Ignored; it does not create an extra condition. |
+| Unknown category or node | Accepted as a lookup key; it has no effect until something uses that exact category/node pair. |
+| Syntactically valid but unregistered identity ID | Not rejected at load; identity equality normally cannot match it. |
+| Unknown attribute or talent ID | Not checked at load. Use registered IDs; their later resolution belongs to the attribute/talent system and is not a loader validation guarantee. |
+| Negative or excessive numeric threshold | Not range-checked here; the comparison uses the parsed value. Use integer JSON numbers for integer conditions. |
+| Duplicate category/node across resources | Separate objects coexist; lookup takes an arbitrary first match from the set. No combined condition or deterministic override. |
+| Empty root object | Accepted, contributes no conditions. Reload still discards the previous registry first. |
+| Empty or malformed JSON text | No valid condition document; do not use it to disable an entry. |
+
+The reload is not transactional. A bad replacement can leave a partially populated catalogue, rather than retaining the old one. Reward data has different handling: its parser returns errors for missing `power`, invalid identifiers and unused payload keys to Puffish's category-loading process.
+
+## Reloading
+
+Server data reload rebuilds the requirement registry. The full local requirement catalogue is sent to a client on joining; there is no corresponding requirement broadcast on reload in the current wiring. Reconnect after editing requirements so client tooltips and eligibility agree with the server.
+
+The server rechecks conditions during unlock, including forced dependency unlock requests. Graph reload and saved unlocks are managed by Puffish Skills; successful graph loading does not prove that the separate local requirement catalogue reached a connected client.
+
+## Related
+
+[Wheel of Fate](/en/wiki/skill-tree/) explains the bundled graph. [Skill-tree runtime](/en/dev/skill-tree/) covers gates, synchronisation and the generator. [Talents](/en/wiki/talents/) and [Identity](/en/wiki/identity/) explain the values tested by talent and identity conditions.

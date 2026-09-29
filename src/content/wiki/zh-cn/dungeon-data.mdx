@@ -1,0 +1,245 @@
+---
+title: "地下城数据与场景编写"
+description: "配置原生地下城布局、遭遇脚本、临时强化及场景中的编写方块。"
+category: data
+order: 94
+updated: 2026-09-19
+---
+
+原生地下城由服务端定义、拼图模板和世界中的已配置入口组成。遭遇、门和完成流程由脚本控制；仅选择模式不会自动生成这些遭遇。
+
+## 文件放在哪里
+
+定义路径为 `data/<namespace>/dungeons/**/*.json`。文件默认使用其资源 ID，也可通过 `id` 覆盖。拼图池与模板仍使用常规世界生成资源；标题和消息使用客户端语言文件。
+
+随模组提供的定义为 `isekaiexpansion:dark_delves`（幽暗矿窟）、`isekaiexpansion:sunken_sanctum`（沉没圣所）和 `isekaiexpansion:verdant_temple`（翠影古殿）。内置的 `isekaiexpansion:dungeon_instance` 维度使用空的超平坦生成器，地板及所有可游玩方块都必须由模板提供。
+
+## 最小示例
+
+将下述精简自幽暗矿窟遭遇的配置保存为 `data/example/dungeons/trial.json`，再将入口设为 `example:trial`。它使用模组现有的起始池，在 `100` 刻（`5` 秒）后生成一只僵尸，并在危险遭遇清除后开始 `600` 刻（`30` 秒）的撤离倒计时。
+
+```json
+{
+  "difficulty": "uncommon",
+  "modes": [
+    "hazard"
+  ],
+  "structure": {
+    "start_pool": "isekaiexpansion:dark_dungeon/dungeon_spawn",
+    "start_jigsaw": "isekaiexpansion:spawn",
+    "base_y": 80,
+    "jigsaw_depth": 64
+  },
+  "scripts": [
+    {
+      "id": "example:opening",
+      "trigger": "session_started",
+      "actions": [
+        {
+          "type": "spawn_hazard",
+          "offset": [
+            7,
+            0,
+            0
+          ],
+          "waves": [
+            {
+              "entries": [
+                {
+                  "entity": "minecraft:zombie",
+                  "count": 1,
+                  "delay_ticks": 100
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "example:finish",
+      "trigger": "hazard_cleared",
+      "actions": [
+        {
+          "type": "complete",
+          "completion_delay_ticks": 600
+        }
+      ]
+    }
+  ]
+}
+```
+
+## 字段
+
+解析器拥有的每层对象都会拒绝未知字段。数组与对象必须符合预期容器类型。枚举字符串去除首尾空白且不区分大小写；空白值使用对应枚举的默认值，未知值则拒绝。下表中的数值钳制发生在解析后；无法解析的数字仍会失败。
+
+### 根对象
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `id` | `identifier` | 文件资源 ID | 可覆盖默认 ID；标识符无效则拒绝此定义。 |
+| `title_key` | `string` | `dungeon.<namespace>.<path>` | 翻译键；去除首尾空白，空白值使用派生键。斜杠保持不变。 |
+| `difficulty` | `string` | common | common、uncommon、rare、epic、legendary、unique。选择稀有度与传送门颜色，不会自动缩放敌人数值。 |
+| `modes` | `array<string>` | [common] | common、timed、rogue_like、must_complete、hazard；重复项合并，缺失或空数组变为 common，可组合。 |
+| `team_policy` | `string` | party | solo、party、open。影响记录的队伍键；当前入口复用不强制隔离队伍。 |
+| `time_limit_ticks` | `int` | 0 | 单位为刻；负数钳制为 0，仅 timed 使用。应设置正时长；0 通常立即到期。 |
+| `structure` | `object` | 下述默认值 | 缺失时使用默认空起始池；提供此对象时，start_pool 和 start_jigsaw 必填。 |
+| `scripts` | `array<object>` | [] | 有序脚本；缺失或空数组不会添加自动完成行为。 |
+| `powerup_pool` | `array<object>` | [] | 已注册临时强化的加权引用，用于 rogue_like 选项。 |
+
+### 结构
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `structure.dimension` | `identifier` | isekaiexpansion:dungeon_instance | 目标维度；进入时检查是否存在，解析器不检查。 |
+| `structure.start_pool` | `identifier` | 提供 structure 时必填 | 拼图模板池 ID。整个对象的默认起始池 minecraft:empty 无法提供可游玩布局。 |
+| `structure.start_jigsaw` | `identifier` | 提供 structure 时必填 | 起始拼图连接器名称；整个对象缺失时默认为 `isekaiexpansion:spawn`。 |
+| `structure.entry_offset` | `array<number>` | [0, 0, 0] | 相对实例原点的 3 个坐标，转换为整数。长度错误则拒绝；小数截断。 |
+| `structure.base_y` | `int` | 96 | 实例原点 Y 坐标，单位为格；无额外范围钳制。 |
+| `structure.spacing` | `int` | 1152 | 先钳制到至少 320 格，再检查 spacing ≥ 2 × max_distance + 64，否则拒绝。 |
+| `structure.jigsaw_depth` | `int` | 0 | 拼图扩展深度钳制到 0–64。 |
+| `structure.max_distance` | `int` | 512 | 距生成锚点的最大距离钳制到 16–512 格。 |
+
+### 脚本与动作
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `scripts[].id` | `identifier` | 必填 | 重放历史键；接受重复 ID，它们共享单次执行或冷却记录。 |
+| `scripts[].trigger` | `string` | area_entered | session_started、player_entered、area_entered、hazard_cleared、tick。 |
+| `scripts[].replay_mode` | `string` | once_per_session | once_per_session、cooldown、repeatable。 |
+| `scripts[].cooldown_ticks` | `int` | 0 | 钳制到 0–72000 刻（0–3600 秒）。cooldown 要求正数；其他模式要求 0。 |
+| `scripts[].actions` | `array<object>` | [] | 按顺序执行；空脚本也会记录重放状态。 |
+| `scripts[].actions[].type` | `string` | spawn_hazard | spawn_hazard、spawn_return_portal、complete、offer_powerup、unlock_gate、message。 |
+| `scripts[].actions[].offset` | `array<number>` | [0, 0, 0] | 相对原点方块中心的 3 个双精度坐标。unlock_gate 改用相对原点的整格偏移，拒绝小数。 |
+| `scripts[].actions[].waves` | `array<object>` | [] | 危险遭遇波次；spawn_hazard 没有波次时不执行，其他动作忽略。 |
+| `scripts[].actions[].completion_delay_ticks` | `int` | 600 | complete 撤离延迟：非正数使用 600 刻（30 秒），再钳制到 20–12000 刻（1–600 秒）；其他动作忽略。 |
+| `scripts[].actions[].message_key` | `string` | 空字符串 | message 使用的翻译键，去除首尾空白；空白不发送，其他动作忽略。 |
+
+### 危险遭遇波次
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `waves[].entries` | `array<object>` | [] | 有序生成批次；缺失或空波次不生成实体，继续推进。 |
+| `waves[].entries[].entity` | `identifier` | 必填 | 实体类型 ID；加载时只校验标识符语法。 |
+| `waves[].entries[].count` | `int` | 1 | 每批实体数钳制到 1–64。 |
+| `waves[].entries[].delay_ticks` | `int` | 0 | 钳制到 0–12000 刻（0–600 秒）。本批之前的延迟，从遭遇或波次开始、或上一批之后计时。 |
+| `waves[].entries[].offset` | `array<number>` | [0, 0, 0] | 相对遭遇位置的 3 个双精度坐标；随后还会应用生成环与碰撞搜索。 |
+| `waves[].entries[].nbt` | `object` | {} | 生物初始化后应用的类型化 JSON NBT，保留变换与 UUID。容器类型或类型化 NBT 无效则拒绝。 |
+
+### 强化池
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `powerup_pool[].powerup` | `identifier` | 必填 | 已注册强化 ID；生成选项时排除未知或已达最高等级的条目。 |
+| `powerup_pool[].weight` | `int` | 1 | 下限钳制为 1。选项最多包含 3 个不同 ID；加载时接受重复引用。 |
+
+`nbt` 与任务生成实体使用相同的[类型化 JSON NBT 规则](/zh-cn/wiki/quest-objectives/)：复合对象、元素类型一致的列表，以及必要时显式指定数值类型的包装对象。它不是 SNBT 字符串。任意实体 NBT 仍遵循该实体自己的格式；地下城解析器校验 NBT 表示方式，不逐项校验实体专用键。
+
+### 脚本何时执行
+
+| 触发器 | 分发时机 |
+| --- | --- |
+| `session_started` | 新会话完成布局放置，并成功传送首名参与者之后。 |
+| `player_entered` | 每次成功进入之后，包括首次；重放模式仍可阻止执行。 |
+| `area_entered` | 已配置触发器方块为身处会话维度的绑定参与者请求指定脚本。 |
+| `hazard_cleared` | 移除已结束的危险遭遇后，会话中不再有其他危险遭遇。 |
+| `tick` | 存在身处地下城的在线参与者且尚未开始撤离时，每 `20` 个服务端刻。 |
+
+重放记录按会话与脚本 ID 保存。先执行动作，再记录重放状态，没有事务或逐动作回滚。`repeatable` 允许每次符合条件的分发；`cooldown` 保存下一次允许执行的游戏刻。
+
+`spawn_hazard` 创建有序波次。同一波内各批按各自延迟生成；下一波等待所有已生成且受追踪的实体清除。已卸载实体的 UUID 会继续保留，不会被算作已击杀。生成位置搜索失败后，不会重试同一批次。所有危险遭遇清除时，还会为符合条件的参与者生成类 Rogue 强化选项，无需额外声明 `offer_powerup` 动作。
+
+`spawn_return_portal` 创建出口，但不完成会话；`must_complete` 会阻止使用该出口。`complete` 开始撤离，并非立即授予完成。撤离期间停止新的区域脚本及危险遭遇、逐刻脚本处理；原有的限时截止时间先被检查，仍可能导致失败。最终完成还需等待至少一名在线参与者身处地下城。
+
+`unlock_gate` 操作原点整数偏移处的控制器；控制器不存在或关联集合为空时记录警告，不会改为解锁其他位置。`message` 向在线参与者发送翻译消息。`offer_powerup` 要求 `rogue_like` 模式与非空强化池。
+
+### 模式与成员边界
+
+`timed` 创建初始截止时间；`must_complete` 阻止主动使用返回传送门，并选择原生地下城死亡重生流程。`rogue_like` 启用临时强化选项。`common` 和 `hazard` 不会自动创建敌人或完成规则。
+
+同一实体入口会复用入口位置与地下城定义均匹配的活动会话。当前进入流程不比较进入者队伍与会话所记录的队伍键。因此，不能将 `solo`、`party` 或 `open` 视为访问控制或独立队伍隔离保证。已经绑定活动会话的玩家无法再开始另一场会话。
+
+### 场景编写方块
+
+编辑要求创造模式与权限等级 `2`。使用主手打开入口、触发器或控制器编辑器。四种方块与物品 ID 为 `isekaiexpansion:dungeon_gateway`、`isekaiexpansion:dungeon_script_trigger`、`isekaiexpansion:dungeon_unlock_controller` 和 `isekaiexpansion:dungeon_unlockable`。
+
+1. 在世界入口结构内放置入口方块，并设置地下城 ID。非旁观者站在其范围内充能 `40` 刻（`2` 秒）；离开会清除充能，传送门冷却也会重置充能。
+2. 在地下城模板内放置触发器，绑定 `area_entered` 脚本 ID。扫描使用球体范围、可选视线检查，以及 `on_enter` 或 `while_present` 激活方式；脚本仍受自身重放模式约束。
+3. 对现有方块使用可解锁方块物品，将其方块状态保存为门的外观。保留的是方块状态，不包括原方块实体的物品栏或其他 NBT。外观不会替代门锁定时的完整方块碰撞。
+4. 手持控制器物品，潜行使用控制器以选中它。再用该物品操作同维度的门单元，切换相对关联。
+5. 配置控制器时序，并让 `unlock_gate` 动作指向它。新会话会重置定义中引用的控制器。解锁顺序取跨度最大的两个轴，从内向外顺时针展开；各单元直到自身动画结束才移除碰撞。
+
+触发器每次扫描最多向一名玩家分发。占用者缓存不持久化，且只更新到本次分发前扫描过的玩家，因此 `on_enter` 不是可靠的逐玩家永久单次保证。需要持久的单次或冷却行为时，应使用脚本重放规则。
+
+下列字段属于场景方块或控制器物品 NBT，与地下城定义 JSON 分开。编辑器会写入这些字段；表中也列出运行时字段，便于准确检查保存的结构。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `Dungeon` | `string` | 未设置 | 入口定义 ID；已保存 ID 无效时禁用。编辑要求有效标识符，但不检查定义是否存在。 |
+| `Portal` | `UUID` | 无 | 入口已生成传送门的 UUID，由运行时维护。 |
+| `Script` | `string` | 未设置 | 区域触发器脚本 ID；已保存 ID 无效时禁用。需匹配参与者定义内的 area_entered 脚本。 |
+| `Radius` | `double` | 2 | 触发球体半径，单位为格，钳制到 0.5–64。 |
+| `Activation` | `string` | on_enter | on_enter 或 while_present；保存值为空白或未知时回退为 on_enter。 |
+| `ScanInterval` | `int` | 10 | 单位为刻；非正数使用 10，再钳制到 1–100。 |
+| `RequireLineOfSight` | `boolean` | false | 从玩家眼睛向触发器中心进行碰撞射线检查，忽略流体；命中触发器自身也接受。 |
+| `Targets` | `list<compound>` | [] | 门控制器相对偏移。最多读取 256 项，去重，拒绝零偏移或任一坐标超出 −64–64 的条目。 |
+| `Targets[].X, Targets[].Y, Targets[].Z` | `int` | 0 | 相对控制器的整格坐标，并非相对地下城原点。 |
+| `StepInterval` | `int` | 3 | 门单元之间的间隔刻数；非正数使用 3，再钳制到 1–40。 |
+| `BlockAnimation` | `int` | 10 | 消散动画时长，单位为刻；非正数使用 10，再钳制到 2–60。 |
+| `PlayBreakSounds` | `boolean` | true | 解锁时控制器播放各外观方块的破坏声音。 |
+| `Active` | `boolean` | false | 控制器运行中的序列状态；重新配置会取消。 |
+| `Index` | `int` | 0 | 控制器下一个单元索引，下限钳制为 0；保存索引越界时取消序列。 |
+| `NextStep` | `long` | 0 | 控制器下一步的世界刻，下限钳制为 0。 |
+| `DisplayState` | `compound` | minecraft:stone_bricks | 可解锁单元的外观方块状态。拒绝空气、可解锁单元和控制器状态。外观不改变锁定时的完整方块碰撞。 |
+| `Unlocking` | `boolean` | false | 单元的消散状态，与方块状态属性 locked 不同。 |
+| `UnlockStarted` | `long` | 0 | 单元消散开始时的世界刻。 |
+| `UnlockDuration` | `int` | 10 | 默认值及 2–60 刻钳制同 BlockAnimation。 |
+| `DungeonUnlockControllerDimension` | `string` | 无 | 控制器物品选中的世界 ID；关联要求当前维度一致。 |
+| `DungeonUnlockControllerPos` | `long` | 无 | 物品上保存的选中控制器绝对方块坐标，使用压缩长整数。 |
+
+入口、触发器与控制器几何对普通玩家不可见。可解锁单元锁定时保留外观，解锁后没有碰撞。触发器与控制器编辑更新要求玩家在 `8` 格以内；入口配置检查创造模式、管理员权限与方块类型，没有该距离检查。
+
+### 内置临时强化
+
+下列 ID 均使用 `isekaiexpansion:` 命名空间。每轮最多提供 `3` 个不同的可选强化，待选列表按参与者保存。未选择的列表会被复用；提交选择要求会话仍活动、玩家是参与者，且 ID 属于已提供选项。等级与待选列表在重新连接后恢复，离开或结算时清除等级。
+
+| ID | 等级 | 效果 |
+| --- | --- | --- |
+| `vitality_surge` | `1` | 获得时恢复 `6` 点生命；同一会话中不能再次选择。 |
+| `reapers_mending` | `1–3` | 作为归属玩家击杀怪物时，分别恢复 `1`、`1.5` 或 `2` 点生命。 |
+| `iron_resolve` | `1–3` | 受到有效伤害后获得 `60` 刻（`3` 秒）抗性提升，放大值为等级减 `1`。 |
+| `windstep` | `1–3` | 每秒刷新 `30` 刻（`1.5` 秒）速度效果，放大值为等级减 `1`。 |
+
+这些事件效果要求玩家是身处会话维度的活动参与者。清除等级会停止后续钩子；已有的限时状态效果按自身时长到期。
+
+### 完成进度
+
+原生地下城成功完成时，会为在线参与者触发进度触发器 `isekaiexpansion:dungeon_completed`。其自定义条件字段如下；常规进度玩家谓词由 Minecraft 处理。此条件对象与严格的地下城定义格式分开。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `dungeon` | `identifier` | 任意地下城 | 精确匹配已完成的地下城 ID；标识符无效则解析失败。 |
+| `minimum_difficulty` | `string` | 任意难度 | 使用根对象表中的难度名称；完成难度至少达到指定稀有度。空白使用 common，未知值拒绝。 |
+
+## 校验
+
+加载器逐文件捕获错误，并发布有效子集，即使其他文件失败也会替换。显式地下城 ID 重复时，保留加载器迭代顺序中首个成功插入的定义，并报告后续重复项。这不是回滚到旧目录的原子重载。
+
+定义解析不会解析所有模板池、连接器、维度、脚本引用、实体类型或强化。进入时才规划拼图图结构，并拒绝缺失或空池、缺失起始连接器、不支持的结构片段，以及不包含锚点的布局。布局最多覆盖 `256` 个区块；预加载增加 `1` 个区块的边界，总上限为 `1024` 个区块。
+
+初始入口搜索最多向水平方向搜索 `8` 格、垂直方向搜索 `8` 格，寻找脚部与头部无碰撞、无流体且下方有支撑碰撞形状的位置。参与者绑定前保存选定的脚部坐标。会话一旦有参与者，就保持该精确出生点；恢复损坏布局时不会静默改换位置。
+
+在测试世界中验证成功进入和返回、各脚本重放模式、波次与门动画中途重启、缺失引用、生成位置失败，以及临近限时截止时的完成。应实际测试队伍准入，不要从 `team_policy` 推断隔离行为。
+
+## 重载
+
+定义使用服务端数据重载。有效条目替换旧目录；格式错误的条目可能在 `/reload` 后消失。活动会话在逐刻处理时查询当前定义，移除或使其定义失效会导致会话失败。已保存的原点、出生点、槽位与截止时间不会根据修改后的结构或时间字段重新计算。
+
+编辑入口或触发器只修改已放置配置，不会改写 JSON 定义。定义重载不保证完整替换布局：已放置且到达点仍安全的会话可以继续使用现有方块。
+
+## 相关页面
+
+- [地下城运行时](/zh-cn/dev/dungeons/)——生命周期、存档格式、钩子与命令。
+- [进度数据](/zh-cn/wiki/progression-data/)——进度图定义。
+- [任务目标](/zh-cn/wiki/quest-objectives/)——原生地下城完成目标与类型化 NBT。

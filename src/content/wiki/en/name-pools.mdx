@@ -1,0 +1,82 @@
+---
+title: "Name pool data"
+description: "Define translated full names and select them by race, culture and name style."
+category: data
+order: 115
+updated: 2026-09-26
+---
+
+A name pool contains explicit name identifiers and matching rules. The shipped catalogue supplies bilingual full names; extensions use the same format for NPC selection and the [character-name browser](/en/wiki/character-names/).
+
+## Where the files live
+
+Server overrides use `data/<namespace>/naming/pools/<path>.json`. Client browser overrides use `assets/<namespace>/naming/pools/<path>.json`. The pool ID is `<namespace>:<path>`. The highest-priority pack's file replaces that pool completely; different pool IDs coexist.
+
+Bundled pools live under `assets/isekaiexpansion/naming/pools/`, listed in `assets/isekaiexpansion/naming/catalog.json`. Both sides start from that bundled catalogue. Pack extensions are discovered automatically and need no manifest edit. Add new bundled pools to the manifest.
+
+For name `aelith_silverfrond` in pool `isekaiexpansion:elven`, the identity is `isekaiexpansion:elven/aelith_silverfrond` and the translation key is `name.isekaiexpansion.elven.aelith_silverfrond`. Pool titles use `name_pool.isekaiexpansion.elven`; slashes in pool paths become dots. Author the English and Chinese strings in `language_assemble/categories/names/en_us.json` and `language_assemble/categories/names/zh_cn.json`, then assemble language files. A pack outside the repository supplies normal client language resources.
+
+## Minimal example
+
+This reduced example uses a shipped elven name. As `data/isekaiexpansion/naming/pools/elven.json`, it replaces that pool with one neutral name and a wildcard selector:
+
+```json
+{
+  "names": {
+    "unisex": ["aelith_silverfrond"]
+  }
+}
+```
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `selectors` | `array<object>` | `[]` | Alternative matching clauses, at most 64. Missing or empty gives one wildcard clause. |
+| `selectors[].origins` | `array<identifier>` | `[]` | Allowed race IDs, at most 64 unique values. Empty matches any race. Syntax is validated; registry existence is not required. |
+| `selectors[].cultures` | `array<string>` | `[]` | Allowed culture IDs, at most 64 unique values. Empty matches any culture. Each value matches `[a-z0-9_-]{1,64}`. Use `yamato` or `donghuang`, not translated labels. |
+| `priority` | `integer` | `0` | Range −1000–1000. Higher priority wins among pools at the same specificity; tied pools contribute their names together. |
+| `names` | `object` | `required` | Gender/style groups containing 1–16384 names in total. |
+| `names.female` | `array<string>` | `[]` | Feminine name IDs, each matching `[a-z0-9_]{1,96}`. |
+| `names.male` | `array<string>` | `[]` | Masculine name IDs, with the same syntax. |
+| `names.unisex` | `array<string>` | `[]` | Neutral IDs, available in either gender selection and in the neutral filter. |
+
+Within a clause, both populated selector lists must match. Selection tries race+culture, culture alone, race alone, then the wildcard. At each stage it keeps only the highest-priority pools, then applies the requested name style. An empty result continues to the next stage. Selecting all styles includes every group; each surviving name has equal probability.
+
+## Full example
+
+This elven override specialises in Donghuang elves. Its names already have bundled translations:
+
+```json
+{
+  "selectors": [
+    {
+      "origins": ["isekaiorigins:elf"],
+      "cultures": ["donghuang"]
+    }
+  ],
+  "priority": 10,
+  "names": {
+    "female": ["aelith_silverfrond"],
+    "male": ["aelar_silverfrond"]
+  }
+}
+```
+
+## Validation
+
+Unknown fields, wrong structural types, invalid identifiers, non-string name entries, fractional/out-of-range priorities and empty name sets reject the reload. Repeated complete name IDs are rejected, including a name listed in two style groups. Selector lists collapse repeated values. The catalogue allows at most 256 pools, 100000 names and 4096 distinct selector combinations; it must retain a wildcard pool. Pool identifiers are limited to 150 characters.
+
+The new catalogue replaces the old one only after every pool validates. Translation presence is checked by the repository's catalogue audit, not by a dedicated server. Ship both language files: a missing translation displays its key. Existing assigned names retain their translation keys even if a later pool removes those entries.
+
+## Reloading
+
+Server pools reload with data packs; browser pools reload with client resources. The catalogue is not sent over the network. Supply matching client resources when a server adds preset names. The server rejects newly selected preset IDs absent from its catalogue; a client-only addition cannot bypass that check. Already selected names remain valid for unrelated edits when presets are later disabled or removed.
+
+NPC eligibility is extended through `data/<namespace>/tags/entity_types/nameable_npcs.json`, targeting tag `isekaiexpansion:nameable_npcs`. Tag `isekaiexpansion:naming_excluded` excludes types even when otherwise eligible. The bundled optional entry is `guardvillagers:guard`. Unique IsekaiExpansion NPCs and existing custom names are always protected. Reloading rules does not rename already named entities.
+
+## Related
+
+- [Character names](/en/wiki/character-names/)
+- [Naming API](/en/dev/naming/)
+- [Humanoid and NPC presets](/en/wiki/humanoid-presets/)

@@ -1,0 +1,131 @@
+---
+title: "Quest Rewards"
+description: "Reward payloads, recipient fallbacks, runtime validation and partial-failure behaviour."
+category: data
+order: 92
+updated: 2026-09-24
+---
+
+Quest rewards run in array order after the quest is recorded as complete. For [bounties](/en/wiki/bounty-quests/), this occurs when the original signer settles the writ with a receptionist serving its issuing pool. Each entry has its own result: a failed reward does not restore the quest or undo earlier grants, and later entries still run.
+
+## Where the files live
+
+Rewards are entries in the required `rewards` array of `data/<namespace>/quests/**/*.json`. An empty array is valid. [Quest Data](/en/wiki/quest-data/) defines the enclosing file, resource priority and catalogue validation; reward entries have no independent resource files or IDs.
+
+## Minimal example
+
+Insert this entry into a quest's rewards array. It uses the XP reward shape found in the demonstration quest fixtures; omitting distribution selects the original picker with the fallbacks below.
+
+```json
+{
+  "type": "isekaiexpansion:xp",
+  "data": { "amount": 50 }
+}
+```
+
+## Fields
+
+### Types and payloads
+
+| Type | Effect |
+| --- | --- |
+| `isekaiexpansion:xp` | Add Isekai Core player-level experience |
+| `isekaiexpansion:currency` | Grant a registered physical item |
+| `isekaiexpansion:item` | Grant a registered item with optional NBT |
+| `isekaiexpansion:loot_table` | Roll a loot table independently for each recipient |
+| `isekaiexpansion:recipe_unlock` | Unlock loaded recipes |
+| `isekaiexpansion:mainstory_progress` | Apply a signed story-progress delta |
+| `isekaiexpansion:world_flag` | Set a server-wide persistent boolean |
+| `isekaiexpansion:faction_reputation` | Apply a reputation change to the named factions |
+| `isekaiexpansion:adventurer_rank_promotion` | Attempt a qualified adventurer-rank promotion |
+
+The prefixes in the field table identify a reward type, not an extra JSON wrapper. For example, `currency.id` means `id` directly inside that reward's `data`.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | Required | Registered reward ID from the table below; unknown IDs reject reload. |
+| `data` | `object` | Required | Payload for this reward type; empty is valid only if the type permits it. |
+| `distribution` | `string` | picker | All recipient-based types: picker, finisher or team_online. Trimmed/case-insensitive; unknown or blank rejects. world_flag ignores this field. |
+| `xp.amount` | `integer` | 0, rejected | Positive player-level experience. Omission therefore rejects; no extra authoring upper cap beyond the integer type. |
+| `currency.id` | `item id` | Required | Registered non-air item. This reward grants physical items, not an account balance. |
+| `currency.amount` | `integer` | 1 | 1–4096 items per recipient. |
+| `item.item` | `item id` | Required | Registered non-air item ID. |
+| `item.count` | `integer` | 1 | 1–4096 items per recipient. |
+| `item.nbt` | `object` | Absent | Sets the granted stack's NBT; typed JSON rules from Quest objectives apply. SNBT strings and malformed NBT reject. |
+| `loot_table.loot_table` | `identifier` | Required | Loot table resolved at reward execution. |
+| `loot_table.rolls` | `integer` | 1 | 1–64 rolls per recipient, each using that recipient's world, position and entity with a gift context. |
+| `recipe_unlock.recipes` | `array<identifier>` | Required | Non-empty recipe ID set; duplicates collapse. Every distinct recipe must be loaded before any recipient is granted this entry. |
+| `mainstory_progress.add` | `integer` | 0, rejected | Non-zero signed change to each recipient's Isekai Core story progress; negative values are allowed. |
+| `world_flag.flag` | `string` | Empty, rejected | Trimmed nonblank flag key. Case is retained; no identifier syntax requirement. |
+| `world_flag.value` | `boolean` | true | Stored server-wide flag value; false stores false rather than deleting the key. |
+| `faction_reputation.factions` | `array<string>` | Required | Non-empty faction set. Values normalise as below; duplicate normalised entries collapse. |
+| `faction_reputation.amount` | `integer` | Required | Non-zero signed base reputation amount; negative values are allowed. Reputation-system modifiers still apply. |
+| `adventurer_rank_promotion.target_rank` | `string` | Empty, rejected | copper, silver, gold, diamond, mythril, adamantite, stormyx or celestium. Trimmed/case-insensitive; none and unknown values reject. |
+| `amount` | `integer` | Type-specific | Actual key inside xp, currency or faction_reputation data; the prefixed rows above distinguish their different defaults and ranges. |
+
+
+### Recipients
+
+| Distribution constant | JSON value | Resolution order |
+| --- | --- | --- |
+| `PICKER` | picker | Online player matching the saved picker UUID; otherwise the finisher; otherwise all online players currently in the completed quest's profile |
+| `FINISHER` | finisher | Finisher if present; otherwise all online players in that profile |
+| `TEAM_ONLINE` | team_online | All online players whose current quest-profile key matches the completed quest |
+
+Each recipient receives the **full authored amount**, not a share divided among members. Team recipients may be in different dimensions. Offline players are not queued for later delivery. An online picker is resolved by UUID without checking that they still belong to the completed profile; the fallback finisher is likewise used directly.
+
+Recipient-based entries fail when resolution returns nobody. `world_flag` has no recipient requirement. Each reward resolves recipients at its own execution time, so the list is not snapshotted once for the entire reward array.
+
+### Item and loot delivery
+
+Physical items are split into legal stack sizes, inserted into inventory and dropped beside the recipient when inventory insertion leaves a remainder. The reported grant count includes dropped items. A full inventory therefore does not make a currency/item reward fail.
+
+Loot rewards resolve the table at execution. An unloaded/empty-table sentinel fails that entry; a valid table that rolls no items can still succeed. The gift context supplies recipient origin and entity. Each recipient gets their own rolls, so a team reward does not clone one shared loot result. The 4096 authoring limit belongs to direct item/currency counts, not a total cap on generated loot.
+
+### Story progress and world flags
+
+Story progress is personal to each recipient and delegated to Isekai Core; it is not the shared profile's completion count. A negative `add` is accepted. Use the [Quest Data](/en/wiki/quest-data/) main-story range fields to decide which resulting progress values can select another quest.
+
+World flags are persistent server-wide state shared across teams and dimensions. Repeating the same assignment succeeds even when nothing changes. A false flag remains stored, while querying an absent flag yields false. The reward does not automatically add a flag predicate to the quest's pick-condition vocabulary.
+
+### Reputation and rank promotion
+
+Faction strings trim and lowercase, replace backslashes and vertical bars with forward slashes, and replace spaces with underscores. Empty strings normalise to `unknown`, so they do not behave like a missing faction. Unrecognised faction keys are created at execution; they are not rejected as unregistered resource IDs. The amount enters the normal quest-reward reputation path, so [Reputation](/en/wiki/reputation/) owns modifiers and limits.
+
+Rank names and qualification belong to **Isekai Core**. Checked in its local source checkout for the consumed `0.4.0-build60`: promotion advances to the next rank, with the dependency's reputation requirement beyond the initial rank. This is source verification, not binary-equivalence verification.
+
+This reward first checks every resolved recipient. A recipient already at or above the target is accepted without promotion. Any recipient with another failure status prevents this reward entry from promoting anyone in the initial pass. Only after that preflight does it promote eligible recipients. If state changes during application, it can fail after earlier recipients have already been promoted; there is no rollback.
+
+This differs from `adventurer_rank_promotion_ready` in pick conditions: readiness requires an actual next-rank promotion, while this reward tolerates recipients who already hold the target. A failed rank reward does not uncomplete the quest.
+
+## Validation
+
+| Input or runtime condition | Result |
+| --- | --- |
+| Missing rewards array in the quest | Quest reload rejects |
+| Empty rewards array | Accepted; no grants |
+| Missing type/data, unknown type or incompatible payload type | Quest catalogue validation rejects |
+| Unknown extra key | Ignored by built-in parsers |
+| Duplicate reward entries | Accepted and executed separately in order |
+| Missing or air item for currency/item | Rejected during quest load |
+| Out-of-range direct count/rolls, nonpositive XP, zero story/reputation delta | Rejected; not clamped |
+| Invalid or none promotion target | Rejected during load |
+| Loot table absent at execution | That reward fails; later entries continue |
+| Any requested recipe absent at execution | Entire recipe-unlock entry fails before granting it to any recipient |
+| Empty resolved recipient list | Recipient-based entry fails |
+| Reward throws an exception | Failure is logged and recorded; later entries continue |
+
+A successful recipe-unlock entry can report no newly unlocked recipes when recipients already know them. Reward success means that entry completed its own procedure; it is not proof that a quest's entire reward list succeeded.
+
+## Reloading
+
+Rewards reload with quest definitions. Current execution uses the definition supplied when completion is processed; already-recorded completions are not replayed when data reloads. World flags and player grants persist independently of the authoring file.
+
+The server records completion before running rewards, then emits its completion event after collecting reward results. There is no automatic retry queue or cross-reward transaction. See the runtime page for diagnostics and extension points.
+
+## Related
+
+- [Quest Data](/en/wiki/quest-data/) — enclosing definitions and selection rules.
+- [Quest objectives](/en/wiki/quest-objectives/) — progress, delivery and typed NBT.
+- [Quest runtime](/en/dev/quest-system/) — completion ordering and integration.
+

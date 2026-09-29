@@ -1,0 +1,127 @@
+---
+title: "Persistent state storage"
+description: "Versioned save paths, world scope, key validation and the shared persistence helper."
+category: systems
+order: 130
+updated: 2026-09-24
+---
+
+Most project world-save records use the internal `IsekaiPersistData` helper and a versioned filename below `data/isekaiexpansion/`. The selected persistent-state manager determines world scope; a version in the filename does not itself migrate old data.
+
+## What it does
+
+`internal.persiststate.IsekaiPersistData` extends Minecraft's `PersistentState`, creates the parent directory and delegates loading/caching to `PersistentStateManager.getOrCreate`. It is an internal storage convention, not a public API facade or a transaction coordinator.
+
+The server overload always uses the overworld manager. The manager overload uses exactly the supplied manager. Thus a server-wide record accessed from the Nether still lives in overworld data, while a world-scoped city or housing record lives in that world's data directory.
+
+## Runtime model
+
+### Current file inventory
+
+Paths below are relative to the selected manager's data directory. Records are loaded on demand; listing a path does not imply its file already exists.
+
+| Scope | Relative file | Owner |
+| --- | --- | --- |
+| Server | `isekaiexpansion/blacksmith/commissions_v1.dat` | Forge commissions |
+| Server | `isekaiexpansion/dungeon/runtime_v2.dat` | Dungeon sessions, entrance allocations and participant progress |
+| Server | `isekaiexpansion/faction/reputation_v1.dat` | Player reputation |
+| Server | `isekaiexpansion/faction/relations_v1.dat` | Faction relation overrides |
+| Server | `isekaiexpansion/humanoid/paint_v1.dat` | Shared humanoid paint |
+| Server | `isekaiexpansion/npc/graves_v2.dat` | NPC grave snapshots |
+| Server | `isekaiexpansion/npc/unique_marriage_v1.dat` | Unique NPC marriage bindings |
+| Server | `isekaiexpansion/quest/meta_v2.dat` | Quest storage metadata |
+| Server | `isekaiexpansion/quest/world_flags_v2.dat` | Quest world flags |
+| Server | `isekaiexpansion/quest/shards/state_00_v2.dat` through `state_3f_v2.dat` | 64 quest profile shards |
+| Server | `isekaiexpansion/scene/trigger_memory_v2.dat` | Persistent scene-trigger replay memory |
+| Server | `isekaiexpansion/taming/companions_v1.dat` | Global tame reservations and pending owner death notices |
+| Selected world | `isekaiexpansion/city/cities_v1.dat` | Cities and their substructures |
+| Selected world | `isekaiexpansion/structure/limited_structures_v1.dat` | Structure placement limits |
+| Selected world | `isekaiexpansion/structure/spaces_v2.dat` | Housing spaces and membership |
+
+Faction and scene state also expose manager overloads; calling those directly can choose a different scope. The listed server scope describes their normal runtime callers. Quest shards take a manager supplied by the server quest state, not the player's current dimension.
+
+### Companion ledger
+
+Use `api.taming.TamedCompanionsAPI` to read `limit(player)` and `occupied(player)` or to reserve and release ownership. Ownership mutations run on the server thread; a rejected `reserve(entity, owner)` must cancel the assignment. The facade supports `TameableEntity` and `AbstractHorseEntity` families.
+
+`internal.taming.TamedCompanionLedger` uses the overworld helper record. It indexes entity UUID → owner UUID and owner UUID → occupied entities. `TamedCompanionsComponent` is an owner-only synchronised projection; it does not decide whether a slot is available. Reservations are checked and changed on the server thread before ownership changes. Repeating the same assignment consumes no extra slot.
+
+Death removes the live reservation and queues a named grave notice. An online owner receives a component refresh and the notice immediately. An offline owner's queue survives saving; login refreshes the projection from the ledger, sends the notices and clears their grave entries. Unloading a live entity or moving it between dimensions leaves its reservation intact. Explicit discard or release removes it. A dead entity loaded from a save cannot restore a live reservation.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `Reservations` | `array<object>` | `[]` | Live reservations. A missing or incorrectly typed list reads as empty. |
+| `Reservations[].Entity` | `array<integer>` | required | Entity UUID encoded as 4 integers; malformed UUID data fails loading. |
+| `Reservations[].Owner` | `array<integer>` | required | Owner UUID encoded as 4 integers. Later duplicate entity entries replace earlier ownership. |
+| `Graves` | `array<object>` | `[]` | Death notices awaiting an online owner; repeated death callbacks do not add duplicates. |
+| `Graves[].Entity` | `array<integer>` | required | Dead entity UUID encoded as 4 integers. |
+| `Graves[].Owner` | `array<integer>` | required | Recipient UUID encoded as 4 integers. |
+| `Graves[].Name` | `string` | empty text | JSON-serialized Minecraft text. A decoded null becomes empty text; malformed text is not migrated. |
+| `Occupied` | `integer` | `0` | Player component count, clamped to at least 0 when read and reconciled from the ledger on login. |
+
+### World-tree exception
+
+`world.terrain.placement.WorldTreeState` directly extends `PersistentState` and uses `isekaiexpansion_world_tree.dat` at the manager's data root. It does not use the versioned helper path. The saved payload has its own version and geometry checks.
+
+Attachment restores a valid reservation, or chooses and records a new one before explicitly saving the manager. An invalid decoded reservation aborts attachment rather than silently selecting another tree location. Do not move this file into the helper directory or infer that all project persistent state follows the helper.
+
+## Contracts
+
+| Input or operation | Contract |
+| --- | --- |
+| Domain | Nonblank slash-separated segments; each segment matches `[a-z0-9][a-z0-9_-]*`. Nested domains such as `quest/shards` are supported. |
+| Name | A single segment matching the same expression. Dots, spaces, uppercase characters and path separators are rejected. |
+| Version | Integer at least `1`; invalid keys throw `IllegalArgumentException`. |
+| Trailing domain slash | Java's default split discards trailing empty segments, so it normalizes away. Interior empty segments are rejected. |
+| Generated ID | `isekaiexpansion/<domain>/<name>_v<version>`; Minecraft adds the file suffix. |
+| Directory creation | Resolves the actual manager directory through `PersistentStateManagerAccessor`, then creates the mod/domain directories. |
+| Directory failure | `IOException` or `SecurityException` is logged; the helper still calls `getOrCreate`. This is not proof that a later save will succeed. |
+| Loading and mutation | Reader/factory and save format belong to the owning subsystem. The helper supplies no generic NBT validation, locks, dirty tracking or client synchronization. |
+| Format change | A new key selects a different file. The helper neither reads the previous filename nor transforms its contents. Any migration must be explicit in the owning subsystem. |
+
+Use state mutations on the server thread, after the relevant world exists. Mark dirty when durable data changes; mutating an object returned from a getter does not automatically notify this helper. Keep entity components, client caches and server persistent records distinct, and use the owning service rather than editing live NBT as a gameplay operation.
+
+## Extending it
+
+A project-internal state can follow this pattern. The example stores a counter and only marks changes dirty:
+
+```java
+final class ExampleState extends IsekaiPersistData {
+    private static final Key KEY = key("example", "counter", 1);
+    private int count;
+
+    static ExampleState get(MinecraftServer server) {
+        return IsekaiPersistData.get(server, KEY, ExampleState::read, ExampleState::new);
+    }
+    private static ExampleState read(NbtCompound nbt) {
+        var state = new ExampleState();
+        state.count = nbt.getInt("Count");
+        return state;
+    }
+    void increment() { count++; markDirty(); }
+    @Override public NbtCompound writeNbt(NbtCompound nbt) {
+        nbt.putInt("Count", count);
+        return nbt;
+    }
+}
+```
+
+Choose server versus world scope before choosing a key. Keep keys stable for compatible formats and implement the reader's missing/invalid-field behaviour deliberately. A cache added by the owning subsystem must also respect server/world lifetime.
+
+## Verifying
+
+- Load and mutate a server-wide state from different dimensions; confirm it resolves to the same overworld record.
+- Mutate the same world-scoped key in separate worlds and confirm independent records after restart.
+- Exercise invalid domain/name/version inputs and an unavailable storage directory; distinguish logged directory failure from successful durable saving.
+- Round-trip the owning NBT format, including missing and invalid fields. Test a version change against a disposable save and verify the intended migration or fresh-state policy.
+- For a saved world-tree reservation, test restoration and invalid geometry separately; attachment must not silently relocate the landmark.
+
+## Related
+
+- [Terrain generation](/en/dev/terrain-generation/) — complete world-tree payload and attachment failure rules.
+- [Dungeon runtime](/en/dev/dungeons/) — aggregate NBT, allocation validation and restart recovery.
+- [NPC revival](/en/dev/npc-revival-api/) — grave snapshot and payment contracts.
+- [City API](/en/dev/city-api/) — world-scoped city records.
+- [Reputation runtime](/en/dev/reputation-runtime/) — faction storage and overrides.
+- [Blueprint research](/en/dev/blueprint-research/) — commission storage and transactions.
+- [Humanoid runtime](/en/dev/humanoid-runtime/) — paint and profile ownership.

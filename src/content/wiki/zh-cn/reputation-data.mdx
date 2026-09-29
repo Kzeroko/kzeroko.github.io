@@ -1,0 +1,90 @@
+---
+title: "声望数据"
+description: "实体阵营、动态职业阵营及阵营关系规则。"
+category: data
+order: 30
+updated: 2026-09-18
+---
+
+实体阵营规则决定实体属于哪些阵营、承担哪些角色；关系规则决定阵营之间的友好、中立或敌对关系。一个实体可以同时匹配多个文件，匹配结果会共同参与判定。
+
+## 文件放在哪里
+
+实体规则使用`data/<namespace>/reputation/entity_factions/*.json`，关系规则使用`data/<namespace>/reputation/faction_relations/*.json`。每个文件是一条规则，资源ID来自命名空间和文件路径，不在JSON内另写ID或版本字段。
+
+不同资源ID的实体规则累加，不按文件名互相覆盖。关系规则按优先级和关系类别解决冲突。相同资源路径先按数据包优先级选择资源。
+
+## 最小示例
+
+以下文件保留内置村民规则的必填字段；它能匹配村民，但不主动添加阵营或角色：
+
+```json
+{
+  "entity_types": ["minecraft:villager"]
+}
+```
+
+## 字段
+
+### 实体阵营
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `entity_types` | `array<string>` | 必填 | 实体ID或以`#`开头的标签，任一匹配即可；`[]`不匹配实体。只检查ID语法，不要求已注册。 |
+| `factions` | `array<string>` | `[]` | 添加静态阵营。ID规范化后按需创建，不查询外部注册表。 |
+| `dynamic_factions` | `array<string>` | `[]` | 只接受`minecraft:villager_profession`，也可省略命名空间写`villager_profession`。为村民添加`minecraft:villager_profession/<profession_id>`，其他实体不产生此项。 |
+| `roles` | `array<string>` | `[]` | 规范化角色名。防卫者检查使用`protector`；其他名称可加载，但这里没有对应行为。重复值合并。 |
+| `include_structure_origin_factions` | `boolean` | `false` | 实体支持结构来源记录时，收集其已保存的来源阵营。不会仅因实体站在结构内就赋予阵营。 |
+
+### 阵营关系
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `source_factions` | `array<string>` | 必填 | 行为方的规范化阵营ID；空列表不匹配。 |
+| `target_factions` | `array<string>` | 必填 | 目标方的规范化阵营ID；空列表不匹配。 |
+| `relation` | `enum(friendly, neutral, hostile)` | 必填 | 去除两端空白且不区分大小写。友好别名：`ally`、`allied`、`alliance`；敌对别名：`enemy`、`war`。其他值使文件加载失败。 |
+| `bidirectional` | `boolean` | `true` | 同时交换行为方与目标方进行匹配。 |
+| `priority` | `integer` | `0` | 匹配时数值高者优先。没有显式截断，应写32位有符号整数。同优先级依次取敌对、友好、中立。 |
+
+
+## 完整示例
+
+把以下实体规则放入实体阵营目录：
+
+```json
+{
+  "entity_types": ["minecraft:villager"],
+  "factions": ["minecraft:village"],
+  "dynamic_factions": ["minecraft:villager_profession"],
+  "roles": ["protector"],
+  "include_structure_origin_factions": true
+}
+```
+
+以下关系规则放入另一个目录，沿用内置文明与怪物关系：
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/civilization"],
+  "target_factions": ["isekaiexpansion:side/monster"],
+  "relation": "hostile"
+}
+```
+
+阵营ID会去除两端空白、转小写，把反斜杠和竖线替换为斜杠、空格替换为下划线；空白ID变为`unknown`。角色名采用同样的大小写和空格处理，但不转换竖线，也不把空名改为`unknown`。实体ID与标签仍须使用合法资源ID语法。
+
+## 校验
+
+缺少必填键、已读取字段类型错误、非法实体ID语法、未知动态阵营类型或关系值会使该文件失败，日志记录错误后继续处理其他文件。两个加载器都会用本轮成功读取的规则替换旧表；坏文件对应的旧规则不会保留。未知字段被忽略，不提供版本兼容转换。空对象缺必填键；空白文本不是合法JSON。
+
+合法但尚未注册的实体ID可以加载，实际匹配时不会命中不存在的类型。空标签和空`entity_types`数组不命中；空阵营列表不贡献阵营。未知静态阵营ID会按需创建，不是错误。重复实体规则可以共同贡献；关系规则先比较较高优先级，同级时敌对优先于友好，友好优先于中立。
+
+若没有关系规则命中，双方共有阵营时视为友好，否则视为中立。显式规则可以覆盖这个共有阵营的默认结果。
+
+## 重载
+
+两个目录都是服务端数据资源，在启动和`/reload`时读取。重载替换规则表，后续阵营与关系查询使用新规则。这里没有把整张规则表同步给客户端的路径；玩家看到的声望报告与游戏结果来自运行时查询。
+
+## 相关页面
+
+玩家行为的声望结算见[声望](/zh-cn/wiki/reputation/)，村民报价格式见[交易覆盖](/zh-cn/wiki/trade-overrides/)。

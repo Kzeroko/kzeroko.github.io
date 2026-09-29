@@ -1,0 +1,115 @@
+---
+title: "Shaders and materials"
+description: "Portal material generation and the status-driven entity aura pipeline."
+category: client
+order: 50
+updated: 2026-09-26
+---
+
+Portal materials render generated textures onto entities; status auras capture an entity silhouette and composite it over the scene. Both use Satin-managed effects, but they own separate clocks, targets and lifecycle state. `ShaderFXAPI` is the client facade for aura render hooks; portal helpers remain internal rendering machinery.
+
+## What it does
+
+`PortalTextureManager` owns local and global generated textures. `PortalEntityRenderer` draws the body and energy with ordinary translucent and translucent-emissive entity programs respectively. Both use `LEQUAL`, write colour and depth, and use `ITEM_ENTITY_TARGET` for Fabulous transparency composition. Neither layer culls back faces. Energy outside the absorbing body contributes its own depth, preventing farther water or sky from overwriting it; discarded transparent texels leave the exterior open. Portal rendering and texture generation skip Iris shadow passes.
+
+`IShaderFXEffect` opts a status effect into observer synchronisation and silhouette rendering. `ShaderFXEffectSync` sends vanilla effect packets on application, reapplication, removal and the start of tracking. Its broadcast skips the affected player, whose own status packets are handled separately by vanilla. The aura's visual outro does not extend the status effect or its attribute modifiers.
+
+## Runtime model
+
+### Portal textures and colour
+
+| Property | Value | Contract |
+| --- | --- | --- |
+| Atlas size | 1536 × 512 | Local and global targets each hold 3 horizontal tiles. |
+| Tile width | 512 | Body, energy and highlighted crest use successive thirds. |
+| Appearance | 12 ticks (0.60 seconds) | Smoothstep scale during spawn. |
+| Height/width | 1.25 | Width derives from entity height. |
+| Default colour | `0xFF18DFFF` | Stored in the entity's tracked colour. |
+
+`PortalAnimationClock` advances on unpaused client ticks and freezes its partial tick while paused. A world identity change resets it. Texture generation primes an uninitialised target, then skips work when no portal was submitted within the last 2 frames or the sampled time is unchanged. Generation saves and restores read/draw framebuffers, viewport, depth/blend settings and texture matrix. Disconnect releases the effect.
+
+Call `PortalEntity.setPortalColor` on the server; it forces opaque alpha. Colour is tracked and persisted. These are save fields, not resource-pack authoring fields:
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `PortalColor` | `integer` | `0xFF18DFFF` | Packed colour. Legacy `0xFFFFFFFF` becomes the default when the version key is absent. |
+| `PortalPaletteVersion` | `integer` | absent | Its presence suppresses legacy white conversion; saves write `1`. Newly saved explicit white stays white. |
+
+`DungeonGatewayDistortionController` samples gateway overlap on client ticks and fades out over 4 ticks (0.20 seconds) after leaving. Spectators do not charge it. It initialises the shader before setting uniforms and blits only colour from `swap` to the main target, preserving scene depth. It uses the portal clock while paused; this visual probe does not decide teleport eligibility.
+
+`SwordProjectileModel` selects the texture-cached `IsekaiRenderLayers.projectileEmissive` material. It keeps the ordinary translucent-emissive program and source-alpha blending, with `LEQUAL`, colour/depth writes, disabled culling and `ITEM_ENTITY_TARGET`. Foreground terrain and water retain their normal depth order. This material does not change projectile movement or attachment placement.
+
+### Status auras
+
+`EntityShaderFX` scans living entities on end-client-tick. The highest `getShaderFXPriority()` wins; equal priorities choose the lower registered effect identifier. A profile change releases the previous profile before introducing the new one. An unchanged profile refresh does not restart the envelope, and reapplication during release reverses it from the current progress.
+
+| Bound | Value | Effect |
+| --- | --- | --- |
+| New-state distance | 96 blocks | Measured from the client player. |
+| Retained states | 256 | Additional entities wait for free capacity. |
+| Removal distance squared | 96 × 96 × 1.5 | Beyond this threshold a retained state is removed immediately. |
+| Capture batches | 128 | Shared by world and first-person captures. |
+| Captured vertices | 262144 | Excess geometry retains normal rendering without added capture. |
+
+Capture duplicates only quads whose render layer supplies an affected outline. World depth is copied after translucency, then the post-world callback draws masks and composites. Field targets use half the framebuffer width and height. First-person hands retain their own projection and depth domain. Changing worlds, joining or disconnecting clears aura state and releases targets; idle state also releases the mask pipeline.
+
+## Contracts
+
+`ShaderFXProfile` is common-side data under `api.fx`; it imports no client renderer. All constructor arguments are required, and invalid values throw `IllegalArgumentException` rather than clamp.
+
+| Argument | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `color` | `integer` | required | RGB tint; the upper byte must be zero. |
+| `radius` | `number` | required | Finite thickness in blocks, greater than 0 and at most 1. World capture multiplies it by rendered height / 1.8, clamped to 0.35–3.0. |
+| `introTicks` | `integer` | required | 1–200 ticks (0.05–10 seconds) to build envelope progress. |
+| `outroTicks` | `integer` | required | 1–200 ticks (0.05–10 seconds) to release envelope progress. |
+
+The default effect priority is `0`. World capture rejects invisible entities, screen-space previews and shadow passes. `ShaderFXAPI` methods belong on the client lifecycle/render path; they do not schedule arbitrary background-thread calls. `beginFirstPerson` returns a scope that must be closed even when drawing throws, to balance capture depth and any compatibility pipeline pushed by the implementation.
+
+### Spirit Mantle
+
+`SpiritMantleEffect` supplies profile `new ShaderFXProfile(0x62DFFF, 0.14F, 12, 18)`: intro 12 ticks (0.60 seconds), outro 18 ticks (0.90 seconds). Its registered effect is `isekaiexpansion:spirit_mantle`. The current modifiers are fixed across amplifiers:
+
+| Attribute | Operation | Amount |
+| --- | --- | --- |
+| `AETHER_POWER` | `MULTIPLY_TOTAL` | +20% |
+| `GENERIC_ATTACK_DAMAGE` | `MULTIPLY_TOTAL` | +15% |
+| `GENERIC_ATTACK_SPEED` | `MULTIPLY_TOTAL` | +10% |
+| `GENERIC_MOVEMENT_SPEED` | `MULTIPLY_TOTAL` | +10% |
+| `TENACITY` | `ADDITION` | +20 |
+| `ENERGY_REGEN_SPEED` | `MULTIPLY_TOTAL` | −50% |
+
+`adjustModifierAmount` returns the stored modifier value regardless of amplifier. Duration is supplied by whoever applies the effect; the class does not define an encounter rotation or a recommended-duration constant.
+
+## Extending it
+
+Implement the common interface on a registered effect. This example uses the same validated presentation values as Spirit Mantle and inherits priority `0`:
+
+```java
+final class ExampleAuraEffect extends StatusEffect implements IShaderFXEffect {
+    private static final ShaderFXProfile PROFILE =
+            new ShaderFXProfile(0x62DFFF, 0.14F, 12, 18);
+
+    ExampleAuraEffect() {
+        super(StatusEffectCategory.BENEFICIAL, PROFILE.color());
+    }
+
+    @Override
+    public ShaderFXProfile getShaderFXProfile() {
+        return PROFILE;
+    }
+}
+```
+
+Use `ShaderFXAPI.capture` only from the existing entity render integration, retaining the distinction between the affected entity and its rendered morph. A custom first-person integration passes the scope's `vertexConsumers()` to its draw call and closes the scope afterwards. `initClient` is already invoked by the mod's client bootstrap.
+
+## Verifying
+
+
+Check portal colours, overlapping portals, spawn/shutdown, pause, dimension changes, resource reload and window resizing in vanilla/Fabulous and the intended Sodium/Iris setup. Inspect the portal energy and sword projectile against bright sky, rear water, foreground water and the waterline. Verify foreground geometry occludes the portal body and that leaving a gateway releases distortion without losing scene depth. Compatibility with a particular shader pack requires an in-game check.
+
+Apply and clear `isekaiexpansion:spirit_mantle`; compare different amplifiers, effect refresh, reapplication during the outro and late-arriving observers. Inspect ordinary entities, morphs, armour, held items and first-person hands. Test invisible entities, previews and crowded scenes for capture exclusion and limits. Confirm removing the effect removes modifiers before the visual fade finishes.
+
+## Related
+
+See [Particlize](/en/dev/particlize/) for surface capture and [entity FX](/en/dev/entity-fx/) for removal and teleport effects.

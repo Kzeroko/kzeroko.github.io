@@ -1,0 +1,115 @@
+---
+title: "Blockbench humanoid creator"
+description: "The bundled part workshop: declarations, template bones, previews, export controls and limitations."
+category: assets
+order: 110
+updated: 2026-09-27
+---
+
+Use the bundled Blockbench plugin to export humanoid parts and NPC starter assets. This guide covers local installation, declarations and the limits of its export pipeline.
+
+## What you are making
+
+The bundled IsekaiExpansion Humanoid Creator, version `2.2.0`, exports declared parts from a Blockbench document. It can also export an NPC body and a starter preset. It writes geometry, textures, optional mask templates, catalogue entries and filtered secondary animation.
+
+## Requirements
+
+Load the local file `src/main/resources/blockbench_plugin/isekaiexpansion_humanoid_creator.js` through the desktop editor's local-plugin loader. The plugin registers as desktop-only and requires filesystem modules to export. It does not download a remote plugin.
+
+Use a document that the Bedrock model codec can compile and the [humanoid rig contract](/en/dev/humanoid-parts/). The exporter changes geometry versions `1.14.0`, `1.21.0` and `1.21.20` to `1.12.0` and removes `item_display_transforms`; this is a targeted conversion, not a general format converter.
+
+## Steps
+
+### Set the destination
+
+Set the export root and namespace in Settings → Export or the workshop's Output tab. Resolution checks the configured **existing** directory first. If it contains `src/main/resources`, that child becomes the root. Otherwise it uses the configured directory itself.
+
+Without a valid configured root, the plugin searches ancestors of the document's saved/export paths for a repository/resources directory, then falls back to `export` beside the document. An unsaved document without a usable root cannot export. Read the resolved-root line before writing: a misspelled or nonexistent configured path can silently select a fallback.
+
+| Setting / run option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `isekaiexpansion_humanoid_creator_root` | `existing path` | `""` | Persistent export root; repository root, resources directory or existing output directory. |
+| `isekaiexpansion_humanoid_creator_namespace` | `string` | `isekaiexpansion` | Persistent namespace, sanitised like a part ID. |
+| `style` | `string` | `default` | PNG style name; invalid characters removed and blank falls back to `default`. |
+| `gender` | `enum` | `none` | `none`, `male`, `female`; writes the declared part model as the gendered mesh `<part>.male.geo.json` or `<part>.female.geo.json`. Textures, catalogue entry and part ID are unchanged. |
+| `npcMode` | `boolean` | `false` | Export an NPC body and, with catalogue generation enabled, a preset. |
+| `npcId` | `string` | `""` | Required nonempty sanitised ID in NPC mode. |
+| `generateMasks` | `boolean` | `true` | Generate mask templates for textured exports with a bound channel. |
+| `generateCatalog` | `boolean` | `true` | Generate part JSON and the NPC preset in NPC mode. |
+| `generateAnimations` | `boolean` | `true` | Compile and filter part animation clips. |
+| `overwrite` | `boolean` | `false` | Replace existing output files; otherwise skip them independently. |
+
+Only root and namespace are persistent machine settings. The other values are per-run panel state.
+
+### Declare parts
+
+A bone named `hair` declares the hair slot and derives its part ID from the document name. A bone named `hair_long_wavy` declares `hair/long_wavy`. Slot prefixes are matched longest first. Rig bones never declare parts; use `body_<part>` for an explicit body part.
+
+A saved `isekai_part_id` override on the declaring bone takes priority over the bone name, then the document name. Edit it in the Parts tab; clearing it restores name-based resolution. IDs are lowercased, spaces become underscores, characters outside `a-z`, `0-9`, `_` and `-` are removed, and boundary underscores are trimmed.
+
+Everything after `__` is a piece label. Roots such as `outfit_top_robe__torso` and `outfit_top_robe__sleeve` merge. The declaring bone owns its subtree, so nested slot-like names do not become separate parts. Undeclared geometry becomes the candidate base mesh.
+
+### Mark references and inspect previews
+
+Use the outliner template switch under More options, the bone context action or Tools → Toggle Template Bone. The saved boolean property is `isekai_template`. Descendants inherit it without each being stamped; selecting a cube targets its parent bone. The action is wrapped in an undo step when the editor supports one. It is independent of the editor's lock flag.
+
+Templates stay visible for fitting but are excluded from detected parts and texture footprints; their geometry is stripped from exported models. Held-item proxy bones `main_item` and `off_item` also have their cubes/meshes removed.
+
+Selecting a part isolates its elements in Part Preview using render layer 10; it does not change saved element visibility. Clearing selection shows the whole model. Reset view reframes the selection. The preview uses its own lights and includes the ground grid while excluding the side grids.
+
+### Validate and export
+
+The Check tab and Tools → Validate Humanoid Contract report blocking problems and nonblocking notes. Problems include no bones, duplicate case-insensitive names, a missing or extra root, missing animated anchors, uppercase rig names and nonzero anchor rotation above tolerance `0.0001`. Optional feature/attachment bones and animations that drive rig bones produce notes. The check does not validate every pivot, parent, texture or output resource.
+
+Use Preview Paths to run export planning without writing. Export All writes declared parts and any requested NPC outputs. A row export writes just that part and never the NPC body/preset. Existing files are skipped independently unless Overwrite is enabled; changing the style does not merge a new style into an existing catalogue file.
+
+Model export works on compiled copies, keeps owned geometry and empty rig anchors, removes template/proxy geometry and reattaches surviving bones to their nearest surviving ancestor. Animation export keeps only owned, non-rig bones and discards empty clips. Runtime clip selection remains `idle`/`run`; see [part authoring](/en/dev/humanoid-parts/).
+
+### Review texture output
+
+A part with exactly one texture that the base mesh does not use is labelled `own sheet` and exports that whole image. This classification does **not** check whether another part shares the image. Otherwise, export separates the part's UV footprint at unchanged coordinates using its first referenced texture. It does not combine multiple source sheets into an atlas.
+
+No assigned texture produces a model/catalogue without artwork and a report entry. For multi-texture parts, consolidate the source artwork or inspect and finish the output manually. Tools → Separate Texture For Selection also uses the document's first texture and adds a new texture to the editor; it does not rewrite every cube's texture assignment.
+
+Generated mask templates fill the first bound mask channel. Source pixels with any alpha become full mask coverage `255`; fully transparent pixels remain zero. Partial source alpha is not copied as partial mask coverage. Carve the template into the intended RGB regions. The mask action adds an editable texture; automatic export writes it beside the style. The exporter does not generate a glowmask image.
+
+## Declaring it
+
+The plugin's output files follow [part authoring](/en/dev/humanoid-parts/). Catalogue generation writes `styles`, explicit slot-appropriate `channels` and `sort: 1000`; it does not infer your origin filters, unlock conditions or companion requirements. Complete those fields by hand against the schema.
+
+NPC mode additionally produces:
+
+```text
+assets/<namespace>/geo/entity/humanoid/body/<npc>.geo.json
+assets/<namespace>/textures/entity/humanoid/body/<npc>/<style>.png
+data/<namespace>/humanoid_parts/body/<npc>.json
+data/<namespace>/npc_presets/<npc>.json
+```
+
+The body catalogue has `unlock.type: locked` and `sort: 900`. The starter preset uses `gender: female`, `fixed_gender: true`, the generated body reference, a `default` outfit with `default: true` and `sort: 0`, root `sort: 1000`, and tag `unique`. Review these choices; they are fixed export defaults, not inferred character facts. Full fields are in [preset data](/en/wiki/humanoid-presets/).
+
+The gender-variant switch does not qualify the NPC-mode body. If several declared parts occupy the same slot, the starter outfit keeps the last part encountered in the sorted export selection. It does not create multiple outfits automatically.
+
+**Current NPC-body limitation:** base export filters each bone by whether its own name declares a part. A freely named child bone inside a declared wearable can therefore also enter the body model, even though detection correctly assigns it to the wearable. Inspect body geometry for such duplicates before copying the output into a pack. Template geometry remains excluded. The body texture can also fall back to a whole source sheet if footprint separation fails.
+
+## Checklist
+
+Run the repository's existing harness from its root:
+
+```text
+node tools/blockbench_plugin_test/run.js
+```
+
+The runner discovers all `*.test.js` files recursively and runs each in a separate process. These stub tests cover registration, declarations, templates, preview isolation and export structure. They do not validate real Blockbench rendering, texture pixels or in-game alignment.
+
+- Reopen a saved document and confirm template flags and part-ID overrides survive.
+- Check Parts, Output and Check in both editor languages.
+- Preview output paths, then export into a temporary directory and inspect every file.
+- Export again with Overwrite off and confirm edited catalogue/mask files survive.
+- Inspect parts using shared or multiple sheets, translucent pixels and nested content bones.
+- Test an NPC document with several parts in the same slot and review the generated outfit.
+- Test in Blockbench and in-game using the part-authoring checklist.
+
+## Related
+
+[Humanoid parts](/en/dev/humanoid-parts/), [Preset data](/en/wiki/humanoid-presets/) and [NPC assets](/en/dev/npc-assets/).

@@ -4,8 +4,10 @@ import { localeCodes, localePath, useTranslations, type LocaleCode } from '../..
 import {
   blogPath,
   codexPath,
+  devPath,
   getBlogPosts,
   getCodexEntries,
+  getDevPages,
   getPages,
   getWikiPages,
   wikiPath,
@@ -44,8 +46,9 @@ export const GET: APIRoute = async ({ params }) => {
   const lang = params.lang as LocaleCode;
   const t = useTranslations(lang);
 
-  const [wiki, codex, blog, pages] = await Promise.all([
+  const [wiki, dev, codex, blog, pages] = await Promise.all([
     getWikiPages(lang),
+    getDevPages(lang),
     getCodexEntries(lang),
     getBlogPosts(lang),
     getPages(lang),
@@ -57,6 +60,16 @@ export const GET: APIRoute = async ({ params }) => {
       d: entry.data.description,
       u: wikiPath(lang, entry),
       s: 'wiki' as const,
+      k: toPlainText(
+        `${entry.data.title} ${entry.data.description} ${entry.data.tags.join(' ')} ${entry.body ?? ''}`
+      ),
+    })),
+
+    ...dev.map((entry) => ({
+      t: entry.data.title,
+      d: entry.data.description,
+      u: devPath(lang, entry),
+      s: 'dev' as const,
       k: toPlainText(
         `${entry.data.title} ${entry.data.description} ${entry.data.tags.join(' ')} ${entry.body ?? ''}`
       ),

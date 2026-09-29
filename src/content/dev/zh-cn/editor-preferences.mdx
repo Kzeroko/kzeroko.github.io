@@ -1,0 +1,96 @@
+---
+title: "开发编辑器偏好"
+description: "共享编辑器主题、客户端偏好文件，以及紧凑制作控件的接入约定。"
+category: client
+order: 71
+updated: 2026-09-19
+---
+
+游戏内开发编辑器共用一项客户端本地主题选择，提供 Blender、Blockbench、Graphite 共 3 套配色。实现位于 `client.screen.editor`，属于内部界面框架，不是公共 API 或服务器配置系统。
+
+## 它做什么
+
+`EditorThemePreferences` 保存共享选择。场景录制器、场景触发器和 `DungeonEditorFragment` 在创建片段时读取它；地下城基类服务于脚本、入口、解锁控制器与战利品箱编辑器。
+
+切换到下一个主题会立即更新共享偏好，并重建当前编辑器控件。其他已存在的片段保留自己的主题字段，没有统一重绘所有界面的广播。新建片段会读取当前共享选择。
+
+## 运行时模型
+
+单例在首次使用该类时加载。文件是 Fabric 游戏目录中的 `isekaiexpansion-deveditors.txt`，不在世界存档或配置目录中。读写使用 UTF-8。
+
+```text
+# IsekaiExpansion developer editor preferences
+format 1
+theme blender
+```
+
+| 条目 | 类型 | 默认值 | 约定 |
+| --- | --- | --- | --- |
+| `format` | 精确文本版本 | 已存在文件中必填 | 必须为 `1`；其他文本（包括行内注释）均无效。 |
+| `theme` | 主题名称 | 没有普通文件时，内存使用 `blender` | 已存在文件要求 `blender`、`blockbench` 或 `graphite`。输入去除两端空白，不区分大小写；输出使用小写。 |
+| 以 `#` 开头的行 | 注释 | 可省略 | 去除两端空白后忽略。 |
+| 空白行 | 空白 | 可省略 | 忽略。 |
+
+每个非注释行按空白分割一次。未知键和没有值的行会被忽略。后续有效的重复键替换先前数值，但未知主题会立即抛错，不会等待后续行纠正。后续无效的 `format` 会使最终格式无效。
+
+| 文件情况 | 结果 |
+| --- | --- |
+| 路径不存在或不是普通文件 | 保持 Blender，不尝试首次写入 |
+| 缺少必填格式或主题、格式无效、主题无效 | 重置为 Blender，并写入当前格式 |
+| 读取失败 | 记录警告，重置为 Blender，再尝试同样的重写 |
+| 读取成功 | 在内存保留解析出的主题 |
+| 加载后在外部修改 | 没有文件监视或重载方法；当前进程保留内存选择 |
+
+保存仅输出标题注释、格式与主题行，因此自定义注释和未知字段不会保留。先写入同目录的 `isekaiexpansion-deveditors.txt.tmp`，再以原子替换移动到目标。不支持原子移动时，改用普通替换。其他 I/O 失败会记录警告；内存选择不会回滚，临时文件可能保留。
+
+## 约定
+
+| 内部方法 | 行为 |
+| --- | --- |
+| `EditorThemePreferences.current()` | 返回单例当前选择 |
+| `EditorThemePreferences.select(EditorTheme)` | 空值或同一选择直接返回当前主题，不写文件；其他值更新内存、同步写入并返回该选择 |
+| `EditorTheme.next()` | 按 Blender → Blockbench → Graphite → Blender 循环 |
+| `EditorTheme.serializedName()` | 使用 `Locale.ROOT` 转为小写 |
+| `EditorTheme.fromSerializedName(String)` | 拒绝空值或空白，去除两端空白后不区分大小写解析 |
+
+通过客户端编辑器界面路径调用这些方法。它们不切换线程、不协调并发访问，也不将磁盘写入排入后台队列。不要在独立服务器加载偏好类，也不要把此文件当作同步的玩家状态。
+
+配色提供工具栏、普通与抬高面板、边框、输入框、普通与悬停及激活按钮、强调色、主要与次要及弱化文字、危险按钮的颜色。`SquareButton` 优先采用危险填充，其次是激活填充，再次是悬停或按下填充；激活按钮仍使用强调色边框。
+
+## 扩展方式
+
+新编辑器应通过 `EditorThemePreferences.current()` 初始化主题。主题按钮回调可沿用现有片段的写法：
+
+```java
+theme = EditorThemePreferences.select(theme.next());
+statusColor = theme.textMuted();
+rebuild();
+```
+
+这里的 `theme` 与 `statusColor` 是片段已有字段，`rebuild()` 根据其状态重建控件。将编辑数据保留在片段模型中，避免控件重建变成对制作内容的隐式保存或重置。
+
+| 共享辅助方法 | 应保留的行为 |
+| --- | --- |
+| `EditorWidgets.square` | 矩形背景，圆角半径 0，边框 1 dp |
+| `EditorWidgets.editText` | 单行输入；先设置初值，再注册文字监听器 |
+| `EditorWidgets.field` | 修改时调用传入的消费者；可选提交回调在失去焦点时投递 |
+| `EditorWidgets.choice` | 循环传入选项后重建；必须提供非空列表 |
+| `EditorWidgets.toggle` | 反转值后重建 |
+| `EditorWidgets.actionRow` | 等宽控件，使用公共间距分隔 |
+
+公共工具栏高度为 25 dp，控件高度为 21 dp，间距为 3 dp。这些是布局常量，不限制控件所编辑的数据值。
+
+`EditorI18n.option` 将选项转为小写，再依次检查翻译前缀：`screen.isekaiexpansion.developer_editor.option.`、`screen.isekaiexpansion.cinematic_scene.editor.option.`、`screen.isekaiexpansion.dungeon.editor.option.`。空值转为 `none`。没有翻译时，`EditorWidgets.humanize` 将冒号与下划线替换为空格，并将单词首字母大写。显示文字应使用翻译键，底层序列化值保持不变。
+
+## 验证
+
+- 关闭客户端后，仅移除测试副本中的偏好文件。打开编辑器，确认默认 Blender，且读取本身不会创建文件。
+- 循环全部主题，重新打开另一种编辑器并重启客户端。确认复用已保存的小写选择。
+- 测试错误格式、缺少主题、大写的有效主题，以及无效主题后跟有效主题，区分被接受与触发重置的输入。
+- 将测试目标设为不可写，再切换主题。确认警告与内存变化；返回选择不代表磁盘写入成功。
+- 修改字段、移开焦点并切换主题。确认模型保留编辑，且重建不会因设置初始文字而误触修改回调。
+
+## 相关页面
+
+[教程运行时](/zh-cn/dev/tutorials/)介绍独立的教程界面与持久化。[Blockbench 插件](/zh-cn/dev/blockbench-plugin/)介绍外部素材工具；编辑器的 Blockbench 配色只是主题名称，不依赖该插件。
+

@@ -1,0 +1,120 @@
+---
+title: "法术集成"
+description: "注册、投递约定、星界能量扣费、物品数据与依赖衔接。"
+category: systems
+order: 30
+updated: 2026-09-25
+---
+
+法术集成使用 Spell Engine 的世界注册表与自定义投递处理器。异界扩展的 `spell` 及 `internal.spell` 类型属于内部集成入口，不是公开 API 门面；数据包编写见[法术数据](/zh-cn/wiki/spell-data/)。
+
+## 它做什么
+
+当前构建固定使用 Minecraft 1.20.1、Spell Engine 1.10.7+1.20.1、Spell Power 1.6.0+1.20.1、Ranged Weapon API 2.3.4+1.20.1 及 Tiny Config 3.1.0+1.20.1。Fabric Loader 为 0.19.5。这些是本检出的构建输入，不代表其他版本兼容。
+
+`IIsekaiSpell` 负责 ID、新定义、投递回调及可选提示词元。`IsekaiSpellRegistry.registerSpell` 注册自定义处理器、保存实例并安装定义供应器。`registerDefinition` 只注册定义。本地映射中的重复 ID 会被后者替换；应在世界注册表填充前的初始化阶段注册。
+
+## 运行时模型
+
+`DynamicRegistrySetupCallback` 为每个法术注册表创建新定义。通过当前世界的 `SpellRegistry.from(world)` 获取条目，不要把世界注册表条目保存在静态状态中。代码定义的法术不需要配套的重复 JSON。
+
+`IsekaiSpellDefinition` 立即校验样本，并校验后续每次工厂结果。法术本身、学派、active/cast、目标、投递或费用为 null 时注册失败。CUSTOM 还要求 custom 对象；包装器将法术 ID 写入处理器 ID。样本学派会被缓存，因此工厂必须保持学派身份一致。
+
+| 回调 | 触发时机 | 约定 |
+| --- | --- | --- |
+| `onCast(IsekaiSpellContext)` | 非引导自定义投递 | 仅在投递成功时返回 true；默认 false。 |
+| `onChannelTick(IsekaiSpellContext)` | 引导自定义投递 | 同样要求如实返回成功状态；默认 false。 |
+| `onChannelRelease(IsekaiSpellContext)` | 引导法术的成功 RELEASE 事件 | 清理或收尾回调，默认不执行操作。 |
+| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, Map<String,String>)` | 提示词元展开 | 为语言文本中的原始词元加入替换值。 |
+
+适配器拒绝客户端世界及非玩家施法者。上下文复制目标列表，保留 Spell Engine 传入的影响上下文。引导结束会依据当前法术强度创建新的影响上下文，并非复用最后一次投递的上下文。
+
+### 施法与扣费
+
+尝试前置检查跳过创造模式玩家。其余情况会拒绝职业限制的魔法，但卷轴可绕过职业限制；失衡状态、天赋不符或星界能量不足也会阻止施法。正在进行的同 ID 引导会跳过额外入场能量检查，使结束引导不需要再支付一次投递费用。
+
+星界能量费用为能量映射值、卷轴倍率、天赋倍率、各适用种族费用能力及滞空修正相乘后取整，并保证非负。映射缺失时费用为 0。准入、扣费与提示使用同一计算函数。
+
+| 事件 | 本地费用行为 |
+| --- | --- |
+| 引导投递成功 | 服务端投递返回钩子发出 CHANNEL，扣除该次投递的星界能量。 |
+| 下次引导投递费用不足 | HEAD 钩子对匹配的施法过程执行正常 RELEASE，并拒绝本次投递。 |
+| 进度高于 0.30 的 RELEASE | 非引导法术扣星界能量；卷轴数量减少 1；获得法术及星界能量熟练度。引导不在结束时再次扣星界能量。 |
+| 创造模式玩家 | 准入及本地消耗绕过费用。 |
+
+结束阈值为严格大于：进度等于 0.30 时不会进入该扣费及熟练度分支。此逻辑接收引擎的成功事件；自定义投递后不要再手动发出一次本地事件。
+
+`SpellParametersMixin` 对正时长的非引导施法乘以天赋、种族急速能力及卷轴施法倍率。瞬发与引导保留上游计算结果。构建器 `channel(duration, deliveryCount)` 分别接收秒数及总投递次数，次数至少为 1。
+
+### 施法移动
+
+`IIsekaiSpell.blocksMovementWhileCasting()`默认为false。返回true时，只要该已注册法术仍有活动的Spell Engine施法过程，就会附加实时MOVE/JUMP限制。`FallenDownSpell`已启用。公共动作禁用查询把它与其他来源的计时限制合并，客户端输入的最后阶段在脚本移动之后应用结果。物品使用、攻击和视角不变，施法物品可以正常完成使用。
+
+释放、取消或替换施法过程后，施法限制立即随过程变化而消失，其他动作限制仍然有效。死亡和旁观模式玩家不受该限制。这控制输入和已有的不可移动判定，不锁定传送、击退或重力。检查施法中的移动、疾跑、跳跃和飞行输入，再在其他来源仍持有移动限制时中断并重新施法。
+
+### 施法 HUD
+
+`SpellCastHudOverlay` 在游戏线程读取 Spell Engine 当前施法过程，将不可变快照交给 ModernUI。居中的紧凑读条由技能槽边框、法术图标与名称、剩余秒数及学派配色的状态栏式进度条组成。蓄力时进度条填充，引导时逐渐缩短。读条按变形 HUD 的实际高度排列在其下方；未显示变形 HUD 时使用它的顶部位置。
+
+`SpellHudMixin` 接管上游技能槽与施法进度条绘制，保留目标及错误反馈。读条出现和消失时淡入淡出并缩放，位置变化采用插值；资源重载后重新获取图像。进度最多外推一个游戏刻，客户端暂停时停止推进。打开界面、隐藏 HUD 或断开连接会清除读条。窗口不接收输入，并遵循 `HudAPI` 的可见性控制。
+
+### 物品、冷却与抗性
+
+卷轴创建通过 `SpellItemData.setSpellContainer` 写入 CONTAINED `SpellContainer`。容器值不可变，应通过 copy/with 方法替换。完整查询 `SpellContainerHelper.containerFromItemStack` 依次考虑物品堆数据、数据包分配、物品默认值及回退；单独使用 `SpellItemData.getSpellContainer` 不包含数据包分配。这些行为由 Spell Engine 的[固定版本物品实现](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java)负责。
+
+Minecraft 1.20.1 将容器存放在物品堆的 `spell_engine` 复合标签内。读取器不会回退读取旧版根级容器。优先通过物品数据 API 操作，避免直接拼装 NBT。
+
+```text
+{spell_engine:{spell_container:{access:"CONTAINED",spell_ids:["isekaiexpansion:healing"]}}}
+```
+
+| NBT 键 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spell_engine` | `compound` | 缺省 | 依赖拥有的物品堆法术数据。 |
+| `spell_engine.spell_container` | `compound` | 缺省 | 编解码器编码的容器；缺失时允许继续解析分配及默认值。 |
+| `spell_engine.spell_container.access` | `string` | `NONE` | 施法访问枚举；CONTAINED 使用容器持有的法术 ID。 |
+| `spell_engine.spell_container.spell_ids` | `list<string>` | 空 | 法术 ID，使用与分配相同的规范化规则。其他容器成员见[数据字段表](/zh-cn/wiki/spell-data/)。 |
+
+`ISpellCDManager` 导出 max(0, endTick − currentTick) 的剩余冷却刻数，并强制恢复非负时长。`PersistentCompUtil` 将这些值序列化到玩家冷却组件，恢复后清空已存快照。
+
+`SpellResistanceMixin` 在抗性换算前，按攻击者限制在有效范围内的魔法穿透比例削减通用抗性点数；不修改学派专属抗性。`SpellResistanceUtil` 读取 Spell Power 当前曲线、调节常量、倍率与上限来计算提示，不拥有这些配置默认值。
+
+`IsekaiRangeProperties` 修改伤害、弹速或拉弓时间时保留其他 `RangedConfig` 成员。绝对弹速减去基础值后转为增量：弓为 3，弩为 3.15，其余为 1。拉弓时间接收刻数，至少为 1，再换算为秒并减去 1。不实现 `CustomRangedWeapon` 的物品会被忽略。
+
+## 约定
+
+在通用初始化阶段注册，在服务端线程修改投递涉及的世界状态。工厂须返回新的可变定义；安装到注册表后，应将其视为共享数据。自定义投递不会自动执行占位影响系数，实际结果由处理器代码负责。
+
+定义构建器默认采用 CUSTOM 投递、AIM 目标及伤害占位。`unrestrictedCursorTarget` 会补充缺少的零系数 DAMAGE 与 HEAL 意图标记。使用这些标记时保留自定义投递；它们是供自定义处理器选敌的元数据。
+
+本地能量加载器会重载服务端数据，但当前能量包仅在加入时发送。修改能量映射后让客户端重新连接，以对齐准入预测及提示。法术定义与物品分配遵循依赖的注册表及启动生命周期；通用数据重载并不保证所有法术状态都已重建。
+
+## 扩展方式
+
+最小内部自定义法术可在初始化中调用 `IsekaiSpellRegistry.registerSpell(new ExampleSpell())` 注册。此示例只恢复固定生命值；需要暴击或学派缩放的正式治疗应参考 `HealingSpell` 与 `SpellHealingUtil`。
+
+```java
+final class ExampleSpell implements IIsekaiSpell {
+    public Identifier id() { return new Identifier("example", "mend"); }
+    public Spell createSpell() {
+        return IsekaiSpellDefinitionBuilder.custom(SpellSchools.HEALING)
+                .selfTarget().cast(1F).cooldown(3F).build();
+    }
+    public boolean onCast(IsekaiSpellContext context) {
+        context.caster().heal(1F);
+        return true;
+    }
+}
+```
+
+构建器 `build()` 返回原可变法术，不作防御性复制。应在 `createSpell()` 内创建构建器。读取当前世界定义时，使用投递或提示回调收到的 `Spell`。
+
+## 验证
+
+修改 Java 后运行 `./gradlew.bat compileJava`，再实际加载世界：编译不会应用混入或解码注册表数据。覆盖普通施法成功与失败、引导耗尽及结束、卷轴消耗、创造豁免、学派准入、暴击治疗与伤害、冷却恢复及断开重连。
+
+检查法术注册表 JSON 与网络编解码往返、绑定台池解析及物品堆容器持久化。在匹配依赖版本下检查客户端预测、星界能量提示、快捷栏及弹射物显示。这些是验证步骤，不代表已经完成游戏内测试。
+
+## 相关页面
+
+[法术数据](/zh-cn/wiki/spell-data/)说明数据包格式与加载限制。[属性与效果](/zh-cn/wiki/attributes-and-effects/)说明战斗属性。
