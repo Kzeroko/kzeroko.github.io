@@ -3,7 +3,7 @@ title: "NPC relationships and allegiance"
 description: "Internal relationship ownership, command policy, contract escrow and market persistence."
 category: systems
 order: 125
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 `NpcRelationships` owns marriage, favour operations and allegiance for a base NPC. These are internal implementation types, not an addon facade. Player rules are in [NPC allegiance](/en/wiki/npc-allegiance/).
@@ -41,7 +41,7 @@ Entity data trackers synchronise owner UUID and bond kind. The current entity sa
 
 Scripted recruitment can call `AllegianceRaces.random(random)` for a base race or explicitly call `AllegianceRaces.randomEvolved(random)` for an evolved race, then construct `new AllegianceRecruit(race, role)` and use the normal spawner. Empty pools reject a roll instead of falling back to another pool. The supported payload and dialogue race list still includes evolved races.
 
-`AllegianceAuctionState` owns shared lots and refund balances in `npc/allegiance_auctions_v2`. Broker stock uses the existing trade usage ledger. Auctions use server overworld ticks and settle on player interaction, so unloaded brokers need no tick task.
+`AllegianceAuctionState` owns shared lots and refund balances in `npc/allegiance_auctions_v2`. Broker stock comes from `trade_overrides/npc/common/allegiance_broker.json` through the shared authoritative manager and use ledger. Its preset binds `isekaiexpansion:allegiance_broker`. Ordinary citizen/combat vouchers cost 3200/4800 copper; dark-magic versions cost 4800/6400 copper. Auctions retain their own emerald bids. Auctions use server overworld ticks and settle on player interaction, so unloaded brokers need no tick task.
 
 | Persistent field | Type | Default | Contract |
 | --- | --- | --- | --- |

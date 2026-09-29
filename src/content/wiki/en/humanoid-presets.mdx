@@ -3,7 +3,7 @@ title: "Humanoid and NPC presets"
 description: "The complete shared appearance format, player gallery presets and NPC outfit rules."
 category: data
 order: 100
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 Player presets store a reusable appearance. NPC presets store a base character and selectable outfit overlays. They share appearance fields but have different application and unlock rules.
@@ -74,6 +74,7 @@ The reward record is per player and keyed by preset ID plus outfit ID, so it app
 | `tags` | `array<string>` | `[]` | Trimmed lowercase, empty entries removed and duplicates collapsed. Keep player-preset tags within 48 characters for network sync. |
 | `unlock` | `object` | `always` | Player-preset rule metadata; currently not enforced by the preset gallery. NPC presets gate individual outfits. |
 | `fixed_gender` | `boolean` | `false` | NPC preset only; forces the preset gender when an NPC profile is assigned. Unique NPCs also impose their own fixed gender. |
+| `trade_profession` | `identifier` | `absent` | NPC catalogue key; custom jobs and vanilla professions share [Trade overrides](/en/wiki/trade-overrides/). Invalid identifier syntax rejects the preset. |
 | `outfits` | `array<object>` | `fallback default outfit` | NPC preset only. Missing or empty gives an always-available `default` outfit with no overlay or bonuses. |
 
 A player preset can load as an empty object, but it then contains the default profile with no explicit parts. Applying the whole preset replaces build, face, palette and parts, changes gender, and preserves the player's age, character name and origin. Applying selected part kinds overlays only those slots; body selection also copies build, face selection copies face, and **every partial application copies the entire palette**.

@@ -1,83 +1,94 @@
 ---
 title: "Trading API"
-description: "Open server-owned merchant panels and extend NPC offers while preserving dialogue ownership."
+description: "Open authoritative merchant catalogues and query personal trade rapport inside an active dialogue."
 category: api
 order: 145
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
-`TradingAPI` opens an existing merchant's offers inside an active entity-bound Blabber dialogue. The server owns quotes, stock and payment; Blabber owns presentation, navigation and one-use reply tokens. Gameplay rules are in [Trading](/en/wiki/trading/).
+`TradingAPI` opens a merchant catalogue in an active Blabber conversation and exposes personal rapport ranks. Villagers and NPCs share catalogue generation, payment, stock ledgers and courtesies. Player rules are in [Trading](/en/wiki/trading/).
 
 ## Entry point
 
-Use `net.kzeroko.isekaiexpansion.api.trading.TradingAPI`. It delegates to the internal `DialogueTrading` service. The built-in `blabber:open_trade` and `isekaiexpansion:open_npc_trade` actions both reach this service; no separate NPC merchant screen or offer-index packet remains.
+Use `net.kzeroko.isekaiexpansion.api.trading.TradingAPI`, which delegates to the internal `DialogueTrading` service. The actions `blabber:open_trade` and `isekaiexpansion:open_npc_trade` reach the same service. Blabber owns panel navigation and single-use reply tokens; the server owns all mutations.
 
 ## Common tasks
 
 ### Open the current speaker's shop
-
-Call on the server thread from a dialogue action:
 
 ```java
 Blabber.getActiveDialogueEntity(player)
         .ifPresent(merchant -> TradingAPI.open(player, merchant));
 ```
 
-Import `io.github.ladysnake.blabber.Blabber` and the facade above. The entity must be a `MobEntity` implementing `Merchant`, or a `BaseNpcEntity`. The active dialogue must target that exact entity. The facade returns false for rejected admission; it does not create a dialogue or move the merchant.
+Import `io.github.ladysnake.blabber.Blabber` and the facade. The entity must be a `MobEntity` implementing `Merchant`, or a `BaseNpcEntity`. Admission requires an active dialogue targeting that exact entity. Rejected admission returns false.
 
-### Supply NPC offers
+### Bind an NPC profession
 
-Override `BaseNpcEntity.getNpcTradeOffers(ServerPlayerEntity)` and use the existing `npcTradeOffers()` / `npcTradeOffer()` builders. The service copies the returned offer list through NBT, preserving contributed metadata. It applies saved uses by offer position and output stack; keep ordering stable. Relation-tier pricing remains the provider's responsibility.
+Set `trade_profession` in the NPC preset to a catalogue ID such as `minecraft:farmer`. Author the matching catalogue under `data/<namespace>/trade_overrides/`; [Trade overrides](/en/wiki/trade-overrides/) describes schema version 2. A custom job needs no villager profession registration. Gate optional provider mods with `requires_mods`.
 
-For villagers, [Trade overrides](/en/wiki/trade-overrides/) remain authoritative. A refresh rebuilds through the override manager, or through the vanilla/modded factory hooks for every attained level when no override owns the profession.
+`BaseNpcEntity.getTradeProfession()` resolves a common NPC's saved assignment before its preset. `setTradeProfession(identifier)` assigns a common NPC job; null returns to the preset. Unique NPCs reject instance assignment and always use their preset. Evelina's preset selects `isekaiexpansion:mahoutsukai_evelina`. `canTradeWith` admits ordinary shopping whenever a catalogue is enabled. Friendship, trust and marriage do not change catalogue prices or access.
 
-Override `BaseNpcEntity.canTradeWith(player)` for a public merchant. The default uses `NpcAccessPolicy.trusted`; allegiance ownership grants access independently of favour.
+These entity methods are internal integration points. The preset field is optional and defaults to no trade profession; malformed identifiers reject that preset. `TradeProfession` is the corresponding optional entity NBT string. The humanoid export command preserves the effective profession.
 
+### Query recognition
+
+```java
+int rank = TradingAPI.rapportRank(player, merchant);
+```
+
+`merchant` is a `MobEntity`. The result belongs to this player–merchant pair. The villager dialogue handler uses rank 3 for familiar scenes, resolving profession paths from `Registries.VILLAGER_PROFESSION`.
 
 ## Reference
 
 | Entry point | Side and contract |
 | --- | --- |
-| `TradingAPI.open(player, merchant)` | Server thread, active dialogue only. Returns whether admission succeeded; opens a blocking catalogue and retains the screen handler and scene. |
-| `BaseNpcEntity.getNpcTradeOffers(player)` | Server-thread provider; current relationship may affect prices. The service owns the working copy and daily usage ledger. |
-| `DialogueAPI.registerTradePanel(opener)` | Blabber dependency registration during common setup; host returns true for a handled merchant, including refusal, preventing vanilla fallback. |
+| `TradingAPI.open(player, merchant)` | Server thread and active entity-bound dialogue. Returns admission success and opens the blocking catalogue. |
+| `TradingAPI.rapportRank(player, merchant)` | Server thread; returns rank 1–5, creating a zero-progress record on first lookup. |
+| `DialogueAPI.registerTradePanel(opener)` | Blabber setup hook; the host handles villagers and NPCs through the same service. |
 
-`TradeTransaction` obtains `getAdjustedFirstBuyItem()` before applying the negotiated discount. It checks both ingredient stacks, currency funds and output capacity before payment. It strips currency presentation metadata and uses Isekai Core's `NumismaticCompat.tryPay` for inventory and wallet payment. Currency change can consume space during withdrawal; remaining output uses `offerOrDrop` rather than disappearing.
+`TradeOverrideManager` generates every tier 1–5 immediately, with deterministic merchant UUID, profession, tier, offer-ID and rotation seeds. `VillagerTradeAuthorityMixin` disables vanilla level advancement; unowned professions invoke their vanilla/mod factories once for each tier. Owned lists are frozen at the construction and getter boundaries. Rebuilding preserves compatible offer state and the profession/offer-ID use ledger. The cache depends on definition, revision and rotation, never rapport.
 
-Vanilla `Merchant.trade` owns offer usage and trade effects. Its customer is assigned only inside the synchronous callback and cleared in `finally`, before any AI tick; experience is advanced through the merchant interface. Villager offer preparation runs again afterwards. NPC copies increment their usage ledger. No extra autofill hook is injected into Numismatic's merchant handler.
+`TradeTransaction` computes adjusted costs before bargaining, validates both inputs, currency and output capacity, then pays using Isekai Core `NumismaticCompat`. The displayed exchange uses that same quote. Currency change can occupy space during payment; remaining output uses `offerOrDrop`. Villager `Merchant.trade` runs with a customer scoped to its synchronous callback and cleared in `finally`. Villager experience no longer advances catalogue access. NPCs use their shared authoritative list directly.
 
-The client receives a structured `DialogueScreenObject.Exchange` from the same `TradeTransaction.Quote` used for payment. Currency display uses Isekai Core's `NumismaticClientCompat`; non-currency inputs remain item models with stack counts. The prior price is the reputation-adjusted price before bargaining, not the raw factory cost. The client does not recalculate discounts. Blacksmith catalogue costs use the same renderer.
+After payment, the service records stock use and personal rapport. `MerchantCourtesies` revalidates the definition, session, rank, charge and item before giving or repairing anything. Maintenance compares the selected main-hand snapshot again and changes damage only. Gift capacity is checked before charge consumption.
 
 ### Persistent entity fields
 
-The lazy `IsekaiCommerce` compound is written only for entities that acquire commerce state. It is internal save data, not a data-pack schema.
+`IsekaiCommerce` is lazy internal save data. These fields describe the current format; they are not a data-pack schema.
 
 | Field | Type | Default | Behaviour |
 | --- | --- | --- | --- |
-| `Rotation` | `long` | `0` | Increments when spending a refresh opportunity; saved value clamps below at 0. |
-| `Refresh` | `boolean` | `false` | One stored villager refresh opportunity; restock sets true, refresh clears it. |
-| `Previous` | `list<string>` | `[]` | Previous offer IDs used by weighted selection to prefer unseen entries. |
-| `NpcDay` | `long` | Minimum long | Last NPC day bucket; a changed world-time day clears NPC uses and negotiations. |
-| `Negotiations` | `compound` | Empty | Player UUID keys map to failed value 0 or successful discount 5, 10 or 15. Missing key means unattempted. |
-| `Stock` | `compound` | Empty | NPC offer position/output-stack keys map to used counts. |
-| `IsekaiOfferId` | `string` | Empty | Separate per-offer NBT field retaining the authoritative offer ID across offer copies. |
+| `Rotation` | `long` | `0` | Nonnegative selection rotation. |
+| `Refresh` | `boolean` | `false` | One stored refresh opportunity. |
+| `Previous` | `list<string>` | `[]` | Prior selected IDs, used to prefer unseen candidates. |
+| `NpcDay` | `long` | Minimum long | Last elapsed overworld day. Advancing it clears stock and negotiations and grants refresh; first initialization grants none. |
+| `Negotiations` | `compound` | Empty | Player UUID to discount 0, 5, 10 or 15; absent means no attempt. |
+| `Stock` | `compound` | Empty | Profession/offer-ID to used count; actual restock clears it, rotation preserves it. |
+| `Rapport` | `compound` | Empty | Player UUID to the following relationship state. Invalid UUID entries are ignored. |
+| `Rapport.<uuid>.Score` | `integer` | `0` | Clamped to 0–360. Thresholds are 0, 24, 80, 180 and 360. |
+| `Rapport.<uuid>.Courtesies` | `integer` | `0` | Clamped to current capacity: 1, or 2 from rank 4. |
+| `Rapport.<uuid>.Day` | `long` | Minimum long | Last progress day; only forward changes reset daily limits. |
+| `Rapport.<uuid>.DailyProgress` | `integer` | `0` | Clamped to 0–24. |
+| `Rapport.<uuid>.CourtesyProgress` | `integer` | `0` | Clamped to 0–40 credited progress towards a recurring courtesy. |
+| `Rapport.<uuid>.CourtesySpend` | `long` | `0` | Clamped to 0–1000 net currency spending towards that courtesy. |
+| `Rapport.<uuid>.Repetitions` | `compound` | Empty | Offer-key counts 0–3; reads at most 24 entries. |
+| `IsekaiOfferId` | `string` | Empty | Separate per-offer NBT field for stable authoritative identity. |
 
 ## Threading and lifecycle
 
-Every gameplay operation runs on the server thread; opening off-thread throws. A merchant admits one trading player at a time, so reputation preparation cannot overwrite another player's quote. An existing vanilla merchant customer also blocks other players. A session captures entity, dialogue UUID, offer list, stock rotation and NPC day. Death, removal, dimension or range changes, combat, panic, changed rotation or NPC day invalidate it. The range is 4 blocks (squared distance 16). A reload closes active trading sessions; disconnect and server stop clear runtime maps.
+Call gameplay methods on the server thread; opening off-thread throws. Each merchant admits one trading player at a time. Admission checks life, world, 4-block range, combat, panic, current merchant customer and the NPC catalogue policy. Sessions capture dialogue UUID, entity, offer list, rotation, day, profession and catalogue revision. A changed profession, revision or NPC day invalidates a displayed action. Reload, disconnect and server stop clear active sessions.
 
-Selection rechecks the offered object identity. Confirmation rechecks current costs, result, negotiated price, stock, funds and inventory before one exchange. Blabber invalidates the token before invoking the callback. A catalogue cancellation closes the conversation; cancelling a detail returns to the catalogue. Lifecycle dismissal does not reopen a panel, and a session with no active object is closed on the server tick.
-
-Villager restock clears per-player negotiation results and grants a refresh chance. Refresh changes rotation but keeps negotiation results. Weighted selection keeps guaranteed entries and draws unseen non-guaranteed IDs first; insufficient unseen candidates permit repeats. Saved rotation and the previous-ID set keep the regenerated selection stable across entity reloads. Matching offer shapes preserve uses, demand, special price and Numismatic reputation.
+Confirmation checks the live offer object and current quote before payment. Blabber consumes its reply token before dispatch. Lifecycle dismissals do not reopen panels. Villager restock and forward NPC day transitions clear bargaining and stock uses; refresh only rotates selection. Rapport persists through both. The day bucket uses overworld elapsed time divided by 24000 ticks (1200 seconds at 20 ticks per second).
 
 ## Verifying
 
-Run `./gradlew.bat compileJava assembleLanguageFiles`. For the dependency's UI checks, follow [Dialogue UI](/en/dev/dialogue-ui/).
+Run `./gradlew.bat -I tools/trading/verify.gradle checkCommerce processResources` and `python tools/trading/validate_coverage.py`. The JVM checks exercise production parsing, rapport limits, payout budgets, save/reload and stock transitions. Coverage checks compare the configured profession dump with catalogue, scene and bilingual-text resources.
 
-In game, verify currency-only and mixed payments, sell offers, insufficient funds, full inventory, disabled stock, two consecutive trades, movement/combat interruption, restock then refresh, saved-world reload and a failed bargaining attempt followed by reopening. Repeat with a weighted override and an NPC provider. Check reputation pricing before and after trading and verify that the merchant never starts following the player.
+In game, check a fresh level 1 villager, two players with different rapport, all 5 catalogue tiers, repeated trades, restart, restock and rotation. Test full-inventory gifts, changed held-item repair, changed NPC profession and a reload while a quote is open. Open a fresh cartographer's service menu with and without goods. REI shows bundled catalogue tiers and first-visit availability. These interactive checks require a running pack.
 
 ## Related
 
-- [Trading](/en/wiki/trading/) — player rules and discounts.
-- [Dialogue objects and UI](/en/dev/dialogue-ui/) — panel contracts and staged subtitles.
+- [Trading](/en/wiki/trading/) — player rules.
+- [Trade overrides](/en/wiki/trade-overrides/) — catalogue and courtesy fields.
 - [NPC dialogue](/en/dev/npc-dialogue/) — admission and routing.

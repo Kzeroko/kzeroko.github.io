@@ -3,7 +3,7 @@ title: "Wayfinding API"
 description: "Server-thread destination searches, work limits, result handling, dialogue integration and compass state."
 category: api
 order: 130
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 `WayfindingAPI` searches the current dimension for a biome, terrain family or structure without owning the caller's interaction. Callbacks return a bounded search result; callers must still validate their player, world and active interaction before using it.
@@ -117,9 +117,9 @@ Successful data reload and server stopping cancel current jobs with `CANCELLED`,
 
 ### Villager adapter and compass writes
 
-`WayfindingDialogue` is an internal Blabber adapter. Its menu is `isekaiexpansion:wayfinding/villager`; ask/trade/goodbye are separate routes. The trade handler selects it only for eligible, welcomed trade conversations, after the blacksmith route. Negative major/minor gossip magnitude at least 50 suppresses the wayfinding route.
+`WayfindingDialogue` is an internal Blabber adapter. Its menu is `isekaiexpansion:wayfinding/villager`; ask/trade/goodbye are separate routes. The trade handler selects it only for eligible, welcomed TRADE or NO_TRADE conversations, after the blacksmith route. Negative major/minor gossip magnitude at least 50 suppresses the wayfinding route.
 
-Eligibility requires an adult, awake villager at level 2 or higher. Cartographers know all 3 kinds; farmers, fishermen and shepherds qualify only when `floorMod(uuid.hashCode(), 3) == 0` and know biome/terrain. Their radii are 16384 and 6144 blocks respectively. Continuation requires both participants alive, the same world, squared distance at most 64 (8 blocks), and no villager attacker.
+Eligibility requires an adult, awake villager. Cartographers know all 3 kinds; farmers, fishermen and shepherds qualify only when `floorMod(uuid.hashCode(), 3) == 0` and know biome/terrain. Their radii are 16384 and 6144 blocks respectively. Continuation requires both participants alive, the same world, squared distance at most 64 (8 blocks), and no villager attacker.
 
 The adapter sets a 30-second `nanoTime` cooldown when starting a search, with minimum distance 512. It captures world, screen handler, dialogue session UUID and blocking-object token. Completion rechecks all of them plus villager availability before replacing the panel. A cancelled searching object cancels the API job. Non-position results share the same “unknown” dialogue response.
 

@@ -3,7 +3,7 @@ title: "NPC 关系与隶属运行时"
 description: "关系归属、指令策略、契约暂存与交易持久化的内部约定。"
 category: systems
 order: 125
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 `NpcRelationships` 管理基础 NPC 的婚姻、好感操作和隶属。这些类型属于内部实现，不是附属模组门面。玩家规则见[NPC 隶属](/zh-cn/wiki/npc-allegiance/)。
@@ -41,7 +41,7 @@ updated: 2026-09-26
 
 脚本招募可调用 `AllegianceRaces.random(random)` 抽取基础种族，或显式调用 `AllegianceRaces.randomEvolved(random)` 抽取进化种族，再构造 `new AllegianceRecruit(race, role)` 并使用正常生成流程。空池会拒绝抽取，不会回退到另一池。契约数据和对话支持的种族列表仍包含进化种族。
 
-`AllegianceAuctionState` 将共享拍品与退款余额保存在 `npc/allegiance_auctions_v2`。经纪人库存沿用交易使用次数记录。竞拍按服务端主世界 tick 计时，在玩家交互时结算，因此未加载的经纪人不需要逐 tick 任务。
+`AllegianceAuctionState` 将共享拍品与退款余额保存在 `npc/allegiance_auctions_v2`。经纪人库存由`trade_overrides/npc/common/allegiance_broker.json`定义，通过共享权威管理器和使用记录读取；预设绑定`isekaiexpansion:allegiance_broker`。普通市民/战斗凭证为3200/4800铜币，暗魔法版本为4800/6400铜币；竞拍仍使用独立的绿宝石出价。竞拍按服务端主世界 tick 计时，在玩家交互时结算，因此未加载的经纪人不需要逐 tick 任务。
 
 | 持久字段 | 类型 | 默认值 | 约定 |
 | --- | --- | --- | --- |

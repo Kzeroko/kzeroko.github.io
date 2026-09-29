@@ -3,10 +3,33 @@ title: "Trading"
 description: "Browse goods, negotiate a price and ask villagers to rotate their stock without leaving the conversation."
 category: world
 order: 145
-updated: 2026-09-25
+updated: 2026-09-30
 ---
 
-Trading stays inside the conversation with the merchant. Villagers keep their current offers and NPC shops use the same counter, with item categories, text search and a copper-price range.
+Trading stays inside the conversation with the merchant. Villagers and NPC shops use the same authoritative catalogue and counter, with item categories, text search and a copper-price range.
+
+## Catalogue and Trade Rapport
+
+Every merchant draws stock from all catalogue tiers on your first visit. Weighted catalogues still give different merchants different selections. Your rapport belongs to you and this merchant, survives long absences and does not change anyone else's standing.
+
+| Rank | Title | Rapport needed | Courtesy choice | Stored uses |
+| --- | --- | --- | --- | --- |
+| 1 | New Customer | 0 | Ordinary catalogue and paid services available | 1 |
+| 2 | Familiar Face | 24 | First profession courtesy | 1 |
+| 3 | Regular | 80 | Second choice and familiar villager greetings | 1 |
+| 4 | Trusted Customer | 180 | Same choices, more storage | 2 |
+| 5 | Valued Patron | 360 | Third profession choice | 2 |
+
+Completed purchases and sales both earn rapport. The value is the larger of currency paid or received. Exchanges below 8 copper earn none; otherwise base progress is `min(6, 1 + floor(value / 64))`. The same offer earns full, half and quarter progress on its first 3 qualifying trades in a server day, rounded down but at least 1; later repeats earn none. Total progress is capped at 24 per day. Days use 24000 elapsed overworld ticks (1200 seconds at 20 ticks per second), so changing the daylight clock does not reset them. Trying different offers helps; reopening the counter does not.
+
+## Merchant courtesies
+
+Each rank gained from 2 onward grants a courtesy, up to your storage limit. Further courtesies require both 40 additional credited rapport and 1000 copper of net spending with that merchant. Money received from sales reduces that spending budget. These two budgets reset when a courtesy is earned and do not accumulate while storage is full. Rapport can keep earning courtesies after rank 5, while the displayed rank progress stays at 360.
+
+Choose **A little help for the road** at the counter. Provisioners offer modest parcels; craftspeople can also maintain eligible equipment held in your main hand. Bundled maintenance restores 5% of maximum durability, rounded down with a minimum of 1 and a cap of 40 points. It does not exceed existing damage. Gifts need pack space; an unusable service does not spend a courtesy.
+
+Courtesies do not change stock, prices, enchantments or catalogue access. Rapport is commercial familiarity; NPC friendship, trust and romance retain their own rules.
+
 
 ## Prices and bargaining
 
@@ -34,20 +57,20 @@ W/S or Up/Down moves through the list, E or Enter confirms and the wheel changes
 
 Each villager restock grants one refresh chance, capped at one stored chance. Confirming the request spends it and brings out a new selection. Guaranteed catalogue entries stay; weighted entries favour goods whose offer IDs were absent from the previous selection. Repeats can remain when the pool is small, and different entries can still produce the same item. Catalogues that offer everything keep all eligible entries.
 
-Matching offers retain their current uses and price state when the selection changes. Refreshing does not grant another bargaining attempt. The stored chance, previous selection and negotiation result survive world saves. NPC shops replenish uses and reset bargaining at the next world day; the villager refresh service is not offered there.
+Matching offers retain their current uses and price state when the selection changes. Refreshing does not grant another bargaining attempt. The stored chance, previous selection and negotiation result survive world saves. NPC shops replenish uses and reset bargaining at the next elapsed server day, also gaining one refresh opportunity. First contact supplies stock without a refresh opportunity. The saved profession/offer-ID ledger prevents rotation from replenishing an exhausted offer before restocking.
 
 ## Conversation and other systems
 
 | Condition | Effect |
 | --- | --- |
-| Base NPC | Uses the NPC merchant policy and an available trade route. Ordinary NPCs require trust or allegiance ownership; the contract broker is public. |
+| Base NPC | Uses the NPC merchant policy and an available trade route. An assigned, enabled catalogue opens ordinary shopping without a trust requirement. |
 | Merchant moves away | Trade ends beyond 4 blocks or in another world. |
 | Combat, panic or death | Ends the trade interaction. |
 | Numismatic Overhaul | Supplies adjusted currency prices; payment uses inventory currency and wallet funds. |
-| Trade overrides | Own the villager's eligible offer pool and guaranteed entries. |
+| Trade overrides | Own villagers' and NPCs' eligible offer pools, guaranteed entries and courtesy choices. |
 
 Merchants face you and stop their conversation movement. Threats can interrupt the conversation. They do not walk towards you to maintain a merchant screen.
 
 ## Catalogue data
 
-Villager pools are authored under `data/<namespace>/trade_overrides/`. See [Trade overrides](/en/wiki/trade-overrides/) for selection and price fields, [Blacksmith commissions](/en/wiki/blacksmith-commissions/) for commissioned work and [Wayfinding](/en/wiki/wayfinding/) for asking directions.
+Merchant pools are authored under `data/<namespace>/trade_overrides/`. See [Trade overrides](/en/wiki/trade-overrides/) for selection and price fields, [Blacksmith commissions](/en/wiki/blacksmith-commissions/) for commissioned work and [Wayfinding](/en/wiki/wayfinding/) for asking directions.

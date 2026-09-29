@@ -3,7 +3,7 @@ title: "人形与 NPC 预设"
 description: "共享外观格式、玩家图库预设与 NPC 换装规则的完整参考。"
 category: data
 order: 100
-updated: 2026-09-27
+updated: 2026-09-30
 ---
 
 玩家预设保存可重复使用的外观。NPC 预设保存角色基础外观及可选的换装覆盖。两者共用外观字段，但应用方式与解锁规则不同。
@@ -74,6 +74,7 @@ updated: 2026-09-27
 | `tags` | `array<string>` | `[]` | 去除首尾空格并转为小写，移除空项并去重。玩家预设标签须在 48 个字符以内，以便网络同步。 |
 | `unlock` | `object` | `always` | 玩家预设规则元数据；当前预设图库不执行此条件。NPC 预设对各套外观分别设置规则。 |
 | `fixed_gender` | `boolean` | `false` | 仅用于 NPC 预设；设置 NPC 外观时强制使用预设性别。独特 NPC 本身也会固定性别。 |
+| `trade_profession` | `identifier` | `absent` | NPC交易目录键；自定义职业与原版职业共用[交易覆盖](/zh-cn/wiki/trade-overrides/)，标识符语法错误会拒绝预设。 |
 | `outfits` | `array<object>` | `fallback default outfit` | 仅用于 NPC 预设。缺失或空数组会生成始终可用的 `default` 外观，不含部件覆盖或属性加成。 |
 
 玩家预设允许空对象，此时得到没有显式部件的默认外观。应用完整预设会替换体型、面部、配色和部件，更改性别，并保留玩家年龄、角色姓名与种族。仅应用选定部件类别时，只覆盖对应槽位；身体类别同时复制体型，面部类别同时复制面部参数，且**每次局部应用都会复制整套配色**。
