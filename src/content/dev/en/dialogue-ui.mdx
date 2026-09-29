@@ -3,7 +3,7 @@ title: "Dialogue objects and UI"
 description: "Blabber blocking objects, one-use replies, persistent visuals and the ModernUI presentation bridge."
 category: client
 order: 135
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 Dialogue objects let a server interaction temporarily replace ordinary choices with a catalogue, prompt or subtitle-only waiting state. Persistent contributors add nonblocking visuals through a separate draw-list bridge, with game-state capture on the Minecraft client thread and rendering on ModernUI's UI thread.
@@ -12,7 +12,7 @@ Dialogue objects let a server interaction temporarily replace ordinary choices w
 
 The server API, including `DialoguePanel`, belongs to Blabber: `io.github.ladysnake.blabber.api.DialogueAPI`, `DialogueScreenObject` and `DialogueObjectResult`. Client contracts live under `io.github.ladysnake.blabber.api.client`: `DialogueClientAPI`, `DialoguePresentation`, `PersistDialogueScreenObject`, `DialogueScreenContext` and `DialogueDrawList`.
 
-This checkout consumes Blabber `0.5.1-build32` and Isekai Core `0.4.0-build61`. The dependency contracts below were checked against the local Blabber source checkout, not established by comparing a compiled jar. Keep the consumed build aligned on client and server; these packets include interaction revisions and object tokens.
+This checkout consumes Blabber `0.5.1-build34` and Isekai Core `0.4.0-build61`. The dependency contracts below were checked against the local Blabber source checkout, not established by comparing a compiled jar. Keep the consumed build aligned on client and server; these packets include interaction revisions and object tokens.
 
 IsekaiExpansion installs `IsekaiDialoguePresentation` and registers `NpcFavorDialogueHud` as `isekaiexpansion:npc_status` during client setup. The dependency owns object state, selection and input; the host supplies catalogue surfaces, labels and tooltip controls.
 
@@ -97,8 +97,8 @@ The first subtitle comes from the object's title; subsequent lines come from `co
 | `money` | `long` | Required, ≥0 | Exact payable copper total after adjustments and bargaining. |
 | `result` | `ItemStack` | Required | Copied output stack. |
 | `resultMoney` | `long` | Required, ≥0 | Currency payout; 0 uses the output item model. |
-| `originalMoney` | `long` | Required, ≥`money` | Pre-bargain adjusted copper price; higher values enable the crossed-out comparison. |
-| `discount` | `int` | Required, 0–100 | Display percentage; this host supplies 0–15 and uses 0 for barter. |
+| `originalMoney` | `long` | Required, ≥`money` | The greater of canonical base price and payable price; savings against the base enable the crossed-out comparison. |
+| `discount` | `int` | Required, 0–100 | Actual total savings percentage relative to base; 0 for barter or a surcharge. |
 
 `DialoguePresentation.createExchange(context, exchange)` creates the structured content. The host uses Isekai Core's `NumismaticClientCompat.createCurrencyTooltipComponent` per nonzero denomination. `select(control, selected)` stores activation separately from ListView's transient selection. Filters use full pointer controls and the host's vanilla tooltip layer, including unavailable refresh actions.
 
@@ -107,6 +107,10 @@ The first subtitle comes from the object's title; subsequent lines come from `co
 Panel motion starts on presentation: 260 ms entrance, 150 ms exit with standard easing, and 180 ms history reveal. Replacements wait for the outgoing fade; outgoing controls cannot submit. History hides raw item surfaces immediately. Keyboard selection retains the host's accent and animates its highlight.
 
 `DialogueObjectResult.Reason` distinguishes `SELECTED`, player `CANCELLED` and lifecycle `DISMISSED`. All empty selections still return `cancelled() == true`. A replacement, deadline or closure must not be treated as a request to reopen a menu. The server also rejects disabled entry IDs. `DialogueAPI.registerTradePanel` installs a host predicate for the existing trade action; return true when the host handled that entity, including a refused interaction.
+
+
+`TRADE` also provides All trades, Buy and Sell. Direction is determined by `Exchange.resultMoney`: a positive payout is Sell; other exchanges are Buy. It combines with category, text and price filters and persists when a quote returns to the catalogue. `DialogueScreenContext.reserveTop(height, gap)` allocates rows starting at y=22; each following row begins below the previous bottom plus gap. `contentTop()` supplies the catalogue top, at least 28 with a 5-unit gap. NPC and merchant HUDs share this reservation; the trade bottom stays 12 units above the screen edge. Object update packets refresh session metadata before the next captured frame.
+
 
 ### Client registration and presentation
 

@@ -75,6 +75,7 @@ The reward record is per player and keyed by preset ID plus outfit ID, so it app
 | `unlock` | `object` | `always` | Player-preset rule metadata; currently not enforced by the preset gallery. NPC presets gate individual outfits. |
 | `fixed_gender` | `boolean` | `false` | NPC preset only; forces the preset gender when an NPC profile is assigned. Unique NPCs also impose their own fixed gender. |
 | `trade_profession` | `identifier` | `absent` | NPC catalogue key; custom jobs and vanilla professions share [Trade overrides](/en/wiki/trade-overrides/). Invalid identifier syntax rejects the preset. |
+| `trade_access` | `enum(public, trusted)` | `trusted` | NPC shop access: requires Trust unless explicitly public. Invalid values reject the preset; export preserves this policy. |
 | `outfits` | `array<object>` | `fallback default outfit` | NPC preset only. Missing or empty gives an always-available `default` outfit with no overlay or bonuses. |
 
 A player preset can load as an empty object, but it then contains the default profile with no explicit parts. Applying the whole preset replaces build, face, palette and parts, changes gender, and preserves the player's age, character name and origin. Applying selected part kinds overlays only those slots; body selection also copies build, face selection copies face, and **every partial application copies the entire palette**.

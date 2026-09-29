@@ -3,14 +3,14 @@ title: "Dialogue camera and terrain fading"
 description: "Session-owned shoulder framing, actor facing, movement claims and nearby-terrain shader coverage."
 category: client
 order: 75
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 Dialogue camera follows a player and speaker with a shoulder shot, searching up to 32 candidate positions when it reevaluates the view. Session and entity identity checks keep the camera tied to the current conversation, while a separate terrain shader patch fades geometry close to any scripted camera.
 
 ## What it does
 
-The implementation lives under `client.camera.compat` and `client.camera.fade`; these are internal integration types, not public API facades. The Blabber bridge starts `isekaiexpansion:dialogue_humanoid` for ordinary and parent conversations and forwards close events with the current session ID. Parent starts also claim the dialogue entity. This checkout pins third-party Blabber to `0.5.1-build32`; the hooks described here are the mod's own bridge.
+The implementation lives under `client.camera.compat` and `client.camera.fade`; these are internal integration types, not public API facades. The Blabber bridge starts `isekaiexpansion:dialogue_humanoid` for ordinary and parent conversations and forwards close events with the current session ID. Parent starts also claim the dialogue entity. This checkout pins third-party Blabber to `0.5.1-build34`; the hooks described here are the mod's own bridge.
 
 The camera uses the loaded animation as an offset from a following dialogue anchor, with `YawAlign.NONE` and dialogue playback options. It holds the final animation pose, blends in over 5 ticks (0.25 seconds), keeps the HUD and dialogue input available, and restores the saved perspective when its owned camera stops. The bundled animation is a neutral pose; the rig supplies the shot composition and FOV.
 

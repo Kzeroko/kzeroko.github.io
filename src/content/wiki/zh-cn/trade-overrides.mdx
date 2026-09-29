@@ -20,7 +20,7 @@ updated: 2026-09-30
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "profession": "minecraft:farmer",
   "tiers": {
     "1": [
@@ -46,7 +46,7 @@ updated: 2026-09-30
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `schema_version` | `integer` | 必填 | 必须为`2`；其他值会拒绝本次目录更新。 |
+| `schema_version` | `integer` | 必填 | 必须为`3`；其他值会拒绝本次目录更新。 |
 | `profession` | `identifier` | 必填 | 目录键，可对应已注册村民职业或自定义NPC职业。可选来源模组须通过`requires_mods`明确限制。 |
 | `priority` | `integer` | `0` | 命名空间权重相同时数值高者优先，范围−1000000…1000000。 |
 | `requires_mods` | `array<string>` | `[]` | 列出的模组必须全部加载；空列表不限制。 |
@@ -103,13 +103,17 @@ updated: 2026-09-30
 | `courtesies[].id` | `string` | 必填 | 照拂内唯一，语法与报价ID相同。 |
 | `courtesies[].label` | `string` | 必填 | 非空白翻译键，需要提供双语文本。 |
 | `courtesies[].rank` | `integer` | 必填 | 可选2、3、5，每个交情阶段最多一项；重复会拒绝。 |
-| `courtesies[].type` | `enum(gift, repair)` | 必填 | 决定可用字段与执行动作。 |
-| `courtesies[].item` | `object` | `gift`时必填 | 使用上述物品堆叠字段；仅一个物品ID，固定数量1–16，不能是货币。物品缺失时禁用选项。 |
-| `courtesies[].item_tag` | `identifier` | `repair`时必填 | 不带`#`的物品标签。主手中受损的装备必须属于该标签。 |
-| `courtesies[].percent` | `integer` | `repair`时必填 | 最大耐久的1–10%，向下取整，至少恢复1点。 |
-| `courtesies[].cap` | `integer` | `repair`时必填 | 1–100点耐久，限制百分比修复量，最终不超过当前损伤。 |
+| `courtesies[].action` | `object` | 必填 | 已注册的动作数据；缺失或无效会拒绝目录。 |
+| `courtesies[].action.type` | `identifier` | 必填 | 带命名空间的已注册类型；未知ID拒绝加载。 |
+| `courtesies[].action.item` | `object` | `isekaiexpansion:gift` | 单一固定物品堆叠，数量1–16，不可使用货币；其余字段见上方物品格式。 |
+| `courtesies[].action.item_tag` | `identifier` | `isekaiexpansion:repair` | 不带`#`的标签；受损的主手物品须匹配。 |
+| `courtesies[].action.percent` | `integer` | `isekaiexpansion:repair` | 最大耐久的1–10%，向下取整，至少1点。 |
+| `courtesies[].action.cap` | `integer` | `isekaiexpansion:repair` | 1–100耐久点，最终不超过已有损伤。 |
+| `courtesies[].action.hunger` | `integer` | `isekaiexpansion:meal` | 1–8饥饿点，饱和度因子为0.25；饥饿值未满时可用。 |
+| `courtesies[].action.effect` | `identifier` | `isekaiexpansion:cleanse`, `isekaiexpansion:effect` | 已注册的状态效果。前者解除已有的非增益效果；后者仅在同类效果不存在时，以强度0赋予非瞬时增益。 |
+| `courtesies[].action.seconds` | `integer` | `isekaiexpansion:effect` | 1–120秒，按每秒20 ticks换算。 |
 
-保养只修改损伤值。赠品要求背包有空位。两种服务执行前都会复核当前对话、目录定义、交情阶段和可用次数；更换主手物品后，旧保养选项失效。照拂不补货、不改价，也不解锁普通商品。
+内置类型拒绝其他动作的字段；扩展类型自行验证数据。赠品检查行囊空间，保养仅改变损伤。执行前重新核对对话、定义、阶段、可用次数与选择时的主手快照，成功后才消费次数。唯一NPC拒绝此菜单，内置数据也没有照拂。格式3不保留版本2或旧式平铺动作的读取方式。
 
 ## 完整示例
 
@@ -117,7 +121,7 @@ updated: 2026-09-30
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "profession": "minecraft:farmer",
   "tiers": {
     "1": [
@@ -152,7 +156,7 @@ updated: 2026-09-30
 
 ## 校验
 
-只接受格式版本2；已移除的等级字段和村民经验字段会被拒绝。所有层级都拒绝未知字段。缺失必填字段、类型错误、重复报价ID、非法ID语法、超范围数值和非法NBT都会记录错误，并保留上一版目录，不应用本轮已解析的定义。空文件不是合法JSON，空对象缺少必填字段。`tiers`本身不能空，但货品层级对应的数组可以空。
+只接受格式版本3；已移除的等级字段和村民经验字段会被拒绝。所有层级都拒绝未知字段。缺失必填字段、类型错误、重复报价ID、非法ID语法、超范围数值和非法NBT都会记录错误，并保留上一版目录，不应用本轮已解析的定义。空文件不是合法JSON，空对象缺少必填字段。`tiers`本身不能空，但货品层级对应的数组可以空。
 
 整数必须是精确整数，数字字符串和小数不能充当整数。模组列表不允许空白值或重复值。自定义职业ID可直接使用；物品候选全部不可用时，对应报价被过滤。过滤后即使没有报价，这个定义仍然接管该职业，不回退原版交易。
 

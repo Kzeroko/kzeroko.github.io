@@ -25,9 +25,9 @@ Import `io.github.ladysnake.blabber.Blabber` and the facade. The entity must be 
 
 ### Bind an NPC profession
 
-Set `trade_profession` in the NPC preset to a catalogue ID such as `minecraft:farmer`. Author the matching catalogue under `data/<namespace>/trade_overrides/`; [Trade overrides](/en/wiki/trade-overrides/) describes schema version 2. A custom job needs no villager profession registration. Gate optional provider mods with `requires_mods`.
+Set `trade_profession` in the NPC preset to a catalogue ID such as `minecraft:farmer`. Author the matching catalogue under `data/<namespace>/trade_overrides/`; [Trade overrides](/en/wiki/trade-overrides/) describes schema version 3. A custom job needs no villager profession registration. Gate optional provider mods with `requires_mods`.
 
-`BaseNpcEntity.getTradeProfession()` resolves a common NPC's saved assignment before its preset. `setTradeProfession(identifier)` assigns a common NPC job; null returns to the preset. Unique NPCs reject instance assignment and always use their preset. Evelina's preset selects `isekaiexpansion:mahoutsukai_evelina`. `canTradeWith` admits ordinary shopping whenever a catalogue is enabled. Friendship, trust and marriage do not change catalogue prices or access.
+`BaseNpcEntity.getTradeProfession()` resolves a common NPC's saved assignment before its preset. `setTradeProfession(identifier)` assigns a common NPC job; null returns to the preset. Unique NPCs reject instance assignment and always use their preset. Evelina's preset selects `isekaiexpansion:mahoutsukai_evelina`. `canTradeWith` requires an enabled catalogue and the preset's `trade_access`: `trusted` by default, or `public`. Both the disabled menu choice and server admission use this predicate. Unique NPCs exclude courtesy, refresh and bargaining actions on both rendering and execution paths; automatic stock remains active.
 
 These entity methods are internal integration points. The preset field is optional and defaults to no trade profession; malformed identifiers reject that preset. `TradeProfession` is the corresponding optional entity NBT string. The humanoid export command preserves the effective profession.
 
@@ -49,9 +49,21 @@ int rank = TradingAPI.rapportRank(player, merchant);
 
 `TradeOverrideManager` generates every tier 1–5 immediately, with deterministic merchant UUID, profession, tier, offer-ID and rotation seeds. `VillagerTradeAuthorityMixin` disables vanilla level advancement; unowned professions invoke their vanilla/mod factories once for each tier. Owned lists are frozen at the construction and getter boundaries. Rebuilding preserves compatible offer state and the profession/offer-ID use ledger. The cache depends on definition, revision and rotation, never rapport.
 
-`TradeTransaction` computes adjusted costs before bargaining, validates both inputs, currency and output capacity, then pays using Isekai Core `NumismaticCompat`. The displayed exchange uses that same quote. Currency change can occupy space during payment; remaining output uses `offerOrDrop`. Villager `Merchant.trade` runs with a customer scoped to its synchronous callback and cleared in `finally`. Villager experience no longer advances catalogue access. NPCs use their shared authoritative list directly.
+`TradeTransaction` prices canonical currency costs using `TradePricing` before bargaining, validates both inputs, currency and output capacity, then pays using Isekai Core `NumismaticCompat`. The displayed exchange uses that same quote. Currency change can occupy space during payment; remaining output uses `offerOrDrop`. Villager `Merchant.trade` runs with a customer scoped to its synchronous callback and cleared in `finally`. Villager experience no longer advances catalogue access. NPCs use their shared authoritative list directly.
 
 After payment, the service records stock use and personal rapport. `MerchantCourtesies` revalidates the definition, session, rank, charge and item before giving or repairing anything. Maintenance compares the selected main-hand snapshot again and changes damage only. Gift capacity is checked before charge consumption.
+
+### Register a courtesy action
+
+`net.kzeroko.isekaiexpansion.api.trading.CourtesyAPI.register(type, parser)` delegates to the internal registry. Register during common initialization, before resource reload. Duplicate IDs throw. The parser receives a copied `JsonObject` including `type` and returns an immutable `CourtesyAction` implementation from the internal package, exposed only for this extension contract. Reject unknown or malformed fields in the parser.
+
+`icon(player)` and `description()` supply presentation; `canApply(player, merchant)` is a side-effect-free eligibility check. `apply(player, merchant)` must revalidate, run synchronously on the server thread and return false without mutation if it cannot complete. The dispatcher spends a courtesy only after true. Never retain the player or world in parsed action instances. Built-ins implement gift, repair, meal, cleanse and timed effect actions. Payload fields are in [Trade overrides](/en/wiki/trade-overrides/).
+
+### Reputation quotes and information
+
+`TradePricing.resolve` reads identity and location factions and current villager gossip. Gossip is normalized by 4 and clamped to −1000…1000; the worst negative source wins, otherwise the best positive source wins. Hero of the Village supplies a positive floor of 100 per amplifier step, capped at 500, only when standing is nonnegative. This avoids adding the faction-to-gossip bridge twice. Purchase modifiers span −15%…+40%; payout modifiers span −20%…+5%. Whole percentage points are applied with overflow-safe integer arithmetic, then purchase-only bargaining. Currency is read from original stacks; noncurrency inputs retain vanilla adjustments. Each catalogue resolves one pricing context, and confirmation resolves again before comparing the complete quote.
+
+`MerchantDialogueMetadata` sends rank, score, next threshold, courtesy count/capacity and purchase/payout modifiers. `MerchantDialogueHud` renders wrapping cells through Blabber's shared top-space reservation, after the NPC status HUD. Blabber object updates refresh metadata. `DialogueAPI.lastSpeech(player)` retains the last authored line across an empty ending action; the shop preserves unique speech rather than adding a generic greeting.
 
 ### Persistent entity fields
 

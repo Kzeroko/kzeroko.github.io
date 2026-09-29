@@ -3,7 +3,7 @@ title: "NPC 对话数据"
 description: "Blabber 对话字段、已注册动作、NPC 路由路径、关系回退与本地化。"
 category: data
 order: 120
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 对话文件定义文字、选项与动作，NPC 解析器决定打开哪个文件。文件位置与回退顺序也是格式的一部分；文件即使有效，也可能被更具体的路由覆盖而始终不被选中。
@@ -12,7 +12,7 @@ updated: 2026-09-26
 
 使用 `data/<namespace>/blabber/blabber_dialogues/<path>.json`。对话 ID 为 `<namespace>:<path>`，不含注册表文件夹或扩展名。NPC 自动查找在 `isekaiexpansion` 命名空间下构造 ID；其他命名空间可通过显式引用使用，不参与自动路径回退。
 
-整合包固定使用 Blabber `0.5.1-build32`。基础对话格式由该依赖提供，下述约定已对照本地 Blabber 源码与模组自带数据核对。上游 schema 提示不保证覆盖所有本地扩展。
+整合包固定使用 Blabber `0.5.1-build34`。基础对话格式由该依赖提供，下述约定已对照本地 Blabber 源码与模组自带数据核对。上游 schema 提示不保证覆盖所有本地扩展。
 
 ### NPC 查找路径
 

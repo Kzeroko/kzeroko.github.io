@@ -25,9 +25,9 @@ Blabber.getActiveDialogueEntity(player)
 
 ### 绑定NPC职业
 
-在NPC预设中，将`trade_profession`设为`minecraft:farmer`等目录ID。相应目录写在`data/<namespace>/trade_overrides/`，格式版本2见[交易覆盖](/zh-cn/wiki/trade-overrides/)。自定义职业不必注册为村民职业；可选来源模组通过`requires_mods`限制。
+在NPC预设中，将`trade_profession`设为`minecraft:farmer`等目录ID。相应目录写在`data/<namespace>/trade_overrides/`，格式版本3见[交易覆盖](/zh-cn/wiki/trade-overrides/)。自定义职业不必注册为村民职业；可选来源模组通过`requires_mods`限制。
 
-`BaseNpcEntity.getTradeProfession()`优先读取普通NPC已保存的个体职业，再读取预设。`setTradeProfession(identifier)`为普通NPC指定职业，传入null恢复使用预设。唯一NPC拒绝个体赋值，始终使用预设；伊芙琳娜使用`isekaiexpansion:mahoutsukai_evelina`。目录启用时，`canTradeWith`即可允许普通买卖。友谊、信任及婚姻不改变商品价格或购买资格。
+`BaseNpcEntity.getTradeProfession()`优先读取普通NPC已保存的个体职业，再读取预设。`setTradeProfession(identifier)`为普通NPC指定职业，传入null恢复使用预设。唯一NPC拒绝个体赋值，始终使用预设；伊芙琳娜使用`isekaiexpansion:mahoutsukai_evelina`。`canTradeWith`要求目录已启用，并满足预设的`trade_access`：默认`trusted`要求信任，`public`允许公开买卖。菜单锁定和服务端准入使用同一谓词。唯一NPC在展示和执行端均排除照拂、换货与议价，自动补货仍保留。
 
 这些实体方法是内部集成入口。预设字段可省略，默认没有交易职业；标识符格式错误会拒绝该预设。对应实体NBT可选字符串为`TradeProfession`。人形导出命令会保留当前生效的职业。
 
@@ -49,9 +49,21 @@ int rank = TradingAPI.rapportRank(player, merchant);
 
 `TradeOverrideManager`初次即生成1–5所有货品层级，种子由商人UUID、职业、层级、报价ID及轮换值确定。`VillagerTradeAuthorityMixin`关闭原版升级；未被覆盖的职业依次调用各层级的原版或模组工厂。覆盖目录在构造与读取边界冻结结构。重建保留兼容的报价状态及职业/报价ID使用记录。缓存依赖定义、版本与轮换值，不依赖交情。
 
-`TradeTransaction`先读取调整后的价格，再议价；检查两份材料、货币与输出空间后，使用异界核心`NumismaticCompat`支付。界面交换项来自同一份报价。找零可能占据空间，余下输出通过`offerOrDrop`交付。村民的`Merchant.trade`只在同步回调内设置顾客，并在`finally`清除。村民经验不再推进商品资格；NPC直接使用共享的权威报价列表。
+`TradeTransaction`通过`TradePricing`从基础货币值计算声望价格，再议价；检查两份材料、货币与输出空间后，使用异界核心`NumismaticCompat`支付。界面交换项来自同一份报价。找零可能占据空间，余下输出通过`offerOrDrop`交付。村民的`Merchant.trade`只在同步回调内设置顾客，并在`finally`清除。村民经验不再推进商品资格；NPC直接使用共享的权威报价列表。
 
 支付完成后，服务记录库存使用和个人交情。`MerchantCourtesies`在赠送或保养前复核目录定义、对话、阶段、次数及物品。保养再次比较已选择的主手快照，只改变损伤；赠品在消耗次数前检查背包空间。
+
+### 注册照拂动作
+
+`net.kzeroko.isekaiexpansion.api.trading.CourtesyAPI.register(type, parser)`委托内部注册表。请在通用初始化阶段、资源重载前注册；重复ID抛错。解析器收到包含`type`的`JsonObject`副本，返回不可变的`CourtesyAction`实现；该内部类型仅为此扩展约定公开。解析器应拒绝未知字段与无效数据。
+
+`icon(player)`与`description()`提供界面内容，`canApply(player, merchant)`只检查资格，不改变状态。`apply(player, merchant)`必须在服务端线程同步执行并再次验证，无法完成时返回false且不作任何变更；调度器只在true之后消费照拂。解析后的动作不能持有玩家或世界引用。内置动作包含赠品、保养、用餐、净化与限时效果。参数见[交易覆盖](/zh-cn/wiki/trade-overrides/)。
+
+### 声望报价与信息栏
+
+`TradePricing.resolve`读取身份势力、所在地势力与村民当前流言。流言乘4后限制在−1000…1000；有负值时取最差的一项，否则取最好的一项。村庄英雄只在声望非负时提供正值下限，每级100，最多500。势力转流言的桥接因此不会重复叠加。买价调整范围为−15%…+40%，收购价为−20%…+5%；使用防溢出的整数计算，取整到百分点，再对买价应用议价。货币从原始堆叠取值，非货币材料保留原版调整。每次目录只解析一份价格上下文，确认时重新解析并比较完整报价。
+
+`MerchantDialogueMetadata`同步阶段、交情、下一门槛、照拂次数/容量与买卖调价。`MerchantDialogueHud`通过Blabber共享的顶部空间预留接口绘制可换行的信息块，排在NPC状态栏之后。Blabber对象更新会刷新元数据。`DialogueAPI.lastSpeech(player)`在进入空白结束动作后保留最后的作者台词，商店据此维持唯一NPC的专属发言。
 
 ### 持久实体字段
 

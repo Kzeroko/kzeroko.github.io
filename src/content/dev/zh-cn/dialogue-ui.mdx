@@ -3,7 +3,7 @@ title: "对话对象与界面"
 description: "Blabber 阻塞对象、单次回复、常驻视觉内容与 ModernUI 展示桥接。"
 category: client
 order: 135
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 对话对象让服务端交互暂时用目录、提示或仅保留字幕的等待状态替代普通选项。常驻贡献器通过独立绘制列表添加不阻塞对话的视觉内容，在 Minecraft 客户端线程捕获游戏状态，再由 ModernUI 的 UI 线程绘制。
@@ -12,7 +12,7 @@ updated: 2026-09-19
 
 服务端 API 属于 Blabber：`io.github.ladysnake.blabber.api.DialogueAPI`、`DialogueScreenObject` 与 `DialogueObjectResult`。客户端约定位于 `io.github.ladysnake.blabber.api.client`：`DialogueClientAPI`、`DialoguePresentation`、`PersistDialogueScreenObject`、`DialogueScreenContext` 与 `DialogueDrawList`。
 
-本仓库使用 Blabber `0.5.1-build32` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
+本仓库使用 Blabber `0.5.1-build34` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
 
 异界扩展在客户端初始化时安装 `IsekaiDialoguePresentation`，并将 `NpcFavorDialogueHud` 注册为 `isekaiexpansion:npc_status`。依赖负责对象状态、选择与输入，宿主提供目录容器、标签及提示控件。
 
@@ -97,8 +97,8 @@ static void registerDialogueLabel() {
 | `money` | `long` | 必填，≥0 | 调价与议价后实际应付的铜币总额。 |
 | `result` | `ItemStack` | 必填 | 复制的产物堆叠。 |
 | `resultMoney` | `long` | 必填，≥0 | 商人支付的货币；为0时绘制产物模型。 |
-| `originalMoney` | `long` | 必填，≥`money` | 议价前已调整的铜币价格；高于成交价时显示划线对照。 |
-| `discount` | `int` | 必填，0–100 | 展示百分比；本宿主传0–15，以物易物时为0。 |
+| `originalMoney` | `long` | 必填，≥`money` | 基础价与应付价中的较大值；低于基础价时显示划线对照。 |
+| `discount` | `int` | 必填，0–100 | 相对于基础价的合计优惠百分比；以物易物或加价时为0。 |
 
 `DialoguePresentation.createExchange(context, exchange)`创建结构化内容。宿主按非零币种调用Isekai Core的`NumismaticClientCompat.createCurrencyTooltipComponent`。`select(control, selected)`将激活状态与ListView的临时选中分开。筛选使用完整指针控件和宿主的原版样式提示层，尚不可用的换货按钮也保留提示。
 
@@ -107,6 +107,10 @@ static void registerDialogueLabel() {
 面板真正出现时才开始动画：入场260毫秒，退场150毫秒，使用标准缓动；历史入场180毫秒。替换等待旧面板退场，退场控件不可提交。打开历史会立即隐藏原生物品表面。键盘选择保留宿主强调色，并对高亮进行过渡。
 
 `DialogueObjectResult.Reason`区分`SELECTED`、玩家主动`CANCELLED`与生命周期`DISMISSED`。所有空选择仍满足`cancelled() == true`。替换、超时或关闭不能当成玩家要求返回菜单。服务端也会拒绝禁用条目ID。`DialogueAPI.registerTradePanel`为现有交易动作安装宿主谓词；宿主已经处理该实体时返回true，包括拒绝交互的情况。
+
+
+`TRADE`还提供全部交易、买、卖。方向读取`Exchange.resultMoney`：正的收款额归为卖，其余归为买；与类别、文字和价格条件共同生效，从报价返回时保留选择。`DialogueScreenContext.reserveTop(height, gap)`从y=22开始分配行，后续行从前一行底部加gap开始。`contentTop()`给出目录起点，至少28，并留5单位间距。NPC与商人信息栏共用该预留空间；交易底边距屏幕底部保持12单位。对象更新包在下一帧捕获前刷新会话元数据。
+
 
 ### 客户端注册与展示
 

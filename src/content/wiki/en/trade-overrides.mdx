@@ -20,7 +20,7 @@ This complete catalogue uses the same item-stack syntax as the bundled farmer fi
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "profession": "minecraft:farmer",
   "tiers": {
     "1": [
@@ -46,7 +46,7 @@ This complete catalogue uses the same item-stack syntax as the bundled farmer fi
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `schema_version` | `integer` | required | Must be `2`; any other value rejects the catalogue update. |
+| `schema_version` | `integer` | required | Must be `3`; any other value rejects the catalogue update. |
 | `profession` | `identifier` | required | Catalogue key for a registered villager profession or a custom NPC job. Optional provider mods must be gated explicitly with `requires_mods`. |
 | `priority` | `integer` | `0` | Within the same namespace authority, higher wins. Range −1000000…1000000. |
 | `requires_mods` | `array<string>` | `[]` | All listed mod IDs must be loaded; empty imposes no requirement. |
@@ -103,13 +103,17 @@ This complete catalogue uses the same item-stack syntax as the bundled farmer fi
 | `courtesies[].id` | `string` | required | Unique within courtesies; same syntax as offer IDs. |
 | `courtesies[].label` | `string` | required | Nonblank translation key, authored in both languages. |
 | `courtesies[].rank` | `integer` | required | One service at each chosen rank: 2, 3 or 5. Duplicate ranks are rejected. |
-| `courtesies[].type` | `enum(gift, repair)` | required | Selects the permitted fields and operation. |
-| `courtesies[].item` | `object` | required for `gift` | Item-stack fields above; one item ID, fixed count 1–16, no currency. Missing items disable that choice. |
-| `courtesies[].item_tag` | `identifier` | required for `repair` | Item tag without `#`. The damaged main-hand item must belong to it. |
-| `courtesies[].percent` | `integer` | required for `repair` | 1–10% of maximum durability, rounded down with a minimum of 1 point. |
-| `courtesies[].cap` | `integer` | required for `repair` | 1–100 durability points; caps the percentage repair. Existing damage is the final ceiling. |
+| `courtesies[].action` | `object` | required | Registered action payload; missing or invalid payload rejects the catalogue. |
+| `courtesies[].action.type` | `identifier` | required | Namespaced registered codec. Unknown IDs reject reload. |
+| `courtesies[].action.item` | `object` | `isekaiexpansion:gift` | One fixed item stack of 1–16; no money. Uses the stack fields above. |
+| `courtesies[].action.item_tag` | `identifier` | `isekaiexpansion:repair` | Tag without `#`; damaged main-hand item must match. |
+| `courtesies[].action.percent` | `integer` | `isekaiexpansion:repair` | 1–10% maximum durability; round down, minimum 1 point. |
+| `courtesies[].action.cap` | `integer` | `isekaiexpansion:repair` | 1–100 durability points; existing damage is the final ceiling. |
+| `courtesies[].action.hunger` | `integer` | `isekaiexpansion:meal` | 1–8 hunger points; adds saturation at factor 0.25. Requires hunger below full. |
+| `courtesies[].action.effect` | `identifier` | `isekaiexpansion:cleanse`, `isekaiexpansion:effect` | Existing status effect. Cleanse removes a present non-beneficial effect. Effect grants a non-instant beneficial effect at amplifier 0 only when absent. |
+| `courtesies[].action.seconds` | `integer` | `isekaiexpansion:effect` | 1–120 seconds, converted at 20 ticks per second. |
 
-Repairs only change damage. Gifts require inventory room. Both recheck the current dialogue, definition, rank and stored use before applying. A changed held item invalidates a repair selection. Neither service resets stock, changes prices or unlocks ordinary goods.
+Each built-in rejects fields belonging to another action. External action types validate their own payload. Gifts require pack space; repairs change only damage. Every action rechecks session, definition, rank, saved use and the selected main-hand snapshot, and spends a use only after success. Unique NPCs reject this menu and have no bundled courtesies. Schema 3 has no version 2 or flat-action reader.
 
 ## Full example
 
@@ -117,7 +121,7 @@ This selects 1 weighted offer and resolves its item candidate and count range wh
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "profession": "minecraft:farmer",
   "tiers": {
     "1": [
@@ -152,7 +156,7 @@ This selects 1 weighted offer and resolves its item candidate and count range wh
 
 ## Validation
 
-Only schema version 2 is accepted. Removed level and villager-experience fields are rejected. Unknown fields are rejected at every object level. Missing required fields, wrong types, duplicate offer IDs, invalid identifier syntax, out-of-range numbers and invalid NBT log errors and retain the previous catalogue; no parsed definitions from that update are installed. An empty text file is invalid JSON, and an empty object lacks required fields. The `tiers` object cannot be empty, but its tier arrays can.
+Only schema version 3 is accepted. Removed level and villager-experience fields are rejected. Unknown fields are rejected at every object level. Missing required fields, wrong types, duplicate offer IDs, invalid identifier syntax, out-of-range numbers and invalid NBT log errors and retain the previous catalogue; no parsed definitions from that update are installed. An empty text file is invalid JSON, and an empty object lacks required fields. The `tiers` object cannot be empty, but its tier arrays can.
 
 Integers must be exact integers; numeric strings and fractions are rejected. Mod lists reject blank or duplicate values. Custom profession IDs are accepted; an offer with no available item candidate is filtered out. Even if filtering leaves no offers, the selected definition still owns that profession and does not fall back to vanilla trades.
 

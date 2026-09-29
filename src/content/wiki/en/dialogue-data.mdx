@@ -3,7 +3,7 @@ title: "NPC dialogue data"
 description: "Blabber dialogue fields, registered actions, NPC route paths, relationship fallback and localisation."
 category: data
 order: 120
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 Dialogue files define text, choices and actions; the NPC resolver chooses which file to open. File placement and fallback order are part of the format, so a valid file can remain unused when a more specific route wins.
@@ -12,7 +12,7 @@ Dialogue files define text, choices and actions; the NPC resolver chooses which 
 
 Use `data/<namespace>/blabber/blabber_dialogues/<path>.json`. The dialogue ID is `<namespace>:<path>`, without the registry folders or extension. Automatic NPC lookup builds IDs in `isekaiexpansion`; another namespace is usable through an explicit dialogue reference, not automatic path fallback.
 
-The pack pins Blabber `0.5.1-build32`. Its base dialogue dialect is dependency-owned; the contract below was checked against the local Blabber source checkout and the mod's shipped data. The upstream schema hint is not a validator for every local extension.
+The pack pins Blabber `0.5.1-build34`. Its base dialogue dialect is dependency-owned; the contract below was checked against the local Blabber source checkout and the mod's shipped data. The upstream schema hint is not a validator for every local extension.
 
 ### NPC lookup paths
 
