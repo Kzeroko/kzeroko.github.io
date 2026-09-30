@@ -1,12 +1,12 @@
 ---
 title: "Reputation data"
-description: "Entity factions, dynamic profession membership and faction relation rules."
+description: "Entity factions, affinity rules, player membership powers and faction relation rules."
 category: data
 order: 30
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 
-Entity faction rules assign factions and behaviour roles; relation rules decide whether factions are friendly, neutral or hostile. An entity can match several files, and all matching entity rules contribute.
+Entity faction rules assign factions and behaviour roles; relation rules decide whether factions are friendly, neutral or hostile, and whether a hostile side hunts the other on sight. Players join factions through a membership power. An entity can match several files, and all matching entity rules contribute.
 
 ## Where the files live
 
@@ -14,9 +14,11 @@ Entity rules use `data/<namespace>/reputation/entity_factions/*.json`; relation 
 
 Entity rules with different resource IDs accumulate rather than override by filename. Relation conflicts use priority and relation type. Identical resource paths undergo normal data-pack resource selection first.
 
+Player membership is an Origins power, so it lives with the other powers at `data/<namespace>/powers/*.json` and reaches a player through their origin, class or another power grant.
+
 ## Minimal example
 
-This keeps only the required field from the bundled villager rule. It matches villagers but adds no factions or roles:
+This keeps only one matcher from the bundled villager rule. It matches villagers but adds no factions or roles:
 
 ```json
 {
@@ -28,13 +30,43 @@ This keeps only the required field from the bundled villager rule. It matches vi
 
 ### Entity factions
 
+An entity matches a rule when any of its matchers accepts it. A rule needs at least one of `entity_types`, `entity_groups` or `spawn_groups`.
+
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `entity_types` | `array<string>` | required | Entity IDs or tags prefixed with `#`. Any matcher suffices; `[]` matches nothing. IDs are syntax-checked, not required to be registered. |
+| `entity_types` | `array<string>` | `[]` | Entity IDs or tags prefixed with `#`. `[]` matches nothing. IDs are syntax-checked, not required to be registered. |
+| `entity_groups` | `array<string>` | `[]` | Creature groups, from the table below. Matches any living entity in one of them. |
+| `spawn_groups` | `array<string>` | `[]` | Spawn groups, from the table below. Matches every entity type registered in one of them. |
 | `factions` | `array<string>` | `[]` | Adds static factions. IDs are normalised and created on demand, not resolved against an external registry. |
 | `dynamic_factions` | `array<string>` | `[]` | Only `minecraft:villager_profession` is accepted; `villager_profession` is its alias. Adds `minecraft:villager_profession/<profession_id>` for villagers; other entities contribute nothing. |
 | `roles` | `array<string>` | `[]` | Normalised role names. `protector` is consumed by defender checks; other names are accepted without a defined behaviour here. Duplicates collapse. |
 | `include_structure_origin_factions` | `boolean` | `false` | Collects stored structure-origin factions when the entity supports them. It does not assign a faction merely because the entity stands inside a structure. |
+| `affinity` | `boolean` | `false` | `true` makes this an affinity rule: its factions steer relations and targeting only. They never change your standing, never make an entity a witness and never appear in your report. |
+
+An affinity rule adds to an entity's identity rather than replacing it, and its factions never make members avenge one another. A hostile mob that only affinity rules match still gets the implicit `isekaiexpansion:side/monster` side, and its identity rules, if any, still decide what hurting it costs you.
+
+`entity_groups` values are the creature groups vanilla gives every living entity, the same groups Smite, Bane of Arthropods and Impaling test:
+
+| Value | What it matches |
+| --- | --- |
+| `default` | Every living entity with no special group. |
+| `undead` | Zombies, skeletons, drowned, phantoms and other undead. |
+| `arthropod` | Spiders, silverfish, endermites, bees and other arthropods. |
+| `illager` | Pillagers, vindicators, evokers, illusioners and modded illagers built on them. |
+| `aquatic` | Fish, squid, dolphins, guardians, turtles, axolotls and modded water creatures built on vanilla's. |
+
+`spawn_groups` values are the vanilla spawn categories:
+
+| Value | What it matches |
+| --- | --- |
+| `monster` | Hostile mobs. |
+| `creature` | Land animals. |
+| `ambient` | Bats. |
+| `axolotls` | Axolotls. |
+| `underground_water_creature` | Glow squid. |
+| `water_creature` | Squid, dolphins and other water mobs that spawn as creatures. |
+| `water_ambient` | Fish. |
+| `misc` | Everything else, including players and non-living entities. |
 
 ### Faction relations
 
@@ -45,45 +77,104 @@ This keeps only the required field from the bundled villager rule. It matches vi
 | `relation` | `enum(friendly, neutral, hostile)` | required | Trims and ignores case. Friendly aliases: `ally`, `allied`, `alliance`; hostile aliases: `enemy`, `war`. Other values reject the file. |
 | `bidirectional` | `boolean` | `true` | Also tests with acting and target faction sets exchanged. |
 | `priority` | `integer` | `0` | Higher matching priority wins. No explicit clamp; write a signed 32-bit integer. Equal priority prefers hostile, then friendly, then neutral. |
+| `proactive` | `boolean` | `false` | `true` sends mobs of the acting side after mobs and players of the target side on their own, and the other way round when bidirectional. Only a `hostile` relation can be proactive; any other relation rejects the file. |
 
+A relation decides targeting as follows. `hostile` lets a mob attack a member of the other side even when its own AI would not pick that fight. `friendly` vetoes the attack. `neutral` has no opinion: the mob's own AI decides, so a predator keeps hunting prey that shares its factions. A friendly relation toward a player lapses for 100 ticks (5 seconds) after that player last hurt the mob, unless something else hurts it since, so a provoked creature fights back. Members that share an identity faction and are friendly also avenge each other, as [Reputation](/en/wiki/reputation/) describes; a neutral relation of a faction to itself turns that off.
+
+A proactive relation adds a hunt. Once a second, a mob with no target looks for the nearest entity the relation sends it after, within its follow range clamped to 8–48 blocks (24 blocks when it has none). The candidate must still resolve hostile once priorities and runtime overrides are counted, and the mob must be able to see and detect it. A player is judged by the form they wear, so a player in a pursued form is pursued too. Tamed mobs and mounts a player is riding never start a hunt.
+
+### Player membership
+
+The bundled Mermaid origin places this membership in `mermaid_aqua_affinity` as the `kinship` subpower. `trait_mermaid` is only the race marker.
+
+A player belongs to no faction by default, and every fight with them is left to vanilla AI. A power of type `isekaiorigins:faction_membership` enrols its holder in factions. Put it on a trait power every evolution of a lineage includes, and the whole line shares the membership.
+
+```json
+{
+  "type": "isekaiorigins:faction_membership",
+  "factions": ["isekaiexpansion:side/merfolk"]
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | required | Use `isekaiorigins:faction_membership`. |
+| `factions` | `array<string>` | required | Faction IDs the holder joins, normalised like entity rule factions. |
+| `condition` | `object` | absent | Standard Origins entity condition. While it fails, the holder is not a member. |
+
+Membership only steers relations and targeting. It keeps no standing of its own and does not appear in the report.
 
 ## Full example
 
-Place this entity rule in the entity-faction directory:
+The bundled sea creature rule gives aquatic mobs, and the Myths of the Sea creatures listed in `#isekaiexpansion:sea_creatures`, an affinity side:
 
 ```json
 {
-  "entity_types": ["minecraft:villager"],
-  "factions": ["minecraft:village"],
-  "dynamic_factions": ["minecraft:villager_profession"],
-  "roles": ["protector"],
-  "include_structure_origin_factions": true
+  "entity_types": ["#isekaiexpansion:sea_creatures"],
+  "entity_groups": ["aquatic"],
+  "factions": ["isekaiexpansion:side/sea"],
+  "affinity": true
 }
 ```
 
-This separate relation file follows the bundled civilisation/monster relationship:
+Sharing a faction makes two entities friendly by default, which would stop guardians hunting squid. A relation of the side to itself removes that default:
 
 ```json
 {
-  "source_factions": ["isekaiexpansion:side/civilization"],
-  "target_factions": ["isekaiexpansion:side/monster"],
-  "relation": "hostile"
+  "source_factions": ["isekaiexpansion:side/sea"],
+  "target_factions": ["isekaiexpansion:side/sea"],
+  "relation": "neutral"
 }
 ```
 
-Faction IDs are trimmed and lower-cased; backslashes and vertical bars become slashes, spaces become underscores and blank IDs become `unknown`. Role names receive the same case and space handling but do not convert vertical bars or replace blank names with `unknown`. Entity IDs and tags must still use valid resource-ID syntax.
+The bundled monster communities use the same pattern the other way round. `isekaiexpansion:side/monster` is neutral to itself, so sharing it makes no one allies, and each community restores its own kinship at priority 10:
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/raider"],
+  "target_factions": ["isekaiexpansion:side/raider"],
+  "relation": "friendly",
+  "priority": 10
+}
+```
+
+This relation makes the sea friendly to merfolk players and mermaid citizens, above any hostile relation at priority 0:
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/merfolk", "isekaiexpansion:citizen_origin/mermaid"],
+  "target_factions": ["isekaiexpansion:side/sea"],
+  "relation": "friendly",
+  "priority": 20
+}
+```
+
+The bundled raider and dragon feud is proactive in one direction. Raiders hunt the Saints Dragons dragons in `#isekaiexpansion:dragons` on sight, and a dragon answers through its own AI. Saints Dragons keeps a dragon's target in its own brain, so a hunt started for the dragon would not hold:
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/raider"],
+  "target_factions": ["isekaiexpansion:side/dragon"],
+  "relation": "hostile",
+  "bidirectional": false,
+  "proactive": true,
+  "priority": 10
+}
+```
+
+Faction IDs are trimmed and lower-cased; backslashes and vertical bars become slashes, spaces become underscores and blank IDs become `unknown`. Role names receive the same case and space handling but do not convert vertical bars or replace blank names with `unknown`. Entity IDs and tags must still use valid resource-ID syntax. Group and spawn-group names are trimmed and ignore case.
 
 ## Validation
 
-A missing required key, wrong type in a consumed field, invalid entity-ID syntax, unknown dynamic faction type or unknown relation rejects that file. The loader logs the error and continues with other files. Both loaders replace their previous rule lists with this load's successful rules; a bad file does not retain its old rule. Unknown fields are ignored, with no version migration. An empty object lacks required keys; empty text is invalid JSON.
+A missing required key, wrong type in a consumed field, invalid entity-ID syntax, unknown entity group, unknown spawn group, unknown dynamic faction type or unknown relation rejects that file. An entity rule without any of `entity_types`, `entity_groups` or `spawn_groups` is rejected, and so is a proactive relation that is not hostile. The loader logs the error and continues with other files. Both loaders replace their previous rule lists with this load's successful rules; a bad file does not retain its old rule. Unknown fields are ignored, with no version migration. An empty object lacks required keys; empty text is invalid JSON.
 
-Syntactically valid unregistered entity IDs load but cannot match a nonexistent type. Empty tags and empty `entity_types` arrays match nothing; empty faction arrays add nothing. Unknown static faction IDs are created on demand. Multiple entity rules can contribute together. Relation rules compare higher priority first, then hostile before friendly before neutral.
+Syntactically valid unregistered entity IDs load but cannot match a nonexistent type. Empty tags and empty matcher arrays match nothing; empty faction arrays add nothing. Unknown static faction IDs are created on demand. Multiple entity rules can contribute together. Relation rules compare higher priority first, then hostile before friendly before neutral.
 
-When no relation rule matches, a shared faction makes the sides friendly; otherwise they are neutral. An explicit rule can override that shared-faction default.
+When no relation rule matches, a shared faction makes the sides friendly; otherwise they are neutral. An explicit rule can override that shared-faction default, including a rule whose acting and target sides name the same faction.
 
 ## Reloading
 
-Both directories are server data resources read at startup and on `/reload`. Reload replaces the rule lists, and subsequent faction/relation queries use the new rules. This path does not synchronise the whole rule table to clients; player-visible reputation reports and gameplay results use runtime queries.
+Both directories are server data resources read at startup and on `/reload`. Reload replaces the rule lists, and subsequent faction and relation queries use the new rules. Which rules an entity type matches is cached per type and cleared whenever rules or tags reload. This path does not synchronise the whole rule table to clients; player-visible reputation reports and gameplay results use runtime queries. Membership powers follow the Origins power loader.
 
 ## Related
 

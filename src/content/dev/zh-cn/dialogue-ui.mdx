@@ -12,7 +12,7 @@ updated: 2026-09-30
 
 服务端 API 属于 Blabber：`io.github.ladysnake.blabber.api.DialogueAPI`、`DialogueScreenObject` 与 `DialogueObjectResult`。客户端约定位于 `io.github.ladysnake.blabber.api.client`：`DialogueClientAPI`、`DialoguePresentation`、`PersistDialogueScreenObject`、`DialogueScreenContext` 与 `DialogueDrawList`。
 
-本仓库使用 Blabber `0.5.1-build34` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
+本仓库使用 Blabber `0.5.1-build36` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
 
 异界扩展在客户端初始化时安装 `IsekaiDialoguePresentation`，并将 `NpcFavorDialogueHud` 注册为 `isekaiexpansion:npc_status`。依赖负责对象状态、选择与输入，宿主提供目录容器、标签及提示控件。
 
@@ -86,6 +86,8 @@ static void registerDialogueLabel() {
 `DialoguePanel`包含`layout`、标题、确认与取消`Text`、`searchable`开关、筛选描述和后续台词。布局为`CONVERSATION`、`CATALOGUE`或`TRADE`。`conversation()`生成没有标题和通用页脚的紧凑回复；`catalogue(heading, confirm, cancel, searchable)`生成显式选择列表。`then(Text...)`替换后续台词列表，最多追加32段。筛选描述最多16项，每项包含键、标签和复制的物品图标；空键表示全部类别。
 
 首段字幕取对象标题，之后读取`continuation`。确认键先补全当前台词，再逐段推进；最后一段完整显示后才出现回复。铁匠依次说明价钱、工期和约定。问路只在目的地列表启用搜索，地点类别与指南针使用各自的标题和确认文案。
+
+只有一个可用`{EMPTY}`条目的`CONVERSATION`对象会使用普通浮动继续提示。点击字幕或按确认键，先补全未显示的台词，再推进后续段落，最后提交该条目。没有条目的对象仍是等待面板。完成回调决定返回现有上级菜单还是关闭对话。
 
 `DialogueScreenObject.Display`携带复制的物品图标、详情、类别、铜币价格和启用状态；负价格不参与价格范围筛选。类别`action`将条目放入固定服务按钮栏，不受目录筛选影响。`TRADE`增加物品类别图标与含边界的最低、最高铜币价格输入。Minecraft在ModernUI的表面中绘制物品模型，布局、焦点与输入由ModernUI管理。
 
@@ -186,7 +188,7 @@ builder 保持命令顺序，`build()` 返回不可变命令列表。支持 `spr
 
 数据对话和父级对话 handler 都通过 ModernUI 的 `MenuScreenFactory` 创建界面。控制器捕获初始帧，并在客户端刻末、交互及资源刷新时更新。常驻回调在这些捕获时运行，不是每个 UI 渲染帧都调用；UI 读取最新快照并独立播放动画。
 
-对象活动时，字幕板显示对象提示，推进独立提示时钟，暂停普通台词时钟。普通台词仅在状态键与文字组合变化时重置计时；单改版本不会重播相同台词。显示按 Unicode 码点计数，普通选项在完整显示后 200 ms 才可用。捕获的速度限制为 1–100。
+对象活动时，字幕板显示对象提示。若说话者和提示文字与上一句相同，就沿用该句的显示进度，即使中间经过空白结束状态也不会重播或重复记入历史。不同提示才启动独立提示时钟，并暂停普通台词时钟。普通台词仅在状态键与文字组合变化时重置计时；单改版本不会重播相同台词。显示按 Unicode 码点计数，普通选项在完整显示后 200 ms 才可用。捕获的速度限制为 1–100。
 
 | 上下文 | 操作 |
 | --- | --- |
@@ -205,6 +207,8 @@ builder 保持命令顺序，`build()` 返回不可变命令列表。支持 `spr
 宿主贡献器仅在会话元数据标记为基础 NPC 时绘制，展示好感或订婚状态、分层心情图标、个性与小队模式；跟随槽位按从 1 开始的序号显示。好感进度限制为 0–1，最高好感判定由 Isekai Core 提供。
 
 元数据键与关系语义见 [NPC 对话](/zh-cn/dev/npc-dialogue/)和 [NPC 情绪](/zh-cn/dev/npc-emotion/)。HUD 按可用宽度均衡分配文字上限并加省略号，连省略号也放不下时输出空文字。绘制不会修改关系状态。
+
+`DialogueInfoBar`统一绘制NPC与商人状态栏，使用同一套深色边框、青色高光、分隔线、文字缩放和省略号收窄规则。每条状态栏预留10单位高度与3单位间隔。商人信息复用此渲染器，NPC各项仍保留关系和情绪图标。
 
 ## 验证
 

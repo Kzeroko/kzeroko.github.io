@@ -3,7 +3,7 @@ title: "Skill-tree Runtime"
 description: "The Puffish graph bridge, authoritative gates, learnable-power rewards and snapshot-based client screen."
 category: systems
 order: 70
-updated: 2026-09-24
+updated: 2026-09-30
 ---
 
 The skill-tree integration adds local unlock conditions and learnable-power rewards to Puffish Skills, then presents its state through a Modern UI screen. These are internal integration points under `internal.skills`, `util.skills`, `util.origins` and `client.screen.skilltree`; this subsystem does not expose an IsekaiExpansion public API facade.
@@ -127,7 +127,7 @@ The current handlers are `AegisDomainSkill`, `HeroicRushSkill`, `StarfallVolleyS
 
 The base class assigns `isekaiexpansion:learnable_active_<path>` and forwards `onTrigger` to `execute`. The matching Origins resources use type `isekaiorigins:triggerable_skill`, side `ACTIVE`, category `LEARNED` and that handler ID. Their `meta` carries `max_level = 3`, `cooldown = "0"` and `energy = "0"`. Cooldown and energy expressions must evaluate as non-negative integers through `SkillUpgradeMeta`; the resource does not use legacy top-level upgrade keys.
 
-Implement effects inside the registered handler and read rank/cost context through the existing trigger path. `SkillPowerUtil.tryTriggerSkill` checks activation policy, cooldown and energy; after an accepted execution it charges energy and sets the haste-adjusted cooldown. The empty skeleton still returns through that accepted path, so changing only the metadata could charge a player for an empty effect. Update the handler, generated metadata, validator assumptions and player documentation together.
+Implement effects inside the registered handler and read rank/cost context through the existing trigger path. `SkillPowerUtil.tryTriggerSkill` checks activation policy, cooldown and energy; after an accepted execution it charges energy and sets the haste-adjusted cooldown. A `DynamicCooldownSkill` can resolve its own cooldown and return false from `appliesAbilityHaste` for a fixed lock or a carried-over clock. The empty skeleton still returns through that accepted path, so changing only the metadata could charge a player for an empty effect. Update the handler, generated metadata, validator assumptions and player documentation together.
 
 The frame names used by the generator match the shipped `circle_rank_1`, `circle_rank_2`, `circle_rank_3`, `hexagon_rank_2` and `hexagon_rank_3` texture families, with corresponding dark variants. Adding a reward or icon must pass asset and translation validation before publishing the regenerated graph.
 

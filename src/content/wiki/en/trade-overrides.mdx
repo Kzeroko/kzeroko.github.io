@@ -162,6 +162,8 @@ Integers must be exact integers; numeric strings and fractions are rejected. Mod
 
 Money stacks require `numismatic-overhaul` and its bronze, silver, gold and money-bag items. Silver is worth 100 and gold 10000 bronze units. Money costs occupy the first slot and force initial demand and price multiplier to zero. These values describe IsekaiExpansion's currency adapter.
 
+Exchange valuables are reserved for the separate [gold exchange](/en/wiki/trading/). Any cost or result containing a registered exchange valuable or `LuxuryVal` NBT is unavailable, including item-array candidates and NPC catalogues. Creation and REI previews apply the same rule. The catalogue generator derives its valuable IDs from the item registrations and the validator rejects them in either direction.
+
 ## Reloading
 
 Files load on the server at startup and on `/reload`. A successful update advances the catalogue revision. Merchants rebuild on their next offer lookup when the definition, revision or stock rotation changes. Seeds derive from merchant UUID, profession, catalogue tier, offer ID and saved stock rotation; reopening the merchant screen does not reroll offers.
@@ -171,6 +173,8 @@ Generation includes all tiers 1–5 on the first visit. Rebuilding matches old o
 A villager restock grants one stored refresh chance, capped at one. NPCs replenish on the next elapsed server day and gain the same refresh chance; first contact does not grant one. The dialogue service spends it to rotate the current selection. Weighted catalogues keep guaranteed offers and prefer non-guaranteed IDs absent from the previous selection; when there are too few unseen candidates, repeats fill the remaining slots. The prior selection and rotation seed survive entity saves. `all` catalogues still include every eligible offer. See [Trading](/en/wiki/trading/) for bargaining and filters.
 
 REI previews read the bundled catalogue, not the server's reloaded overrides. They show available candidates after mod conditions, using minimum counts for ranged stacks; they do not represent a particular villager's weighted selection, type or dimension. Verify data-pack edits with a live merchant.
+
+The bundled catalogue generator and validator exclude Donner, Schlag, bounty contracts and bounty boards, as well as developer tools, test items, internal icons and world-authoring anchors or structure blocks. These items must not become shop stock. The checks cover every item candidate, including NPC catalogues.
 
 ## Related
 

@@ -3,16 +3,22 @@ title: "声望运行时"
 description: "服务端事件钩子、持久化归属、关系覆盖与报告快照。"
 category: systems
 order: 20
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 
-声望属于 `internal.reputation` 下的服务端内部系统，目前没有公开的 `ReputationAPI`。它组合实体归属、关系覆盖、事件计分及报告投影；玩家可见数值见[声望与阵营](/zh-cn/wiki/reputation/)。
+声望属于 `internal.reputation` 下的服务端内部系统。公开的 `ReputationAPI` 只提供阵营名称和身份，声望值与关系仍是内部实现。它组合实体归属、关系覆盖、事件计分及报告投影；玩家可见数值见[声望与阵营](/zh-cn/wiki/reputation/)。
 
 ## 它做什么
 
-`FactionContextResolver.entityFactions` 综合 `ReputationFactionProvider`、`BaseNpcFactionBridge` 与匹配的数据规则。地点归属是独立操作：城市来自 `CityAPI.getCitiesAt`；村庄结构贡献全局村庄阵营及以起始区块区分的本地村庄阵营。实体不会自动继承当前位置的归属。
+`FactionContextResolver` 解析两个范围。`entityFactions` 是声望范围：`ReputationFactionProvider`、`BaseNpcFactionBridge` 与匹配的身份规则，事件计分和目击者判定都用它。`targetingFactions` 是关系范围：声望范围再加上亲缘规则、玩家的 `FactionMembershipPower` 阵营以及隐式怪物阵营。玩家的关系范围只包含其阵营归属。地点归属是独立操作：城市来自 `CityAPI.getCitiesAt`；村庄结构贡献全局村庄阵营及以起始区块区分的本地村庄阵营。实体不会自动继承当前位置的归属。
 
-`targetingFactions` 仅为没有提供者、基础 NPC 身份或匹配规则的实体补充隐式怪物阵营。`FactionTargetingService` 区分 HOSTILE、NON_HOSTILE 与 UNSPECIFIED。普通玩家及缺少阵营集合时为 UNSPECIFIED；身份为 null 时为 NON_HOSTILE。主动寻找 NPC 目标要求明确敌对，而通用选敌否决仅拒绝 NON_HOSTILE。
+`targetingFactions` 仅为没有提供者、基础 NPC 身份或匹配身份规则的怪物实体补充隐式怪物阵营；亲缘规则不会取消它。`ReputationEntityFactionRegistry` 按实体类型缓存通过 ID、标签和生成类别匹配到的规则，每个实体只重新检查生物类别规则；规则或标签重载时清空缓存。
+
+`FactionTargetingService` 区分 HOSTILE、NON_HOSTILE 与 UNSPECIFIED。敌对关系得到 HOSTILE。友好关系得到 NON_HOSTILE，除非目标是来源实体当前的攻击者玩家，此时得到 UNSPECIFIED。中立关系或任一方阵营集合为空时得到 UNSPECIFIED；身份为 null 或双方相同时得到 NON_HOSTILE。通用选敌否决仅拒绝 NON_HOSTILE。`spares` 针对不经过目标选择的伤害报告 NON_HOSTILE：河豚的刺和远古守卫者的诅咒会查询它。
+
+`serverTickMobTargeting` 不会重新判断已建立的目标，这件事由同一 tick 更早执行的 `EntityUtil.clearInvalidMobTarget` 负责。没有目标的生物每 20 tick（1 秒）搜寻一次，按实体 ID 错开，范围是钳制在 8–48 格之间的跟随范围。默认敌对的生物寻找自己明确敌对的自定义 NPC。之后，未被驯服、也未被玩家骑乘的生物会寻找 `FactionRelationRegistry.pursuedFactions` 从主动规则中给出的阵营，玩家按其被感知的变身身份判断。追杀索引只用来缩小候选范围；获取目标仍要求 HOSTILE、`canTarget`、可察觉且可见。获取目标会写入 `MobEntity.setTarget` 和原版攻击目标记忆，所以主动规则的追杀方应当选用会读取它们的生物。Saints Dragons 把巨龙的目标保存在自己的大脑记忆里，下一次大脑 tick 就会清掉外部设置的目标，这也是内置灾厄与巨龙世仇不设为双向的原因。
+
+`FactionSolidarityService` 响应 `ICLivingEntityEvents.ON_APPLY_DAMAGE_END` 和死亡处理。它在受害者周围收集与其声望范围阵营有交集的 `MobEntity` 候选，再保留与受害者关系友好、并通过 `FactionWitnessFinder.witnessesIncident` 的目击者，按距离由近到远，至多 8 名。每名目击者通过 `setAttacker` 记下攻击者，原版复仇目标及其群体复仇、NPC 威胁传感器和由大脑驱动的种类都会读取它；靠目标 AI 战斗（即拥有攻击伤害属性）且空闲的目击者还会被 `EntityUtil.setMobTarget` 直接设为目标。与目击者友好的非玩家攻击者会被跳过。受伤时召集 16 格内空闲的目击者，每名受害者每 40 tick 至多一次，用弱引用表记录；被杀时召集 24 格内尚未以凶手为目标的目击者。已驯服的目击者，以及创造或旁观模式的攻击者都会被忽略。
 
 ## 运行时模型
 
@@ -67,6 +73,19 @@ updated: 2026-09-18
 
 数据包最多发送 512 行。报告请求包及服务层成功修改都会重新构建报告；客户端在自身线程应用收到的快照。这是展示快照，不是客户端权威声望存储。
 
+### 命名门面
+
+`api.reputation.ReputationAPI` 与仅限客户端的 `api.client.ReputationClientAPI` 让其他模组用声望簿里的名称和徽记标注地点。它们只读取命名规则：不会注册阵营、不改变声望，也不碰存档状态。IsekaiTweaks 的地图集就是通过它们给村庄图钉命名并绘制阵营徽记。
+
+| 签名 | 端 | 返回 |
+| --- | --- | --- |
+| `ReputationAPI.settlementFactionId(RegistryKey<World>, ChunkPos)` | 双端 | 在该区块起始的村庄所获得的阵营 ID：`minecraft:village/<dimension>/structure/<x>/<z>`，坐标取起始区块。 |
+| `ReputationAPI.settlementName(RegistryKey<World>, ChunkPos)` | 双端 | 聚落地名，纯字符串，由阵营 ID 经固定的 FNV-1a 哈希得出。所有玩家、所有会话、两端看到的都是同一个名字。 |
+| `ReputationAPI.factionName(String)` | 双端 | 声望簿为任意阵营 ID 显示的 `Text`。 |
+| `ReputationClientAPI.factionIcon(String)` | 客户端 | 声望簿为该阵营 ID 绘制的 48 × 48 徽记贴图，按 ID 前缀选择。无法识别的 ID 使用村民徽记。 |
+
+传入结构的起始区块，而不是玩家所在的区块；换成别的区块会得到毫不相干的 ID。聚落名称由有限片段组合，不同村庄可能重名，需要持久保存的数据请以阵营 ID 为键。
+
 ## 扩展方式
 
 内部剧情集成可通过服务设置运行时关系：
@@ -83,6 +102,8 @@ void changeAlliance(MinecraftServer server) {
 ## 验证
 
 分别检查玩家放置及生成的容器、双箱两侧、物品数量减少与物品替换。再使用视线被挡、睡眠、失明及没有目击者的情况重复检查。确认冷却按受害者或容器及维度区分。
+
+检查带阵营归属能力的玩家会被友好生物放过，伤害其中一只后它会还手，直到它对攻击者的记忆过期；再确认中立的一对生物仍按自己的AI互相战斗。把主动规则的双方刷在彼此天然索敌范围之外，再分别在一方被驯服或被骑乘、以及玩家穿着被追杀形态时重复。重载标签和规则，确认匹配结果跟随新数据。
 
 将声望设在 −100 两侧，比较同一事件中各阵营的面相修正。保存重启及重载数据，区分持久化状态与规则默认值。设置再清除运行时关系，确认回退。在不同位置与维度请求报告，确认同名显示记录仍保留不同阵营 ID。
 

@@ -3,16 +3,22 @@ title: "Reputation runtime"
 description: "Server incident hooks, persisted ownership, relation overrides and report snapshots."
 category: systems
 order: 20
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 
-Reputation is an internal server subsystem under `internal.reputation`, not a public `ReputationAPI`. It combines entity affiliation, relation overrides, incident accounting and report projection; [Reputation](/en/wiki/reputation/) documents player-visible numbers.
+Reputation is an internal server subsystem under `internal.reputation`. The public `ReputationAPI` exposes faction names and identities only; standing and relations stay internal. It combines entity affiliation, relation overrides, incident accounting and report projection; [Reputation](/en/wiki/reputation/) documents player-visible numbers.
 
 ## What it does
 
-`FactionContextResolver.entityFactions` combines `ReputationFactionProvider`, `BaseNpcFactionBridge` and matching data rules. Location membership is a separate operation: cities come from `CityAPI.getCitiesAt`; village structures add the general and start-chunk-specific village factions. Entity affiliation does not automatically inherit current location.
+`FactionContextResolver` resolves two scopes. `entityFactions` is the standing scope: `ReputationFactionProvider`, `BaseNpcFactionBridge` and matching identity rules. It is what incidents charge and witnesses share. `targetingFactions` is the relation scope: the standing scope plus affinity rules, a player's `FactionMembershipPower` factions and the implicit monster side. A player's relation scope is their memberships alone. Location membership is a separate operation: cities come from `CityAPI.getCitiesAt`; village structures add the general and start-chunk-specific village factions. Entity affiliation does not automatically inherit current location.
 
-`targetingFactions` adds an implicit monster side only for entities without a provider, base-NPC identity or matched rule. `FactionTargetingService` distinguishes HOSTILE, NON_HOSTILE and UNSPECIFIED. Ordinary players and missing faction sets yield UNSPECIFIED; null identities yield NON_HOSTILE. Proactive NPC acquisition requires positive hostility, while the general targeting veto only rejects NON_HOSTILE.
+`targetingFactions` adds an implicit monster side only for monster entities without a provider, base-NPC identity or matching identity rule; affinity rules do not suppress it. `ReputationEntityFactionRegistry` resolves the rules an entity type matches by ID, tag and spawn group once per type, re-checks only group rules per entity, and clears that cache when rules or tags reload.
+
+`FactionTargetingService` distinguishes HOSTILE, NON_HOSTILE and UNSPECIFIED. A hostile relation yields HOSTILE. A friendly relation yields NON_HOSTILE unless the target is a player who is the source's current attacker, which yields UNSPECIFIED. A neutral relation and an empty faction set on either side yield UNSPECIFIED; null or identical identities yield NON_HOSTILE. The general targeting veto only rejects NON_HOSTILE. `spares` reports NON_HOSTILE for harm that is not a target choice: the pufferfish sting and the elder guardian's curse consult it.
+
+`serverTickMobTargeting` never re-judges an established target; `EntityUtil.clearInvalidMobTarget` does that earlier in the same tick. A free mob scans every 20 ticks (1 second), staggered by entity ID, within its follow range clamped to 8–48 blocks. A default-hostile mob looks for custom NPCs it is positively hostile to. Any mob that is not tamed or player-ridden then looks for the factions `FactionRelationRegistry.pursuedFactions` returns from proactive rules, judging a player by their perceived morph identity. The pursuit index only narrows candidates; acquisition still requires HOSTILE, `canTarget`, detection and sight. Acquisition writes `MobEntity.setTarget` and the vanilla attack-target memory, so point a proactive rule's pursuing side at mobs whose AI reads them. Saints Dragons keeps a dragon's target in its own brain memory and clears an outside target on its next brain tick, which is why the bundled raider and dragon feud is not bidirectional.
+
+`FactionSolidarityService` answers `ICLivingEntityEvents.ON_APPLY_DAMAGE_END` and the death handler. It collects `MobEntity` candidates around the victim that share one of its standing-scope factions, then keeps those whose relation to the victim is friendly and that pass `FactionWitnessFinder.witnessesIncident`, nearest first, up to 8. Each witness receives the attacker through `setAttacker`, which vanilla revenge goals and their group revenge, the NPC threat sensor and brain-driven species all read; an idle witness that fights through goals, meaning it has an attack damage attribute, also gets `EntityUtil.setMobTarget`. A non-player attacker the witness is friendly with is skipped. Harm rallies idle witnesses within 16 blocks once per 40 ticks per victim, tracked in a weak map; a kill rallies witnesses within 24 blocks that are not already targeting the killer. Tamed witnesses and creative or spectator attackers are ignored.
 
 ## Runtime model
 
@@ -67,6 +73,19 @@ Use mutation and query entry points on the server thread with a loaded server. I
 
 The packet sends at most 512 rows. The report request packet and successful service mutations rebuild the report; the client applies the received snapshot on its thread. This is a presentation snapshot, not a client-authoritative reputation store.
 
+### Naming facade
+
+`api.reputation.ReputationAPI` and the client-only `api.client.ReputationClientAPI` let other mods label places with the names and emblems the ledger uses. They read naming rules only: nothing registers a faction, changes standing or touches saved state. The IsekaiTweaks atlas names village pins and draws their faction badge through them.
+
+| Signature | Side | Returns |
+| --- | --- | --- |
+| `ReputationAPI.settlementFactionId(RegistryKey<World>, ChunkPos)` | Either | The faction ID a village starting in that chunk receives: `minecraft:village/<dimension>/structure/<x>/<z>`, using the start chunk's coordinates. |
+| `ReputationAPI.settlementName(RegistryKey<World>, ChunkPos)` | Either | The settlement's place name as a plain string, hashed from the faction ID with a fixed FNV-1a. Every player, session and side sees the same name. |
+| `ReputationAPI.factionName(String)` | Either | The display `Text` the ledger gives any faction ID. |
+| `ReputationClientAPI.factionIcon(String)` | Client | The 48 × 48 emblem texture the ledger draws for that faction ID, chosen by ID prefix. An unrecognised ID gets the villager emblem. |
+
+Pass the structure's start chunk, not the chunk a player stands in; any other chunk yields an unrelated ID. Settlement names are finite combinations and can repeat across villages, so key anything persistent on the faction ID.
+
 ## Extending it
 
 For an internal story integration, set the runtime relationship through the service:
@@ -83,6 +102,8 @@ Use `clearRuntimeRelation(server, sourceId, targetId, true)` to remove both dire
 ## Verifying
 
 Check player-placed and generated containers, both halves of a double chest, stack reduction and item replacement. Repeat with an obstructed, sleeping and blinded witness, then with no witness. Confirm cooldown separation by victim/container and dimension.
+
+Check that a player with a membership power is spared by friendly mobs, that hurting one lets it retaliate until its attacker memory expires, and that a neutral pair still fights under its own AI. Spawn both sides of a proactive rule outside each other's natural targeting, then repeat with one side tamed or ridden, and with a player wearing a pursued form. Reload tags and rules and confirm matching follows the new data.
 
 Set standing on each side of −100 and compare the countenance choices across factions in the same event. Save/restart and reload data to distinguish persistence from rule defaults. Set then clear a runtime relation and confirm its fallback. Request the report from different positions and dimensions, and confirm that duplicate display names still retain distinct faction IDs.
 

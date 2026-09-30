@@ -140,6 +140,8 @@ NPC移动动画由异界扩展的`NpcAnimationController`和共享Gecko套件负
 
 玩家渲染器保留原版模型和附加层流程。`PlayerEntityRendererMixin` 在姿态计算后隐藏原版身体几何体，并添加 `HumanoidPlayerFeature`；骨架接收当前双足模型姿态。`HumanoidPlayerPoseBridge.restoreBindPose` 在形体变换前恢复初始偏移、旋转和缩放，避免变换逐帧累积。现有盔甲跟随外层身高缩放，但此路径不会按每个肢体滑块重塑盔甲。
 
+对于Player Animator，皮肤替换限定在玩家模型的原生绘制范围内。`HumanoidFirstPersonPartMixin`在每只手臂的`ModelPart.render`调用处替换几何，此时外层模型已应用身体弯曲。该范围内不再绘制原版皮肤袖层。完整模型遍历仍然继续，作用域在`finally`中恢复；护甲与手持物随后进入原生特征层阶段。Punchy和原版手部绘制继续使用已有手臂入口。
+
 第一人称渲染接收调用者已计算姿态的手臂，并应用 `animatedArm.rotate`；允许显示在手臂上的部件层跟随身体姿态。运行时渲染失败会在当前客户端进程中禁用 `HumanoidFirstPersonArmRenderer`。玩家附加层则在失败后单独禁用自身实例。应检查日志中的异常；这两个类都不会在资源重载时清除禁用标志。
 
 `HumanoidItemAnchor` 只作用于已启用人形身体的玩家。它读取 `right_arm` 到 `main_item`、`left_arm` 到 `off_item` 的轴心差，应用当前手臂姿态，以手臂粗细和长度缩放定位偏移，再抵消局部缩放并设置物品朝向。它不读取定位骨骼旋转；整体身高已由外层渲染变换负责。

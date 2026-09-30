@@ -1,0 +1,88 @@
+---
+title: "World spawn"
+description: "How a new world picks a dry, level spawn near settlements and away from hostile structures, and where arriving players land."
+category: world
+order: 177
+updated: 2026-09-30
+tags: ["spawn", "world creation", "villages"]
+---
+
+A new Overworld chooses its own spawn instead of taking the first land vanilla finds. It searches up to 3072 blocks from the world centre for dry, fairly level ground on a real landmass, favours a village within walking distance and keeps away from hostile structures. Players who arrive at the world spawn then land on a safe block rather than a random one.
+
+## What a spawn must have
+
+These are the default rules. Every number here is a setting; see [World spawn configuration](/en/wiki/world-spawn-configuration/).
+
+| Rule | Default |
+| --- | --- |
+| Search area | Up to `3072` blocks from `0, 0`, sampled every `48` blocks |
+| Ground height | `2–64` blocks above sea level; ground more than `40` blocks up scores lower |
+| Relief | At most `9` blocks of height difference within `10` blocks |
+| Water | None at the sample points `10` and `24` blocks out; water sampled within `32` blocks lowers the score, ocean counts twice |
+| Landmass | At least `0.85` of the land samples at `96` and `192` blocks must be dry land |
+| Distance | Full score within `768` blocks of the centre, half score `768` blocks further out |
+| Village | A village `64–512` blocks away raises the score by up to `35%` |
+| Hostile structure | A pillager outpost, woodland mansion, ancient city, dragon roost, boss arena or similar within `160` blocks leaves `10%` of the score |
+| Stand checks | At most `12` of the best candidates are generated to look for a safe block |
+
+Ocean, river, mushroom fields, Deep Dark and the three peak biomes are never chosen. Plains, meadows and the Great Plains score highest; deserts, jungles, swamps, badlands and snowy biomes score lower. The World Tree, Halo Crown, Sentinel Isles, Verdant Knives and every exotic terrain family are excluded.
+
+## Choosing the spawn
+
+The search runs once, when the world is created, and only in the Overworld. It works in three passes.
+
+<Steps>
+
+1. **Survey the land.** Columns on a jittered grid are scored in widening square rings around the centre, straight from the terrain generator, without generating a single chunk. Each column is turned away by the first rule it fails. The survey stops once no farther ring could beat what it already has, and stops widening after `24000` columns.
+
+2. **Weigh villages and threats.** The best `32` columns are checked against where structures will generate, again without generating chunks. A village nearby raises a column; a hostile structure nearby sinks it.
+
+3. **Find a stand.** Starting from the best column, the area within `12` blocks is generated and searched for the most comfortable block. The first column with one becomes the spawn.
+
+</Steps>
+
+### What counts as a safe block
+
+A stand is the highest ground in its column that is not leaves, with a full top, no fluid underneath for two blocks and two open blocks above. It must also be somewhere a mob could walk: no fire, lava, water edge or damaging block beside it. Ground inside a protected landmark footprint is never used. Among the safe blocks, the spawn prefers level neighbours, open sky, dirt-type ground and the middle of the area.
+
+When a village was found, the world spawn faces towards it. A bonus chest, if you asked for one, is placed at the chosen spawn.
+
+### When nothing fits
+
+If no column meets the rules, or none of the checked candidates has a safe block, the server log records why and the world uses vanilla spawn selection. The same happens when the settings are invalid, when spawn selection is turned off, and when the Overworld generator has no terrain to survey, such as a superflat world. Debug worlds always use vanilla selection.
+
+## Arriving at the spawn
+
+A player joining for the first time, or respawning without a bed or respawn anchor, lands on a safe block inside the `spawnRadius` game rule around the world spawn. Every column in that square is tried once, in random order, and the first safe block wins. If there is none, the search widens to `24` blocks around the world spawn. If that also fails, vanilla placement takes over.
+
+- **Beds and respawn anchors** are untouched. Only arrivals without one are placed.
+- **Adventure mode as the world's game mode** keeps vanilla placement.
+- **Other dimensions** keep vanilla placement.
+
+## Checking a spawn
+
+Both commands need permission level `2` and work in the Overworld whichever dimension you are in. `/ise` is the short form of `/isekaiexpansion`.
+
+| Command | Result |
+| --- | --- |
+| `/ise spawn survey` | Runs the survey and village pass without generating chunks. Prints the number of columns surveyed, the best `5` candidates with their score and biome, and how many columns each rule turned away. |
+| `/ise spawn relocate` | Runs the full search, generating chunks as needed, and moves the world spawn to the result. If nothing fits, it reports why and leaves the spawn where it is. |
+
+Each candidate's coordinates are clickable and suggest a teleport. A candidate marked as near a settlement found a village in range; one marked as near a hostile structure found a threat. The rejection counts name the rule: outside the border, water, volcanic, elevation, terrain, biome, shoreline, relief or landmass.
+
+<Callout type="caution" title="Relocating pauses the server">
+`relocate` generates the area around up to `12` candidates on the server thread. On a live server, expect a pause while those chunks generate.
+</Callout>
+
+## Other mods and settings
+
+| Interaction | Behaviour |
+| --- | --- |
+| Biome Spawn Point, Village Spawn Point | Both replace the world spawn after this one has chosen it. The server log warns at startup when either is installed; remove them to use these rules. |
+| Terrain families | Scored by family ID. Great Plains score `1.2`, Luminous Grove and Starlit Glade `0.6` and Amber Basin `0.3`. The World Tree, Halo Crown, Sentinel Isles, Verdant Knives and the exotic families are excluded. |
+| Worlds without the pack's terrain generator | Surveyed through the vanilla noise generator instead. Terrain family weights then have no effect. |
+| Existing worlds | Keep their spawn. Use `/ise spawn relocate` to run the search on them. |
+
+## Where the settings live
+
+All rules are in the `spawn` section of `config/isekaiexpansion.json`, owned by the server. Every option, its range and what an invalid value does are in [World spawn configuration](/en/wiki/world-spawn-configuration/). The terrain families it weighs are described in [Terrain and landmarks](/en/wiki/terrain/).

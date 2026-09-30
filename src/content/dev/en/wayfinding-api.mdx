@@ -1,18 +1,18 @@
 ---
 title: "Wayfinding API"
-description: "Server-thread destination searches, work limits, result handling, dialogue integration and compass state."
+description: "Server-thread destination searches, structure surveys, work limits, result handling, dialogue integration and compass state."
 category: api
 order: 130
 updated: 2026-09-30
 ---
 
-`WayfindingAPI` searches the current dimension for a biome, terrain family or structure without owning the caller's interaction. Callbacks return a bounded search result; callers must still validate their player, world and active interaction before using it.
+`WayfindingAPI` searches the current dimension for a biome, terrain family or structure without owning the caller's interaction. Callbacks return a bounded search result; callers must still validate their player, world and active interaction before using it. `survey` finds the nearest generated starts of a set of structures, with their bounds.
 
 ## Entry point
 
-The facade is `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`. Its public records are `LocateTarget`, `LocateRequest` and `LocateResult` in the same package; implementations live under `internal.wayfinding` and `world.terrain.runtime`.
+The facade is `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`. Its public records are `LocateTarget`, `LocateRequest`, `LocateResult`, `SurveyRequest` and `SurveyResult` in the same package; implementations live under `internal.wayfinding` and `world.terrain.runtime`.
 
-Use the logical server thread with a live `ServerWorld`. `locate` and `cancel` enforce this and throw `IllegalStateException` off-thread; the lazily populated catalogue has no thread guard but is backed by unsynchronised maps, so the same requirement applies. No entry point works before a world exists.
+Use the logical server thread with a live `ServerWorld`. `locate`, `cancel`, `survey` and `cancelSurvey` enforce this and throw `IllegalStateException` off-thread; the lazily populated catalogue has no thread guard but is backed by unsynchronised maps, so the same requirement applies. No entry point works before a world exists.
 
 ## Common tasks
 
@@ -48,6 +48,24 @@ static void cancelSearch(ServerPlayerEntity player) {
 
 These use `java.util.List` and Minecraft's `ServerWorld`/`ServerPlayerEntity`. Cancellation is keyed by owner UUID, not dimension; the supplied world provides the server-thread check. Cancelling an absent owner is a no-op.
 
+### Survey the nearest villages
+
+```java
+static void nearestVillages(ServerPlayerEntity player) {
+    var world = player.getServerWorld();
+    var request = new SurveyRequest(List.of("#minecraft:village"),
+            player.getBlockPos(), 2048, 5);
+    WayfindingAPI.survey(world, player.getUuid(), request, result -> {
+        if (world.getServer().getPlayerManager().getPlayer(player.getUuid()) != player) return;
+        for (var found : result.structures())
+            player.sendMessage(Text.literal(found.structure() + " at "
+                    + found.center().toShortString()), false);
+    });
+}
+```
+
+This uses `SurveyRequest` from the API package plus `java.util.List` and Minecraft's `Text`. Selectors are structure IDs or `#tags`. Each result carries the structure ID, start chunk, whole bounding box and box centre, so a caller can mark the actual footprint instead of a locate point. `WayfindingAPI.cancelSurvey(world, owner)` ends an owner's survey with `CANCELLED`.
+
 ## Reference
 
 ### Facade and records
@@ -57,10 +75,15 @@ These use `java.util.List` and Minecraft's `ServerWorld`/`ServerPlayerEntity`. C
 | `destinations(ServerWorld, LocateTarget.Kind)` | Immutable, distinct list sorted by target ID; lazily cached by world identity and kind. |
 | `locate(ServerWorld, UUID, LocateRequest, Consumer<LocateResult>)` | Returns void; admits a job or delivers an immediate terminal result. |
 | `cancel(ServerWorld, UUID)` | Removes that owner's job, cancels terrain future if present, delivers `CANCELLED`. |
+| `survey(ServerWorld, UUID, SurveyRequest, Consumer<SurveyResult>)` | Returns void; admits a survey or delivers an immediate terminal result. |
+| `cancelSurvey(ServerWorld, UUID)` | Removes that owner's survey and delivers `CANCELLED`; an absent owner is a no-op. |
 | `new LocateTarget(Kind, Identifier)` | Both fields nonnull; kinds are `TERRAIN`, `BIOME`, `STRUCTURE`. |
 | `LocateTarget.name()` | Translatable label with fallback, detailed below. |
 | `new LocateRequest(target, origin, minimumDistance, radius)` | Nonnull target and immutable origin copy; horizontal block distances require 128 ≤ minimumDistance < radius ≤ 64000. |
 | `new LocateResult(status, target, dimension, position)` | Position copied immutable; `FOUND` must have a position and every other status must not. Constructor checks that invariant, not world safety or target registration. |
+| `new SurveyRequest(structures, origin, radius, limit)` | Nonempty selector list copied immutable, each a parseable ID or `#tag`; immutable origin; 128 ≤ radius ≤ 16384 horizontal blocks; 1 ≤ limit ≤ 32. Registration is not checked here. |
+| `new SurveyResult(status, dimension, structures)` | Starts copied immutable. The service supplies them nearest first, and only for `COMPLETE` and `PARTIAL`. |
+| `SurveyResult.Found(structure, start, bounds, center, distance)` | Structure ID, start `ChunkPos`, whole `BlockBox`, box centre and horizontal distance from the origin to the placement's locate position. |
 
 The request's origin Y is one input to biome sampling; it is not the only sampled height. Radius is horizontal and inclusive at candidate checks. Search order and coarse sampling do not guarantee the closest possible destination.
 
@@ -109,11 +132,38 @@ Structure search supports concentric rings and random-spread placements. It dedu
 
 Terrain preparation captures the engine, sampler and border on the server thread, then submits the sampling task. Tree-related families inspect their shared region; plains inspect planned regions. Other families first inspect districts where the requested family has first priority in the deterministic weighted ordering, avoiding unrelated geometry construction. If that pass finds nothing, the search falls back to the full district enumeration with normal competition. This changes search order, not generation ownership, and does not guarantee the nearest result. Sampling uses 64-block rings, coordinates aligned to 4 blocks, family/biome confirmation and the requested horizontal bounds. Region samples also require weight greater than 0.6. Returned terrain positions use Y = 0. They are references for direction/compass use, not verified landing positions. Interruption is checked during enumeration/confirmation.
 
+### Structure surveys
+
+A survey answers where the nearest generated starts of some structures are, with their real bounds. It shares the structure-prediction rules with `locate` but runs in its own service, so one owner can hold a locate job and a survey at the same time.
+
+| Status | Meaning |
+| --- | --- |
+| `COMPLETE` | The list holds the nearest `limit` starts in range, or every start in range when there are fewer. |
+| `PARTIAL` | The deadline or confirmation budget ran out first. The list holds what was confirmed, nearest first; nearer unconfirmed starts may exist. |
+| `UNAVAILABLE` | No selector resolved to a structure with a placement in this world. |
+| `BUSY` | The owner already has a survey, or 4 surveys are active. |
+| `CANCELLED` | `cancelSurvey`, successful data reload or server stop. |
+| `FAILED` | Preparation or a step threw; see the server log. |
+
+| Limit | Value and scope |
+| --- | --- |
+| Active surveys | At most 4 globally; at most 1 per owner UUID. Separate from the locate job limits. |
+| Shared tick budget | 3,000,000 nanoseconds (3 ms), with rotating survey order. |
+| Chunk requests | At most 3 in flight per survey. |
+| Confirmations | At most 96 candidate chunks per survey. |
+| Deadline | 120 real seconds; the survey then returns `PARTIAL` with what it has. |
+
+Selectors resolve against the live structure registry in the order given; unknown IDs and tags are skipped with a warning. Candidates come from random-spread cells and concentric-ring positions within the radius and world border; other placement types contribute none. Structures sharing a placement share its candidate chunks, and each chunk is claimed once. Candidates are tried nearest first by the horizontal distance of the placement's locate position, which is also the `distance` reported.
+
+A candidate must pass `shouldGenerate` and a structure presence check, which applies each structure's own site rules and reads saved chunk data when it exists. It is then confirmed by requesting its chunk to `STRUCTURE_STARTS` through vanilla's scheduler, re-requested each tick and never joined. The first structure of the group with a start that has children is recorded. No blocks are placed and the start is not marked explored. The survey finishes once `limit` starts are confirmed and no untested or in-flight candidate lies nearer than the farthest one kept.
+
 ## Threading and lifecycle
 
 `LocateService` advances jobs at `END_SERVER_TICK`. Completion runs on the server thread, including immediate `BUSY`/`UNAVAILABLE` and preparation failures. Normal job completion catches and logs callback exceptions; the initial already-busy/global-cap branch invokes the callback directly, so its exception propagates to the caller.
 
 Successful data reload and server stopping cancel current jobs with `CANCELLED`, interrupt terrain tasks, shut down the worker and clear the catalogue cache. Failed reload does not reset this service. There is no persistent job queue. Callers other than the built-in dialogue adapter must arrange their own disconnect or interaction cancellation. Keep completion handlers safe during shutdown and avoid starting replacement work from a reset callback.
+
+`SurveyService` also advances at `END_SERVER_TICK`, within its own budget. `BUSY`, `UNAVAILABLE` and preparation `FAILED` are delivered during the `survey` call. Completion exceptions are caught and logged, except on the `BUSY` branch, which calls the callback directly. Successful data reload and server stopping end every survey with `CANCELLED`.
 
 ### Villager adapter and compass writes
 

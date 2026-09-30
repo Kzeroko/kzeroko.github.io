@@ -63,7 +63,7 @@ int rank = TradingAPI.rapportRank(player, merchant);
 
 `TradePricing.resolve`读取身份势力、所在地势力与村民当前流言。流言乘4后限制在−1000…1000；有负值时取最差的一项，否则取最好的一项。村庄英雄只在声望非负时提供正值下限，每级100，最多500。势力转流言的桥接因此不会重复叠加。买价调整范围为−15%…+40%，收购价为−20%…+5%；使用防溢出的整数计算，取整到百分点，再对买价应用议价。货币从原始堆叠取值，非货币材料保留原版调整。每次目录只解析一份价格上下文，确认时重新解析并比较完整报价。
 
-`MerchantDialogueMetadata`同步阶段、交情、下一门槛、照拂次数/容量与买卖调价。`MerchantDialogueHud`通过Blabber共享的顶部空间预留接口绘制可换行的信息块，排在NPC状态栏之后。Blabber对象更新会刷新元数据。`DialogueAPI.lastSpeech(player)`在进入空白结束动作后保留最后的作者台词，商店据此维持唯一NPC的专属发言。
+`MerchantDialogueMetadata`同步阶段、交情、下一门槛、照拂次数/容量与买卖调价。`MerchantDialogueHud`复用NPC状态栏的`DialogueInfoBar`紧凑条形样式。两者分别通过Blabber预留顶部行，空间不足时用省略号收窄文字。Blabber对象更新会刷新元数据。`DialogueAPI.lastSpeech(player)`在进入空白结束动作后保留最后的作者台词，商店据此维持唯一NPC的专属发言。
 
 ### 持久实体字段
 

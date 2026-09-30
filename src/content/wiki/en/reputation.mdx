@@ -3,7 +3,7 @@ title: "Reputation and factions"
 description: "Standing, witnesses, protected containers, wanted factions and report bands."
 category: world
 order: 10
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 
 Each faction records your standing separately, from −1000 to +1000, with an initial value of 0. A faction considers you wanted at −100 or below; changes are evaluated against that faction's own standing.
@@ -41,7 +41,43 @@ Entity affiliations combine explicit assignments, NPC configuration and matching
 
 Relations resolve from persistent runtime overrides, then data-pack rules, then shared-faction friendly or otherwise neutral. Higher rule priority wins; equal-priority conflicts resolve hostile before friendly before neutral. These relations are separate from your numeric standing.
 
-For targeting only, a hostile or monster-category entity without an explicit provider, NPC configuration or matching faction rule receives `isekaiexpansion:side/monster`. Ordinary players have no automatic faction targeting veto. The fallback does not make every monster kill a reputation incident.
+For targeting only, a hostile or monster-category entity without an explicit provider, NPC configuration or matching identity rule receives `isekaiexpansion:side/monster`. The fallback does not make every monster kill a reputation incident.
+
+A relation steers who fights whom. A friendly relation stops a mob attacking you or another member, a hostile one lets it attack even where its own AI would not, and a neutral one leaves the choice to that AI. A proactive hostile relation also sends a mob after the other side on its own, once a second within its follow range. Tamed mobs and mounts you are riding never start such a hunt.
+
+You belong to no faction unless a power enrols you, so by default every fight with you is left to vanilla AI. A creature that is friendly to you still fights back: the friendship lapses for 100 ticks (5 seconds) after you last hurt it.
+
+### Allies avenge each other
+
+Members of the same authored faction stand together. When one is hurt or killed, nearby fighters that share one of its factions, are friendly with it and saw the attacker do it turn on that attacker, whether you or another mob struck the blow. Kill one illager in front of its patrol and the rest come for you.
+
+| Incident | Who answers | Limit |
+| --- | --- | --- |
+| Hurt | Idle fighters within 16 blocks | Once every 40 ticks (2 seconds) per victim |
+| Killed | Fighters within 24 blocks not already chasing the killer | Up to 8 per kill |
+
+A witness must see the attacker and have a clear line to the victim. A fighter is a mob that can deal melee damage, or a custom NPC, which then decides through its own combat AI. Tamed mobs stay with their owner. The implicit monster side and affinity factions never rally, so killing a skeleton does not turn endermen or zombified piglins against you, and sea creatures do not avenge one another. Allies do not turn on each other over a stray blow between them, but a player who attacks a faction's ally is treated as having provoked every witness, even one that was friendly.
+
+### Bundled factions
+
+| Faction | Members | Stands with | Hostile to |
+| --- | --- | --- | --- |
+| `isekaiexpansion:side/civilization` | Villagers, guards, iron golems, wandering traders and red merchants | Each other | Monsters, raiders, undead and demons |
+| `isekaiexpansion:side/raider` | Pillagers, vindicators, evokers, illusioners, ravagers, witches, vexes and the illagers of Illager Invasion and Takes a Pillage | Raiders only | Civilization and undead; hunts dragons |
+| `isekaiexpansion:side/undead` | Zombies, husks, drowned, zombie villagers, giants, skeletons, strays, wither skeletons, skeleton and zombie horses, phantoms, the wither and the Bosses of Mass Destruction lich | Undead only | Civilization and raiders |
+| `isekaiexpansion:side/piglin` | Piglins and piglin brutes | Piglins only | Civilization |
+| `isekaiexpansion:side/draconian_swarm` | The Saints Dragons latcher, whettled and winged | The swarm only | Civilization |
+| `isekaiexpansion:side/goblin` | Goblin Traders goblins | Each other | None |
+
+Raiders, undead, piglins and the swarm also carry `isekaiexpansion:side/monster`, which is how civilization knows to fight them. That side is neutral to itself: common monsters do not stand together, so a zombie never avenges a pillager or a creeper, and monsters that hit each other by accident may fight. Every other hostile mob counts as a monster for targeting only and has no community to rally. Third-party members apply only when their mod is installed.
+
+| Bundled relation | Who | Effect |
+| --- | --- | --- |
+| Sea kinship | Mermaid players and mermaid citizens, toward aquatic mobs and Myths of the Sea creatures | Friendly. Guardians, krakens and other sea creatures leave you alone, a pufferfish puffs up but does not sting you, and an elder guardian does not curse you with Mining Fatigue. |
+| Sea predation | Sea creatures toward each other | Neutral, so guardians still hunt squid and axolotls still hunt fish. |
+| Raider and dragon feud | Raiders toward dragons from Saints Dragons, Useless Reptile and Mythic Mounts | Hostile and proactive. Raiders attack dragons on sight and a dragon fights back through its own AI. Raiders treat you as a dragon while you wear a dragon form. |
+
+Mermaid kinship comes from Aquatic Kinship, alongside the origin's water abilities. The sea and dragon sides are affinities: hurting or killing those creatures never changes your standing. The Myths of the Sea and Saints Dragons rows apply only when those third-party mods are installed.
 
 ## Wanted factions and Fate Balance
 

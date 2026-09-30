@@ -12,7 +12,7 @@ Dialogue files define text, choices and actions; the NPC resolver chooses which 
 
 Use `data/<namespace>/blabber/blabber_dialogues/<path>.json`. The dialogue ID is `<namespace>:<path>`, without the registry folders or extension. Automatic NPC lookup builds IDs in `isekaiexpansion`; another namespace is usable through an explicit dialogue reference, not automatic path fallback.
 
-The pack pins Blabber `0.5.1-build34`. Its base dialogue dialect is dependency-owned; the contract below was checked against the local Blabber source checkout and the mod's shipped data. The upstream schema hint is not a validator for every local extension.
+The pack pins Blabber `0.5.1-build36`. Its base dialogue dialect is dependency-owned; the contract below was checked against the local Blabber source checkout and the mod's shipped data. The upstream schema hint is not a validator for every local extension.
 
 ### NPC lookup paths
 
@@ -119,6 +119,7 @@ Actions execute on the state entered by a choice, in list order, before that sta
 | `isekaiexpansion:reveal_energy` | required string `value` | Reveals the player's energy bar; string contents are ignored. |
 | `isekaiexpansion:reveal_rank` | required string `value` | Reveals the player's rank plate; string contents are ignored. |
 | `isekaiexpansion:open_npc_trade` | no payload | Opens trade only for a live conversation NPC within 4 blocks and a player allowed by the NPC merchant policy, inside the dialogue. |
+| `isekaiexpansion:exchange_valuables` | no payload | Opens inventory appraisal with the active tradable villager within 4 blocks. Shows the full selected stack and coin quote before confirmation; humanoid NPCs cannot use it. |
 | `isekaiexpansion:emote` | `emote`, optional `force` | Plays a body emote on the conversation NPC. |
 | `isekaiexpansion:emoji` | emoji playback fields | See the complete [emoji action fields](/en/wiki/emoji-data/). |
 
@@ -159,6 +160,8 @@ Test selection separately from parsing. A file with the wrong canonical event, n
 Dialogue templates belong to Blabber's synchronised data registry and reload with data packs. Start a fresh conversation after reloading to test new content; an existing session retains its captured state map. Resource/language reload handles translated text separately.
 
 Code-built parent menus and registered action codecs do not become new definitions merely by adding dialogue JSON. Use the [runtime extension reference](/en/dev/npc-dialogue/) for those surfaces.
+
+The speaker-name placeholder uses the label currently shown in the dialogue header, which may be a profession before the speaker is known. Write ordinary merchant introductions around their work. A unique character who introduces themselves should use their authored personal name in that line; the header's naming rules still apply.
 
 ## Related
 

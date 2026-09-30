@@ -3,7 +3,7 @@ title: "Naming API"
 description: "Immutable name catalogues, NPC context resolvers and translated player identities."
 category: api
 order: 115
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 `NamingAPI` delegates to the naming runtime for server-side selection and NPC assignment. `ClientNamingAPI` exposes the independent client catalogue used by the creator. See [Character names](/en/wiki/character-names/) for player behaviour and [Name pool data](/en/wiki/name-pools/) for the content schema.
@@ -79,7 +79,28 @@ Name styles are `FEMALE`, `MALE`, `UNISEX` and `ANY`. A null query style becomes
 
 Without a resolver, `BaseNpcEntity.isTrust(viewer)` is the sole reveal gate. Ordinary entities use their entity-type label. Evelina uses the Magic Caster role; other unique NPCs use Traveler. Third-party entities without a trust resolver retain their type label. Ownership, a name tag and friendly status do not bypass Trust.
 
-`DialogueNaming` registers the `isekaiexpansion:dialogue_name` session metadata as a `Text` payload through `writeText`/`readText`. It evaluates the current player and entity when either normal or parent dialogue opens. `DialogueNameMixin` makes the client session name accessor resolve this text locally, so both the speaker heading and `{name}` use it. The decision is a conversation-opening snapshot; reopening reevaluates trust. Entityless narrator sessions retain Blabber's speaker name. World nameplates, stored names and `{player}` are unaffected.
+`DialogueNaming` registers the `isekaiexpansion:dialogue_name` session metadata as a `Text` payload through `writeText`/`readText`. It evaluates the current player and entity when either normal or parent dialogue opens. `DialogueNameMixin` makes the client session name accessor resolve this text locally, so both the speaker heading and `{name}` use it. The decision is a conversation-opening snapshot; reopening reevaluates trust. Entityless narrator sessions retain Blabber's speaker name. World nameplates and stored names are unaffected. Player forms of address use the separate rule below.
+
+### Player forms of address
+
+`DialogueAddresses` is the internal server adapter. Before an eligible `BaseNpcEntity` or `VillagerEntity` starts a normal or parent dialogue, it opens `isekaiexpansion:address/introduction`. The normal NPC handler queues the interaction before recording talk counters or quest progress, retaining any selected menu route. Scripted dialogue starts retain their dialogue ID and speaker arguments.
+
+The introduction holds one continuation per player. Choosing a form saves the preference and consumes the continuation once. Closing, disconnecting, death, combat, changing worlds, leaving 8 blocks, a successful data reload or a 5-minute timeout discards it. The queue is never persisted.
+
+| Saved field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `IsekaiAddresses` | compound | absent | NPC-local map keyed by player UUID strings. |
+| UUID entry value | byte | absent | `1` full, `2` short, `3` adventurer. Invalid IDs, types and UUIDs are ignored. |
+
+No rendered player names are saved. `isekaiexpansion:address_name` carries the current name as `Text`; `isekaiexpansion:address_style` carries the byte choice. The client resolves the name in its language before taking a short form. `{address_full}` and `{address_short}` fill the introductory choices; `{player}` follows the remembered style in subsequent dialogue. Names with no whitespace or middle-dot separator remain complete. Non-NPC sessions keep the full player name.
+
+Verify different choices by two players, entity save/reload, renamed players and both languages. Cancel the introduction and reopen a first-meeting quest: its initial conversation must still run once after answering.
+
+### World nameplate buffers
+
+The base entity nameplate renderer uses `NameplateRenderBuffers`, an internal render-thread helper. Each text or decoration layer owns a distinct buffer for the duration of the label. Nested nameplates lease another set. The draw flushes before returning and recycles completed buffers without retaining layer keys across resource reloads. Text is kept out of entity-mesh buffers; renderer exceptions still propagate. This changes buffer ownership, not naming or visibility rules.
+
+Verify named villagers with ModernUI text, AcceleratedRendering and shaders enabled, including mixed-script names and overlapping labels. Headless checks cover interleaved formats, growth, nesting and reuse; the reported modpack crash still needs an in-game reproduction check.
 
 ### Configuration
 

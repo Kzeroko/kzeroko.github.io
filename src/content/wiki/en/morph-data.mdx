@@ -3,7 +3,7 @@ title: "Morph power and attribute data"
 description: "Morph power fields, skill metadata, form eligibility, attribute profiles and resource reload behaviour."
 category: data
 order: 115
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 Morph powers select a form and its actions; attribute profiles modify the wearer during chosen phases. This page defines the authored fields and reload behaviour, with runtime extension contracts linked separately.
@@ -76,20 +76,23 @@ For this example the modifier amount is `0.2 + min(0.1, dexterity × 0.002)`. Th
 | `secondary_ability` | identifier | required | Secondary slot execution, with the same override rules. `isekaiexpansion:none` explicitly rejects use. |
 | `skin_id` | identifier | absent | Optional dedicated texture selector. An explicit missing skin does not fall through to the default entity override texture. |
 | `transition_ticks` | int | 18 | Clamped to at least 4; used separately for entering and exiting. No upper clamp. |
+| `duration_ticks` | int | 0 | How long the settled form lasts, in ticks. `0` lasts until the player returns; negative values clamp to `0`. No upper clamp. |
 | `morph_able` | object | absent | Parsed as the shared policy below, but ignored by this morphing subtype. Use on regular triggerable/ultimate powers. |
 | `sound_id` | identifier | absent | Optional accepted-trigger sound; unresolved sound events are skipped. |
 | `animation_id` | identifier | absent | Optional player-animation resource requested after an accepted trigger; parsing does not validate the animation asset. |
 | `effek` | object | absent | Optional effect on accepted trigger; see nested fields below. |
 | `disabler` | object | absent | Optional temporary action restrictions on accepted trigger. |
 
-The morph power fixes its side to active; it has no authorable `side` field. Data-authored forms have unlimited settled duration; there is no `duration_ticks` field here. Timed forms are supplied by programmatic requests, including talismans.
+The morph power fixes its side to active; it has no authorable `side` field.
+
+A positive `duration_ticks` makes the form timed, the same way a talisman form is timed. The clock starts once the form finishes entering, so `1200` gives 1200 ticks (60 seconds) in the settled form and the transitions run outside it. When the time runs out the form returns on its own and the power's cooldown starts, as after a manual return. A player with no room to stand stays in the form until there is room, and is told so once. The morph panel's bar drains while a timed form runs, and the skill screen lists the duration.
 
 ### Level metadata
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `max_level` | int | required | 1–256, finite and integral. Numeric strings are rejected. |
-| `cooldown` | string series | required | Nonnegative integer ticks through 2147483647. The morph handler uses 0 on entry and the configured value on a successful return; ability haste adjusts the resulting cooldown. |
+| `cooldown` | string series | required | Nonnegative integer ticks through 2147483647. Entering a form does not use it: entry starts a fixed 60-tick (3-second) settle lock that ability haste does not shorten. A successful return, or a timed form running out, starts the configured value adjusted by ability haste. |
 | `energy` | string series | required | Nonnegative integer astral-energy cost through 2147483647. Charged only on accepted triggers, including an accepted return; creative bypasses payment. |
 | `<custom_key>` | string series | absent | Handler-defined values. At most 256 series, keys match `[a-z][a-z0-9_]*`, length at most 64; `max_level` is reserved. |
 
@@ -129,7 +132,7 @@ Integer lookups use the handler fallback for fractional or out-of-int-range valu
 | `disabler.move` | boolean | false | Temporarily block movement. |
 | `disabler.jump` | boolean | false | Temporarily block jumping. |
 
-For regular `isekaiorigins:triggerable_skill` and `isekaiorigins:ultimate_skill`, omitting `morph_able` permits only normal form. An empty object permits normal form and every active morph; an explicit `entity_types` list restricts active forms. Ordinary skills remain blocked during entry/exit regardless of that policy. The morphing subtype stays eligible so its owning skill can request a return, but other checks can still reject the request.
+For regular `isekaiorigins:triggerable_skill` and `isekaiorigins:ultimate_skill`, omitting `morph_able` permits only normal form. An empty object permits normal form and every active morph; an explicit `entity_types` list restricts active forms. Ordinary skills remain blocked during entry/exit regardless of that policy. The morphing subtype stays eligible so its owning skill can request a return, but other checks can still reject the request. A return pressed during the settle lock is refused like any power on cooldown, so the earliest return comes 60 ticks (3 seconds) after entry.
 
 Sound, animation, effect and action restrictions run after the execution accepts. For effect asset and builder details, see [Effekseer integration](/en/dev/effekseer-particles/).
 

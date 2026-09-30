@@ -3,7 +3,7 @@ title: "NPC locomotion"
 description: "Ground gait, navigation caches, obstacle flight, landing and swimming contracts for NPC controllers."
 category: systems
 order: 61
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 NPC movement combines a continuous ground-speed solver with a phase-based flight/swim controller. These are internal runtime classes under `internal.ai.travel`, not public API facades; use them when extending the mod's NPC implementation.
@@ -156,7 +156,7 @@ The base entity's swim visual has its own hysteresis:
 | Entry stability | `2` ticks; aquatic commands use `1`. |
 | Minimum visual hold | `30` ticks; continued contact renews it to at least `15`. |
 | Exit stability | `12` ticks after the minimum hold expires. |
-| Immediate exit | Capability lost, flying, riding, sleeping or dead. |
+| Immediate exit | Capability lost, flying, riding, sleeping, dead, or grounded with no submersion and water height below `0.12` blocks. |
 
 Water contact also samples the entity column at offsets `0.05`, `0.45`, `0.95`, and `-0.15` while already in swimming pose. Visual state controls `SWIMMING` versus `STANDING` pose. Water movement input is divided by the movement attribute with a floor of `1.0E-5`.
 

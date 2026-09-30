@@ -12,7 +12,7 @@ Dialogue objects let a server interaction temporarily replace ordinary choices w
 
 The server API, including `DialoguePanel`, belongs to Blabber: `io.github.ladysnake.blabber.api.DialogueAPI`, `DialogueScreenObject` and `DialogueObjectResult`. Client contracts live under `io.github.ladysnake.blabber.api.client`: `DialogueClientAPI`, `DialoguePresentation`, `PersistDialogueScreenObject`, `DialogueScreenContext` and `DialogueDrawList`.
 
-This checkout consumes Blabber `0.5.1-build34` and Isekai Core `0.4.0-build61`. The dependency contracts below were checked against the local Blabber source checkout, not established by comparing a compiled jar. Keep the consumed build aligned on client and server; these packets include interaction revisions and object tokens.
+This checkout consumes Blabber `0.5.1-build36` and Isekai Core `0.4.0-build61`. The dependency contracts below were checked against the local Blabber source checkout, not established by comparing a compiled jar. Keep the consumed build aligned on client and server; these packets include interaction revisions and object tokens.
 
 IsekaiExpansion installs `IsekaiDialoguePresentation` and registers `NpcFavorDialogueHud` as `isekaiexpansion:npc_status` during client setup. The dependency owns object state, selection and input; the host supplies catalogue surfaces, labels and tooltip controls.
 
@@ -86,6 +86,8 @@ The encoded check is the constructor's estimate, not an exact count of every wir
 `DialoguePanel` requires a `layout`, heading, confirmation and cancellation `Text`, a `searchable` flag, filter descriptors and continuation lines. Layout is `CONVERSATION`, `CATALOGUE` or `TRADE`. `conversation()` creates compact replies without a header or generic footer; `catalogue(heading, confirm, cancel, searchable)` creates an explicit selection list. `then(Text...)` replaces the continuation list, allowing at most 32 additional speech stages. Filters allow at most 16 descriptors; each has a key, label and copied item icon. An empty key means all categories.
 
 The first subtitle comes from the object's title; subsequent lines come from `continuation`. Confirm first reveals the current line, then advances one stage. Replies appear only after the final line is revealed. The blacksmith quotes price, work time and terms in separate stages. Wayfinding enables search for destinations and uses distinct headings and confirmation labels for kinds and compasses.
+
+A `CONVERSATION` object with one enabled `{EMPTY}` entry uses the normal floating continuation cue. Clicking the subtitle or pressing confirm reveals unfinished text, advances continuation pages, then submits that entry. An object with no entries remains a waiting panel. The completion callback decides whether to return to an existing parent or close.
 
 `DialogueScreenObject.Display` carries a copied item icon, detail text, category, copper price and enabled flag. Negative price omits the price constraint. Category `action` places the entry in a fixed service toolbar, outside catalogue filters. `TRADE` adds item category icons and inclusive minimum/maximum copper fields. Minecraft renders item models inside ModernUI surfaces; ModernUI owns layout, focus and input.
 
@@ -186,7 +188,7 @@ The client ignores packets for a different handler or an older interaction revis
 
 Both data and parent dialogue handlers use ModernUI's `MenuScreenFactory`. The controller captures an initial frame and updates it on end client tick, interactions and resource refresh. Persistent callbacks therefore run during those captures, not once per UI render frame. The UI consumes the latest snapshot and animates independently.
 
-An active object uses its prompt in the subtitle plate and advances a separate reveal clock while holding the ordinary line's clock. Ordinary line timing resets when the combined state key/text changes; changing only a revision does not restart an identical line. Reveal counts Unicode code points, with ordinary choices becoming ready 200 ms after completion. The captured speed is clamped to 1–100.
+An active object uses its prompt in the subtitle plate. When its speaker and prompt match the last spoken line, it carries that line's reveal progress through the handoff, including an intervening empty end state. It does not repeat the line in history. A different prompt starts its own reveal clock while holding the ordinary line's clock. Ordinary line timing resets when the combined state key/text changes; changing only a revision does not restart an identical line. Reveal counts Unicode code points, with ordinary choices becoming ready 200 ms after completion. The captured speed is clamped to 1–100.
 
 | Context | Controls |
 | --- | --- |
@@ -205,6 +207,8 @@ History is local to the fragment and hides ordinary/persistent visuals; it does 
 The host contributor draws only when session metadata identifies a base NPC. It renders favour/engagement, layered mood, personality and squad mode; follow slot numbering starts at 1. Favour progress clamps to 0–1, while Isekai Core supplies the maximum-favour predicate.
 
 Metadata keys and relationship semantics are documented in [NPC dialogue](/en/dev/npc-dialogue/) and [NPC emotion](/en/dev/npc-emotion/). The HUD compacts text to its available width using equalised caps and ellipses; if even the ellipsis cannot fit it emits empty text. Rendering does not mutate relationship state.
+
+`DialogueInfoBar` draws both the NPC and merchant status strips: the same dark frame, cyan highlight, separators, text scale and ellipsis compaction. Each strip reserves a 10-unit row with a 3-unit gap. Merchant values use this shared renderer; NPC segments retain their relationship and mood icons.
 
 ## Verifying
 

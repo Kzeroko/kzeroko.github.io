@@ -1,0 +1,135 @@
+---
+title: "Atelier structures"
+description: "Native piece placement, recoverable revisions, Great Plains landmarks and the in-game structure editor."
+category: systems
+order: 95
+updated: 2026-09-30
+---
+
+Atelier captures and places structures as bounded native NBT pieces. Editor jobs run one at a time. Bundled landmarks are generated independently by chunk workers before natural features and structures.
+
+## What it does
+
+Use `/ise dev atelier block` as a creative operator to obtain `isekaiexpansion:atelier_structure_block`. Place the editor outside the selected volume and open it. Its screen uses the existing developer editor framework and theme preferences.
+
+Select `BUNDLED`, `IMPORT` or `EXPORT`, enter the bundle ID and revision, then inspect it. Inspection fills the dimensions and terrain metadata and pins the manifest digest. Changing placement settings requires another inspection. Preview draws the world bounds; placement requires a matching inspected draft.
+
+Capture reads live blocks and typed block entities, including explicit air. Keep the selected area unchanged until capture completes. Capture uses world axes: rotation must be `0`. Actor entities are omitted; a supplied piece containing actors is rejected. Define NPCs and gameplay entities through their owning systems.
+
+### Exchange folders
+
+Paths are relative to Fabric's game directory:
+
+```text
+data/isekaiexpansion/atelier/exports/<namespace>/<id path>/<revision>/
+data/isekaiexpansion/atelier/imports/<namespace>/<id path>/<revision>/
+```
+
+Each revision contains `manifest.json` and its `pieces/` files. The manifest is written last. An incomplete capture cannot be imported. Revision names cannot overwrite an existing export; interrupted captures require a new name.
+
+After editing in Atelier, return a new revision to imports, select `IMPORT`, inspect and place it. To capture changes made in game, keep the same local origin and volume and choose another revision name. The editor retains the inspected revision as the parent when you change its name.
+
+## Runtime model
+
+`AtelierAPI` under `api.atelier` delegates to the internal service. Call it on the server thread after `SERVER_STARTED`. `END_SERVER_TICK` drives jobs. Registry and block access stay on that thread; a single IO worker validates and compresses pieces. The editor packets require a nearby creative operator and reject stale editor versions.
+
+Placement requests a bounded group of chunks, saves original cells and their checksums before mutation, then places the piece. A second pass resolves neighbour states after every piece is present and schedules fluid ticks. There is no full redstone update broadcast. Use the status action to refresh progress.
+
+Recovery lives under `<world>/isekaiexpansion/atelier/jobs/<UUID>/`. `/ise dev atelier pause`, `/ise dev atelier resume <UUID>` and `/ise dev atelier undo <UUID>` operate in the current dimension. Resume replays the original revision with its original before-images; undo restores the recorded cells. Undo can overwrite later manual edits inside those cells. Neither operation is a whole-world backup or an entity rollback. Restart pauses interrupted placement; it does not silently replay it.
+
+### Natural landmarks
+
+During KTM2 terrain binding, a landmark selects an unexplored Great Plains centre and saves its ID, revision, digest and coordinates. The reserved build radius covers the complete authored rectangle plus clearance, even with low terrain settings. It avoids the world tree and previous reservations.
+
+`LandmarkGeneration` paints each chunk before `ChunkGenerator.generateFeatures`. `ChunkPieceIndex` indexes intersecting pieces; the writer clips every cell to the current chunk, including negative coordinates and pieces crossing boundaries. It requests no neighboring chunks. A concurrent decoded cache holds at most `262144` cells per landmark. Every intersecting piece is decoded before the chunk is changed. Failed reads or writes stop generation instead of reporting a completed structure. Vanilla chunk postprocessing resolves authored neighbor states and fluids when the surrounding chunks are ready.
+
+The authored rectangle plus clearance owns the full vertical column. Fully protected chunks skip natural decoration. At the border, normal decoration continues outside the protected columns. `ChunkRegion` guards worldgen writes, block-entity access and entity placement. An exception-safe worker-local guard also blocks direct chunk writes by features. Structure starts intersecting protected columns are rejected before references and terrain adaptation; a placement guard covers existing starts.
+
+Natural spawning, chunk population, patrols, structure mobs, reinforcements and jockey spawns are excluded inside protected columns. Commands, spawn eggs, breeding, spawners and authored dungeon `EVENT` spawns remain available. These rules prevent new unmanaged spawns; they do not delete existing mobs or prevent animals from walking into town.
+
+Vanilla chunk status owns generation progress and restart behaviour. Joining a world queues no landmark placement and changes no player or respawn position. `/ise dev atelier landmarks` reports the reserved bounds without loading them. When an authored chunk first loads, the server registers its city profile through `CityAPI`; it does not load the rest of the settlement. `isekaiexpansion:lucentrystel` maps to the `isekaiexpansion:lucentrystel_outpost` profile. Saved resource hashes remain pinned; changed resources fail validation. Flat worlds support manual editing only.
+
+Third-party Arona Layers Gen also decorates chunks as they become live. The optional compatibility hooks apply `LandmarkProtectionAPI.blocksDecoration` before its direct section writes and plant conversion writes. This preserves authored layers and air inside the footprint while allowing terrain decoration outside it. The hooks are checked against the installed `1.2.2+mc1.20.1` jar; they are enabled only when `aronalayersgen` is loaded.
+
+### Landmark protection
+
+The same immutable footprint and clearance protect the full vertical columns during gameplay. `LandmarkProtectionAPI.contains` and `canBreak` expose server queries for integrations. Client tools query `api.client.atelier.LandmarkProtectionClientAPI.canBreak` before predicting their own mining actions. Only a creative player with permission level `2` or higher can bypass mining protection. The editor, commands and trusted gameplay writers retain their own authority; tools that bypass vanilla damage paths must consult this API.
+
+The server rejects mining both when receiving the action and immediately before removing a block. A denied action resends the target, its `6` neighbours and available block-entity updates before acknowledging the prediction sequence. The client prevents attack, continued mining and predicted removal using the server snapshot. On a participating server, it temporarily blocks mining until the current dimension snapshot arrives. A previous connection or dimension cannot grant access. Bypass also requires the current local creative-operator state, so leaving creative revokes prediction before the next protection packet arrives.
+
+Bounds sync on join, respawn and dimension change. Each server tick compares the player's current dimension, creative-operator status and immutable index identity; unchanged values send nothing. The client clears state on connection reset and disconnect, and rejects delayed packets from a previous connection. No terrain scans or chunk loads are needed for these checks. The index uses primitive chunk keys. It accepts at most `256` areas and `262144` chunk references, counting overlaps, before allocating the index.
+
+Explosions remove protected positions from their affected-block list before destruction and the outgoing explosion packet; entity damage remains active. Scoped mob and projectile updates cannot replace protected blocks or change plant ages. Mob griefing rule checks are locally denied inside the region, including an Enderman's `4`-block pickup reach; the world's gamerule is unchanged. Same-block door and pressure-plate interactions remain usable. Fire cannot burn protected blocks or prime them from outside. Pistons cannot displace or break protected cells, including movement across the boundary. Fluid flow cannot destroy protected solid blocks; air, existing fluid and waterlogging remain available. Damage scopes restore their previous state on exceptions and passenger transitions.
+
+The `landmark_protection` snapshot uses a strict binary protocol; `landmark_protection_request` has an empty body and grants no authority:
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `protocol` | VarInt | required | Must be `1`; older values are rejected. |
+| `dimension` | identifier | required | Dimension whose bounds this packet replaces. |
+| `editor` | boolean | required | Server-computed creative-operator bypass. |
+| `count` | VarInt | required | `0–256` rectangles. |
+| `bounds` | `count × 4` signed integers | required | Inclusive `minX`, `minZ`, `maxX`, `maxZ`, each within `-30000000…30000000`. Reversed bounds, excess index coverage and trailing bytes are rejected. |
+
+## Contracts
+
+### Bundle manifest
+
+The resource path for shipped revisions is `data/<namespace>/atelier/bundles/<id path>/<revision>/manifest.json`. Piece coordinates share the bundle origin; block coordinates inside each NBT piece start at its own minimum. The editor's origin is its block position plus its origin offset. Rotation applies about that origin.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `schema` | `integer` | required | Must be `2`. |
+| `id` | `identifier` | required | Bundle identity, including namespace; path traversal is rejected. |
+| `revision` | `string` | required | Immutable name matching `[a-z0-9_-]{1,64}`. |
+| `parentRevision` | `string` | required | Previous revision, or empty. |
+| `stage` | `string` | required | Release label, at most `128` characters. |
+| `min` | `array<integer>` | required | Local XYZ minimum; each coordinate within `-8192…8192`. |
+| `size` | `array<integer>` | required | XYZ lengths, each `1–4096`; total volume at most `64000000` cells. Maximum is exclusive. |
+| `center` | `array<integer>` | required | Local terrain centre; XZ must lie inside the footprint. |
+| `terrainDatum` | `integer` | required | Local Y aligned to the reserved plains surface; must lie inside vertical bounds. |
+| `clearance` | `integer` | required | Protected horizontal margin, `0–256` blocks; reserved radius covers the expanded rectangle. |
+| `pieces` | `array<object>` | required | Nonempty list of at most `8192` disjoint piece boxes. |
+| `pieces[].file` | `string` | required | Unique `pieces/[a-z0-9_-]+.nbt` path. |
+| `pieces[].pos` | `array<integer>` | required | XYZ offset from the shared bundle origin. |
+| `pieces[].size` | `array<integer>` | required | XYZ size, at most `32 × 256 × 32`; must fit bundle bounds. |
+| `pieces[].sha256` | `string` | required | Lowercase SHA-256 of the compressed NBT bytes. |
+| `pieces[].blocks` | `integer` | required | Explicit cell count, `1–250000`, no larger than piece volume. |
+
+The loader rejects invalid bounds, overlapping boxes, missing files, changed hashes, unknown block IDs or properties and incorrect NBT types. Pieces use Minecraft data version `3465`. Air removes blocks; absent cells leave the destination untouched, as does structure void. Every listed manifest field is required. Unknown keys, including removed arrival fields, are rejected. Bundle, editor draft, placement journal and landmark state use schema `2`; obsolete prototype data has no compatibility reader. Use a new test world for natural generation after this schema change.
+
+Ordinary capture preserves block-entity NBT. Placement applies the configured editor runtime reset; undo bypasses it. Relative gate targets and structure-space regions rotate, as do gate display states and Jigsaw final states. Rotated placements reject unknown mod block-entity adapters and vanilla structure-block payloads before touching the world. With rotation `0`, other payloads remain unchanged except their destination XYZ. Structure-space markers retain their authoring data; bind property spaces through their editor or the structure-space API.
+
+### Server configuration
+
+The `atelier` section belongs to the server's local `IsekaiConfig`. Editor budgets are read while ticking; landmark selection and immutable generation plans are prepared during world binding. Invalid options fail validation instead of being clamped.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `blocksPerTick` | `integer` | `4096` | Editor cell budget per tick, `64–32768`. |
+| `millisecondsPerTick` | `integer` | `6` | Cell-loop time budget, `1–15` milliseconds; chunk generation and file commits have their own costs. |
+| `generateLandmark` | `boolean` | `true` | Reserve the configured landmark for natural chunk generation; saved reservations remain active. |
+| `landmark` | `identifier` | `isekaiexpansion:lucentrystel` | Bundle selected for natural generation. |
+| `revision` | `string` | `exterior-v1` | Bundled revision for newly reserved sites; existing sites retain their saved revision. |
+| `searchRings` | `integer` | `8` | Search radius in descriptor cells, `1–32`. |
+| `resetEditorRuntimeOnPlacement` | `boolean` | `true` | Reset captured dungeon portal IDs, gate progress and opened loot state; keep authored settings. Undo restores original NBT. |
+
+## Extending it
+
+Add a new immutable resource revision, preserve the coordinate contract and select it in the server options. The shipped `isekaiexpansion:lucentrystel` / `exterior-v1` revision is labelled `exterior-foundation-work-in-progress`; its release stage is metadata, not a gameplay completeness check.
+
+For a new block entity with relative coordinates, extend `EditorNbtProcessor` and the preflight adapter checks together. Add a round-trip and rotation case to `tools/atelier/dev/AtelierCheck.java`. `AtelierAPI` exposes editor actions, status, landmark bounds, pause, resume and undo; callers should not manage the internal job map directly.
+
+## Verifying
+
+Run the native bundle and recovery contract checks from the mod repository:
+
+```bash
+./gradlew.bat -I tools/atelier/verify.gradle checkAtelier assembleLanguageFiles --offline --console=plain
+```
+
+Then test the loaded mod in a disposable world: capture a volume with air, inventories and dungeon editors; inspect and place it with each rotation; pause, restart, resume and undo it. Check exact original cells after undo. In a new KTM2 terrain world, verify generation by ordinary exploration, complete chunk seams, protected borders, suppressed natural mobs, city registration and unchanged player arrival. Reopen it and verify that generated chunks and player edits remain intact. The offline suite compares every exterior cell against its chunk index at positive and negative origins, and verifies serial, shuffled and parallel chunk writes with block entities. Also test survival and non-operator creative mining, creative-operator editing, reconnect and dimension transitions, permission revocation during mining, cross-border explosions and pistons, Enderman pickup, grazing, crops and fire. These are runtime acceptance procedures; passing the offline task alone does not establish them.
+
+## Related
+
+See [terrain generation](/en/dev/terrain-generation/), [city API](/en/dev/city-api/), [dungeon runtime](/en/dev/dungeons/) and [editor preferences](/en/dev/editor-preferences/).

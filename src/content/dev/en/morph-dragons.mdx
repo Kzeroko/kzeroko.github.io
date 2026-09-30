@@ -3,10 +3,10 @@ title: "Saints Dragons morph bridge"
 description: "Native species simulation, rider bindings, damage scaling, transport and replicated presentation for dragon forms."
 category: systems
 order: 116
-updated: 2026-09-24
+updated: 2026-09-30
 ---
 
-The Saints Dragons bridge runs selected native controllers on the unspawned morph form while the player remains the world entity. This page describes the integration in this repository, checked against the pinned dependency `maven.modrinth:saints-dragons:Zn44yGbo`; native ability timings, seat offsets, variants and flight configuration remain owned by Saints Dragons.
+The Saints Dragons bridge runs selected native controllers on the unspawned morph form while the player remains the world entity. This page describes the integration in this repository, checked against the pinned dependency `maven.modrinth:saints-dragons:fe97xyOc`; native ability timings, seat offsets, variants and flight configuration remain owned by Saints Dragons.
 
 ## What it does
 
@@ -20,11 +20,13 @@ The common bridge registers native overrides for both morph ability slots, displ
 
 `SaintsDragonMorphLifecycle` binds the native form to its host, clears sitting and initialises animation once. Runtime state is attached to the form; it is not a separately saved dragon. The lifecycle advances at most once per host age tick and preserves native rotation when synchronising host state.
 
-Combat and sound controllers tick on both sides. World effects tick only on the server. The server and owning client advance ability upkeep, animation, flight counters, takeoff locks and dive/water-entry state; observers apply replicated visual state before medium-specific smoothing. Scoped native-context mixins permit selected untracked-form methods to advance without changing the world's actual side.
+Combat and sound controllers tick on both sides. World effects tick only on the server. The server and owning client advance ability upkeep, animation, flight counters, takeoff locks, dive/water-entry state and flight effort; observers apply replicated visual state before medium-specific smoothing. Scoped native-context mixins permit selected untracked-form methods to advance without changing the world's actual side.
+
+Raevyx, Cindervane, Ignivorus and Volitans have a native flight animation profile, so their flight mode comes from native flight effort rather than from the rider-state evaluator. The owning sides measure effort before synchronising the flight mode; the native effort, mode and wingbeat reads are server-only, so the owning client takes their server branch. Every side then advances the dive pose and the flight blend before banking, pitch and roll, and each species' presentation hook runs last.
 
 Ability displacement of at least 2 blocks (squared distance 4) requests a server teleport. Smaller nontrivial displacement uses player collision movement; changed native velocity copies to the host. The motion epsilon is squared distance `1.0E-8`. This is separate from travel's own movement path.
 
-Detach ends the active native ability, clears input and held bindings, removes attached runtime and unbinds the host. It does not save an in-progress native ability for reconnect.
+Detach ends the active native ability, clears input and held bindings, removes attached runtime and unbinds the host. Client breath and storm flags are cleared even when a late observer never received the ability start. It does not save an in-progress native ability for reconnect.
 
 ### Travel and landing
 
@@ -40,7 +42,7 @@ An already aerial native form can adopt special travel even when the component d
 
 Morph primary reads the native attack binding; morph secondary reads the native primary binding. They both route through `isekaiexpansion:saints_dragons_native_rider`. Display IDs use the native ability's explicit namespace when present, otherwise `saintsdragons:`; a missing binding displays no ability.
 
-Repeated held-input packets are rejected. A press counts as accepted only if the native callback leaves the requested ability active, including an overlay ability. `HOLD`, an infinite section track, or a `CANCEL` repress policy requires release.
+Repeated held-input packets are rejected. A press counts as accepted only if the native callback leaves the requested ability active, including an overlay ability. `HOLD` or a `CANCEL` repress policy requires release. An infinite native section can finish from its own world-time or movement condition and does not imply held input. Named Ignivorus fireball explicitly uses `HOLD`; Summon Storm keeps its native press lifetime.
 
 Accepted native cooldowns have a minimum of 4 ticks (0.2 seconds). A finite cycle sums nonnegative duration sections, counts other sections as 1 tick, and adds recovery. Recovery is the maximum of native cooldown, recovery ticks and interrupt-recovery ticks, with the same minimum. A held/infinite start uses the minimum; release uses recovery.
 
@@ -156,7 +158,9 @@ Unlisted abilities use native factor 1, flat bonus 0, melee factor 0.5 and spell
 
 ### Upkeep and muzzle origin
 
-Raevyx advances beam energy and beam look. Ignivorus advances fire-breath energy and phase state, with its breath stream ticking on the server. Volitans similarly advances breath-gauge energy and its server breath stream. Varasuchus advances phase-two linger. Other profiles have no extra upkeep/effect override here.
+Raevyx advances beam energy and beam look. Every 5 server ticks it also advances supercharge, temporary invulnerability and storm-aura upkeep, matching the native cadence. Ignivorus advances fire-breath energy and phase state, with its breath stream ticking on the server. Volitans similarly advances breath-gauge energy and its server breath stream. Varasuchus advances phase-two linger. Other profiles have no extra upkeep/effect override here.
+
+Presentation hooks run on every side. Raevyx and Cindervane advance the tail counter-bank that bends the tail against the bank. Raevyx, Ignivorus and Volitans advance the breath pose that turns the neck toward the breath or beam direction. Ignivorus and Volitans restate the native activity condition because Saints Dragons ticks that pose inline: Ignivorus while breathing fire before Skyfall starts, Volitans while breathing or in its breath intro, but not while burrowing or during the ultimate slam.
 
 Raevyx uses `beamBoneOrigin` and Volitans uses `breathBoneOrigin`. Ignivorus inherits the default null locator, so this bridge neither samples nor applies a client muzzle offset for it. The owning client samples a rendered locator, converts its world offset into body-yaw-local space, and sends only changed quantised samples, no more often than every 2 ticks. Change detection quantises at 256 units per block; the packet still carries floating-point offsets.
 
@@ -166,8 +170,8 @@ The server accepts the sample only for the active matching morph revision and a 
 
 | Packet / state | Fields | Ownership and acceptance |
 | --- | --- | --- |
-| `saints_dragon_morph_state` | host entity ID, morph revision, raw form type ID, visual state | Tracking observers only. Future matching state can wait; stale revision drops. Apply requires revision and form type match. |
-| Visual state | ground move state, flight mode, rider forward/strafe, going up/down, accelerating, flying, takeoff, hovering, landing, flight pitch, accumulated roll, yaw, pitch, body yaw, head yaw | Move/mode are bytes, input and angles are floats, booleans pack into a flag byte. Reapplied to observer form before native visual smoothing. |
+| `saints_dragon_morph_state` | host entity ID, morph revision, raw form type ID, visual state | Host and tracking observers. Only observers apply movement state; both apply new effect inputs. Future matching state can wait; stale revision drops. Apply requires revision and form type match. |
+| Visual state | ground move state, flight mode, rider forward/strafe, going up/down, accelerating, flying, takeoff, hovering, landing, rider dive momentum, flight pitch, accumulated roll, dive pose target, flight effort, wingbeat phase, yaw, pitch, body yaw, head yaw | Move/mode are bytes, input, flight values and angles are floats, booleans pack into a flag byte. Reapplied to observer form before native visual smoothing; the flight values are zero for a form without native flight. |
 | `saints_dragon_morph_ability_state` | host entity ID, morph revision, active/overlay ability names; empty name means none | Tracking observers and host. Requires active matching revision; no pending queue. Reconciles mismatched local abilities, allowing a short completion window as described below; never starts or seeks one. |
 | `saints_dragon_morph_muzzle` | morph revision and local X/Y/Z float offsets | Owning client's C2S sample; checks described above. |
 
@@ -187,9 +191,15 @@ Variant options and default IDs come from `SaintsDragonVariantRegistry`, for the
 
 ## Extending it
 
-Keep species scaling, form-skill bindings, repress policy and upkeep in its `SaintsDragonProfile`. Register a native action in both the declared power catalogue and species profile. Add movement handling only where the native controller requires it, and keep simulation ownership distinct from render smoothing.
+Keep species scaling, form-skill bindings, repress policy, upkeep and presentation in its `SaintsDragonProfile`. Register a native action in both the declared power catalogue and species profile. Add movement handling only where the native controller requires it, and keep simulation ownership distinct from render smoothing.
 
-Dependency updates require checking accessor/mixin targets, section and recovery semantics, rider controllers, locator names, sound packets, camera output and seat caches. The dependency pin identifies the integration target; this page does not assert stable third-party APIs.
+Dependency updates require checking accessor/mixin targets, section and recovery semantics, rider controllers, locator names, sound packets, camera output and seat caches, and any new per-tick native state the species entity tick owns, since a form never runs that tick. The dependency pin identifies the integration target; this page does not assert stable third-party APIs.
+
+The visual packet appends `SaintsDragonMorphEffectState`: breathing (boolean), breath mode (byte), breath intro/fire and storm start world times (longs), storm air-cast and aura (booleans). These server-authored inputs reach the owner as well as observers without overwriting the owner's movement. Volitans and Ignivorus stream particles send the host entity ID; their client factories resolve that host to its rendered dragon form. Ordinary dragon particles keep their original emitter.
+
+Morph controller lookup also works outside the ability tick, so breath particles use the wearer’s interpolated aim. The client retains the rendered mouth in body-local space and resolves it against the current interpolated position and body yaw. It continues to follow the wearer when the model is culled or the camera enters first person. Portrait and shadow passes cannot replace this world sample; native particle travel and collision stay unchanged.
+
+The emission injections specify full overload descriptors. Run `./gradlew.bat -I tools/compat/verify.gradle checkCompat checkPackagedCompat` for dependency signatures, held-input decisions, effect packet round trips and mouth-anchor continuity. The packaged check builds the remapped JAR and checks Saints Dragons injection selectors and invocation targets against the original dependency JAR. It catches selectors that resolve to an overload without the required call. These checks do not start Minecraft or render particles.
 
 ## Verifying
 

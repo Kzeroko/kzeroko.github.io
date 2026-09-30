@@ -10,7 +10,7 @@ updated: 2026-09-30
 
 ## 它做什么
 
-实现位于 `client.camera.compat` 和 `client.camera.fade`，均为内部集成类型，不是公共 API 门面。Blabber 桥接为普通和父级对话启动 `isekaiexpansion:dialogue_humanoid`，并在关闭时传递当前会话 ID；父级对话开始时还会认领对话实体。本仓库将第三方 Blabber 锁定为 `0.5.1-build34`，这里描述的是模组自身的桥接钩子。
+实现位于 `client.camera.compat` 和 `client.camera.fade`，均为内部集成类型，不是公共 API 门面。Blabber 桥接为普通和父级对话启动 `isekaiexpansion:dialogue_humanoid`，并在关闭时传递当前会话 ID；父级对话开始时还会认领对话实体。本仓库将第三方 Blabber 锁定为 `0.5.1-build36`，这里描述的是模组自身的桥接钩子。
 
 镜头将已加载动画作为跟随对话锚点的偏移，使用 `YawAlign.NONE` 和对话播放选项。它保持动画末帧，以 5 刻（0.25 秒）混入，保留 HUD 和对话输入，并在自己持有的镜头停止后恢复原视角。内置动画是中性姿态，实际构图与 FOV 由镜头支架提供。
 

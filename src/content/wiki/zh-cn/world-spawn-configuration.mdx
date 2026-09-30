@@ -1,0 +1,119 @@
+---
+title: "世界出生点配置"
+description: "服务端配置中 spawn 部分的全部选项，包括默认值、范围和填错时的行为。"
+category: data
+order: 179
+updated: 2026-09-30
+tags: ["出生点", "配置"]
+---
+
+`spawn` 部分决定新主世界的出生点位置，以及抵达那里的玩家落在哪里。由服务器管理员和整合包作者编辑，客户端从不读取。这些规则在游戏里的效果见 [世界出生点](/zh-cn/wiki/world-spawn/)。
+
+## 文件放在哪里
+
+编辑 `config/isekaiexpansion.json` 里的 `spawn` 对象。它是配置文件，不是数据包格式：每个服务器或单人游戏安装只有一份，数据包无法覆盖。在游戏内，这些选项位于模组配置界面的 **世界出生点（服务端）** 分类下。
+
+## 最小示例
+
+下面的片段只是开启这套系统，而它本来就默认开启。把它合并进现有文件即可，省略的选项都保持默认值。
+
+```json
+{
+  "spawn": {
+    "enabled": true
+  }
+}
+```
+
+## 字段
+
+距离单位都是方块，海拔从海平面算起。范围包含两端；超出范围的值不会被截断，而是让整个部分失效。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn` | `object` | 见下方默认值 | 出生点选择与抵达设置。缺失或为 null 时，加载时恢复为默认值。 |
+| `spawn.enabled` | `boolean` | `true` | 按这些规则选择世界出生点，并把抵达的玩家放在安全地面上。`false` 时两者都交给原版。 |
+| `spawn.search` | `object` | 见下方默认值 | 在哪里找。见 [搜索](#搜索)。 |
+| `spawn.ground` | `object` | 见下方默认值 | 什么样的地面可以接受。见 [地面](#地面)。 |
+| `spawn.preferences` | `object` | 见下方默认值 | 群系与地形权重。见 [偏好](#偏好)。 |
+| `spawn.settlements` | `object` | 见下方默认值 | 要靠近的村庄和要避开的结构。见 [聚落](#聚落)。 |
+| `spawn.arrival` | `object` | 见下方默认值 | 抵达的玩家怎么安置。见 [抵达](#抵达)。 |
+
+### 搜索
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.search.centerX` | `integer` | `0` | 搜索从这个方块 X 坐标向外展开，任意整数。 |
+| `spawn.search.centerZ` | `integer` | `0` | 搜索从这个方块 Z 坐标向外展开，任意整数。 |
+| `spawn.search.radius` | `integer` | `3072` | 出生点离中心的最远距离，`256–16384`。 |
+| `spawn.search.spacing` | `integer` | `48` | 相邻采样列的间距，`16–512`。每一列会偏移最多这个值的 `40%`，避免出现规整网格。数值越小，候选越多，耗时越长。 |
+| `spawn.search.comfortRadius` | `integer` | `768` | 离中心这个距离以内的候选保持完整评分，再往外一个舒适半径，评分降为一半。`0–16384`。 |
+| `spawn.search.chunkChecks` | `integer` | `12` | 最多允许为多少个最佳候选生成区块并寻找安全方块，`1–64`。候选名单保留 `32` 个或这个值的两倍，取较大者。 |
+
+### 地面
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.ground.minElevation` | `integer` | `2` | 可接受的最低地面，高出海平面的格数，`1–128`。 |
+| `spawn.ground.maxElevation` | `integer` | `64` | 可接受的最高地面，高出海平面的格数，从 `minElevation` 到 `256`。高出 `40` 格以上的地面评分最多降低 `40%`。 |
+| `spawn.ground.maxRelief` | `integer` | `9` | 候选点外 `10` 格处 `8` 个采样点之间允许的最大高度差，`1–64`。 |
+| `spawn.ground.shoreClearance` | `integer` | `32` | `16` 个会降低评分的水域采样点的外圈半径，海洋按两倍算，`0–256`。`0` 表示跳过这些采样。不论这个值是多少，向外 `10` 格和 `24` 格的固定采样点上有水都会直接排除候选。 |
+| `spawn.ground.landmassRadius` | `integer` | `96` | 两圈各 `16` 个陆地采样点中内圈的半径，外圈是它的两倍。`16–512`。 |
+| `spawn.ground.landmassShare` | `number` | `0.85` | 这 `32` 个采样点中必须是干燥陆地的比例，`0–1`。用来排除小岛和狭长沙嘴。 |
+
+### 偏好
+
+两个列表里的规则都写作 `id=weight`。规则按顺序匹配，第一条匹配的生效。权重 `0` 表示禁止，`1` 为中性，最高为 `4`。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.preferences.unlistedBiomeWeight` | `number` | `0.45` | 没有任何群系规则匹配时的权重，`0–4`。 |
+| `spawn.preferences.biomeWeights` | `array<string>` | 36 条规则 | 群系规则。每条是群系 ID 或 `#tag`，后接 `=weight`，例如 `#minecraft:is_ocean=0` 或 `minecraft:plains=1`。列表为空时，所有群系都使用未列出群系的权重。 |
+| `spawn.preferences.terrainWeights` | `array<string>` | 20 条规则 | 地形系列规则，例如 `isekaiexpansion:great_plains=1.2`。不接受标签。没有规则的地形系列，以及不属于任何地形系列的地面，权重为 `1`。 |
+
+默认群系规则禁止 `#minecraft:is_ocean`、`#minecraft:is_river`、`minecraft:mushroom_fields`、`minecraft:deep_dark`、`minecraft:frozen_peaks`、`minecraft:jagged_peaks` 和 `minecraft:stony_peaks`，并把 `isekaiexpansion:great_plains` 设为 `1.2`。默认地形规则禁止 `isekaiexpansion:world_tree`、`isekaiexpansion:halo_crown`、`isekaiexpansion:sentinel_isles`、`isekaiexpansion:verdant_knives` 和所有奇境地形系列，把 `isekaiexpansion:luminous_grove` 与 `isekaiexpansion:starlit_glade` 设为 `0.6`，`isekaiexpansion:amber_basin` 设为 `0.3`。完整的默认规则请打开生成的配置文件查看。
+
+### 聚落
+
+结构选择器是结构 ID 或 `#tag`，例如 `#minecraft:village` 或 `minecraft:pillager_outpost`。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.settlements.bonus` | `number` | `0.35` | 在理想距离预测到聚落时提高的评分，`0–4`。`0.35` 表示最多提高 `35%`；`0` 关闭聚落比对。 |
+| `spawn.settlements.minDistance` | `integer` | `64` | 比这更近的聚落只给部分加成，贴着候选点时降到一半。`0–4096`。 |
+| `spawn.settlements.maxDistance` | `integer` | `512` | 这个距离以内的聚落给完整加成，到两倍距离时降为零。从 `minDistance`（至少 `1`）到 `4096`。 |
+| `spawn.settlements.structures` | `array<string>` | `["#minecraft:village"]` | 视为聚落的结构。列表为空时关闭聚落比对。 |
+| `spawn.settlements.avoidStructures` | `array<string>` | 18 个结构 | 出生点要远离的结构：远古城市，以及原版和整合包模组里的掠夺者、灾厄村民、女巫、龙类和首领结构。范围内预测到其中之一的候选只保留 `10%` 的评分。列表为空时关闭这项检查。 |
+| `spawn.settlements.avoidRadius` | `integer` | `160` | 敌对结构的影响距离，`0–1024`。`0` 关闭这项检查。 |
+
+### 抵达
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.arrival.safeArrival` | `boolean` | `true` | 首次进入、或没有重生点而重生的玩家，会落在 `spawnRadius` 游戏规则范围内的安全方块上，而不是原版的随机散布。 |
+| `spawn.arrival.searchRadius` | `integer` | `24` | 出生半径内没有安全方块时，在世界出生点周围搜索的距离，`0–64`。 |
+
+## 校验
+
+每次运行搜索时，服务器都会检查整个部分。只要有一个值不对，整个部分就失效；不会截断，也不会跳过。
+
+- **数值超出范围、规则格式错误或 ID 无效**。创建世界时，服务器会记录一条指明选项的错误日志，并改用原版的出生点选择。`/ise spawn survey` 和 `/ise spawn relocate` 会输出同样的信息，不做任何改动。
+- **权重规则**。规则必须含有 `=`，两边都要有内容。键会被转为小写；权重必须是 `0–4` 之间的数字。`terrainWeights` 里写 `#tag` 属于错误。格式正确但不对应任何群系、标签或地形系列的 ID 可以通过，只是永远不会匹配。
+- **结构选择器**。配置里只检查格式。不对应任何结构的 ID 或标签，会在运行搜索时被跳过，并在日志里留下警告。
+- **重复规则**。第一条匹配的规则生效，后面重复的会被忽略。
+- **缺失的键和 null 部分**。缺失的键使用默认值。为 null 的部分在加载文件时恢复为默认值。为 null 的列表属于错误。
+- **未知的键**。直接忽略。拼错的选项会悄悄保持默认值。
+
+`spawn.arrival` 不经过完整检查：抵达安置只读取 `enabled`、`safeArrival` 和 `searchRadius`，并把后者限制在 `0–64`，所以其他选项无效时它仍然能工作。
+
+## 重载
+
+游戏启动时读取这个文件。每次搜索和每次玩家抵达都会重新读取已加载的设置，搜索之间不做缓存。这些设置只在服务端，从不发送给客户端。
+
+修改设置不会移动已有世界的出生点。世界出生点只在创建世界时选择一次；想让新设置作用于已有世界，运行 `/ise spawn relocate`。
+
+## 相关页面
+
+- [世界出生点](/zh-cn/wiki/world-spawn/)——规则如何选出出生点，以及两条命令。
+- [地形配置](/zh-cn/wiki/terrain-configuration/)——这些权重引用的地形系列。
+- [地形与地标](/zh-cn/wiki/terrain/)——每个地形系列的样子。

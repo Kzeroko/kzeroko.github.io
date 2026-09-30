@@ -1,12 +1,12 @@
 ---
 title: "声望数据"
-description: "实体阵营、动态职业阵营及阵营关系规则。"
+description: "实体阵营、亲缘规则、玩家阵营归属能力及阵营关系规则。"
 category: data
 order: 30
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 
-实体阵营规则决定实体属于哪些阵营、承担哪些角色；关系规则决定阵营之间的友好、中立或敌对关系。一个实体可以同时匹配多个文件，匹配结果会共同参与判定。
+实体阵营规则决定实体属于哪些阵营、承担哪些角色；关系规则决定阵营之间是友好、中立还是敌对，以及敌对的一方会不会见面就主动追杀。玩家通过阵营归属能力加入阵营。一个实体可以同时匹配多个文件，匹配结果会共同参与判定。
 
 ## 文件放在哪里
 
@@ -14,9 +14,11 @@ updated: 2026-09-18
 
 不同资源ID的实体规则累加，不按文件名互相覆盖。关系规则按优先级和关系类别解决冲突。相同资源路径先按数据包优先级选择资源。
 
+玩家的阵营归属是一个 Origins 能力，所以和其他能力一样放在`data/<namespace>/powers/*.json`，通过种族、职业或其他能力授予途径到达玩家身上。
+
 ## 最小示例
 
-以下文件保留内置村民规则的必填字段；它能匹配村民，但不主动添加阵营或角色：
+以下文件只保留内置村民规则中的一个匹配项；它能匹配村民，但不添加阵营或角色：
 
 ```json
 {
@@ -28,13 +30,43 @@ updated: 2026-09-18
 
 ### 实体阵营
 
+任一匹配项接受实体，规则即匹配该实体。每条规则至少要写`entity_types`、`entity_groups`、`spawn_groups`三者之一。
+
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `entity_types` | `array<string>` | 必填 | 实体ID或以`#`开头的标签，任一匹配即可；`[]`不匹配实体。只检查ID语法，不要求已注册。 |
+| `entity_types` | `array<string>` | `[]` | 实体ID或以`#`开头的标签；`[]`不匹配实体。只检查ID语法，不要求已注册。 |
+| `entity_groups` | `array<string>` | `[]` | 生物类别，取值见下表。匹配属于其中任一类别的生物。 |
+| `spawn_groups` | `array<string>` | `[]` | 生成类别，取值见下表。匹配注册在其中任一类别下的所有实体类型。 |
 | `factions` | `array<string>` | `[]` | 添加静态阵营。ID规范化后按需创建，不查询外部注册表。 |
 | `dynamic_factions` | `array<string>` | `[]` | 只接受`minecraft:villager_profession`，也可省略命名空间写`villager_profession`。为村民添加`minecraft:villager_profession/<profession_id>`，其他实体不产生此项。 |
 | `roles` | `array<string>` | `[]` | 规范化角色名。防卫者检查使用`protector`；其他名称可加载，但这里没有对应行为。重复值合并。 |
 | `include_structure_origin_factions` | `boolean` | `false` | 实体支持结构来源记录时，收集其已保存的来源阵营。不会仅因实体站在结构内就赋予阵营。 |
+| `affinity` | `boolean` | `false` | 设为`true`时这是一条亲缘规则：它添加的阵营只影响关系和索敌，不会改变你的声望，不会让实体成为目击者，也不会出现在声望报告里。 |
+
+亲缘规则是在实体原有身份上追加阵营，而不是替换身份，它的阵营也不会让成员互相复仇。只被亲缘规则匹配的敌对生物仍会获得隐式的`isekaiexpansion:side/monster`，如果它还有身份规则，伤害它的声望代价仍由身份规则决定。
+
+`entity_groups`的取值就是原版给每个生物划分的生物类别，也就是亡灵杀手、节肢杀手和穿刺判定用的那套类别：
+
+| 取值 | 匹配对象 |
+| --- | --- |
+| `default` | 没有特殊类别的所有生物。 |
+| `undead` | 僵尸、骷髅、溺尸、幻翼等亡灵生物。 |
+| `arthropod` | 蜘蛛、蠹虫、末影螨、蜜蜂等节肢生物。 |
+| `illager` | 掠夺者、卫道士、唤魔者、幻术师，以及基于它们制作的模组灾厄村民。 |
+| `aquatic` | 鱼、鱿鱼、海豚、守卫者、海龟、美西螈，以及基于原版水生生物制作的模组生物。 |
+
+`spawn_groups`的取值是原版的生成类别：
+
+| 取值 | 匹配对象 |
+| --- | --- |
+| `monster` | 敌对生物。 |
+| `creature` | 陆地动物。 |
+| `ambient` | 蝙蝠。 |
+| `axolotls` | 美西螈。 |
+| `underground_water_creature` | 发光鱿鱼。 |
+| `water_creature` | 鱿鱼、海豚等按生物类生成的水生生物。 |
+| `water_ambient` | 鱼类。 |
+| `misc` | 其余所有实体，包括玩家和非生物实体。 |
 
 ### 阵营关系
 
@@ -45,45 +77,104 @@ updated: 2026-09-18
 | `relation` | `enum(friendly, neutral, hostile)` | 必填 | 去除两端空白且不区分大小写。友好别名：`ally`、`allied`、`alliance`；敌对别名：`enemy`、`war`。其他值使文件加载失败。 |
 | `bidirectional` | `boolean` | `true` | 同时交换行为方与目标方进行匹配。 |
 | `priority` | `integer` | `0` | 匹配时数值高者优先。没有显式截断，应写32位有符号整数。同优先级依次取敌对、友好、中立。 |
+| `proactive` | `boolean` | `false` | 设为`true`时，行为方的生物会主动追杀目标方的生物和玩家；双向时反过来也一样。只有`hostile`关系可以设为主动，其他关系会使文件加载失败。 |
 
+关系对索敌的影响如下。`hostile`允许生物攻击另一方成员，哪怕它自己的AI不会挑起这场战斗。`friendly`否决攻击。`neutral`不表态，交给生物自己的AI决定，所以捕食者照样会猎杀和自己共享阵营的猎物。对玩家的友好关系会在该玩家最后一次伤害这只生物后失效 100 tick（5 秒），期间若有其他来源伤害它则提前结束，所以被激怒的生物会还手。共享身份阵营且彼此友好的成员还会互相复仇，详见[声望与阵营](/zh-cn/wiki/reputation/)；让阵营对自身写一条中立关系即可关闭这一点。
+
+主动关系会追加一次搜寻。没有目标的生物每秒一次，在跟随范围内寻找最近的追杀对象；跟随范围钳制在 8–48 格之间，没有该属性时按 24 格计算。候选对象在计入优先级和运行时覆盖后仍须判定为敌对，并且生物必须能看见、能察觉到它。玩家按身上的形态判定，所以变身成被追杀形态的玩家同样会被追杀。已驯服的生物，以及正被玩家骑乘的坐骑，不会主动开始追杀。
+
+### 玩家阵营归属
+
+内置鱼人族将此成员身份放在`mermaid_aqua_affinity`的`kinship`子能力下；`trait_mermaid`仅作为种族标记。
+
+玩家默认不属于任何阵营，和玩家的一切战斗都交给原版AI决定。类型为`isekaiorigins:faction_membership`的能力会让持有者加入指定阵营。把它放在一个种族所有进化阶段都包含的特性能力上，整条进化线就共享这份归属。
+
+```json
+{
+  "type": "isekaiorigins:faction_membership",
+  "factions": ["isekaiexpansion:side/merfolk"]
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `identifier` | 必填 | 使用`isekaiorigins:faction_membership`。 |
+| `factions` | `array<string>` | 必填 | 持有者加入的阵营ID，规范化规则与实体规则的阵营相同。 |
+| `condition` | `object` | 缺省 | 标准 Origins 实体条件。条件不满足时，持有者不算该阵营成员。 |
+
+阵营归属只影响关系和索敌，没有自己的声望，也不会出现在声望报告里。
 
 ## 完整示例
 
-把以下实体规则放入实体阵营目录：
+内置的海洋生物规则会给水生生物，以及`#isekaiexpansion:sea_creatures`里列出的Myths of the Sea生物，添加一个亲缘阵营：
 
 ```json
 {
-  "entity_types": ["minecraft:villager"],
-  "factions": ["minecraft:village"],
-  "dynamic_factions": ["minecraft:villager_profession"],
-  "roles": ["protector"],
-  "include_structure_origin_factions": true
+  "entity_types": ["#isekaiexpansion:sea_creatures"],
+  "entity_groups": ["aquatic"],
+  "factions": ["isekaiexpansion:side/sea"],
+  "affinity": true
 }
 ```
 
-以下关系规则放入另一个目录，沿用内置文明与怪物关系：
+共享阵营默认视为友好，不做处理的话，守卫者就不会再去捕猎鱿鱼。让阵营对自身写一条关系，就能去掉这个默认：
 
 ```json
 {
-  "source_factions": ["isekaiexpansion:side/civilization"],
-  "target_factions": ["isekaiexpansion:side/monster"],
-  "relation": "hostile"
+  "source_factions": ["isekaiexpansion:side/sea"],
+  "target_factions": ["isekaiexpansion:side/sea"],
+  "relation": "neutral"
 }
 ```
 
-阵营ID会去除两端空白、转小写，把反斜杠和竖线替换为斜杠、空格替换为下划线；空白ID变为`unknown`。角色名采用同样的大小写和空格处理，但不转换竖线，也不把空名改为`unknown`。实体ID与标签仍须使用合法资源ID语法。
+内置的魔物群体反过来使用同一套写法。`isekaiexpansion:side/monster`对自身中立，共享它不会让任何人结盟；每个群体再以优先级 10 恢复自己的同族关系：
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/raider"],
+  "target_factions": ["isekaiexpansion:side/raider"],
+  "relation": "friendly",
+  "priority": 10
+}
+```
+
+以下关系让海洋对鱼人族玩家和鱼人族市民友好，优先级高于任何优先级为 0 的敌对关系：
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/merfolk", "isekaiexpansion:citizen_origin/mermaid"],
+  "target_factions": ["isekaiexpansion:side/sea"],
+  "relation": "friendly",
+  "priority": 20
+}
+```
+
+内置的灾厄与巨龙世仇只在一个方向上主动。灾厄村民见到`#isekaiexpansion:dragons`里的 Saints Dragons 巨龙就会追杀，巨龙则由它自己的AI还击。Saints Dragons 把巨龙的目标保存在自己的大脑里，替巨龙发起的追杀留不住：
+
+```json
+{
+  "source_factions": ["isekaiexpansion:side/raider"],
+  "target_factions": ["isekaiexpansion:side/dragon"],
+  "relation": "hostile",
+  "bidirectional": false,
+  "proactive": true,
+  "priority": 10
+}
+```
+
+阵营ID会去除两端空白、转小写，把反斜杠和竖线替换为斜杠、空格替换为下划线；空白ID变为`unknown`。角色名采用同样的大小写和空格处理，但不转换竖线，也不把空名改为`unknown`。实体ID与标签仍须使用合法资源ID语法。生物类别和生成类别名称会去除两端空白，不区分大小写。
 
 ## 校验
 
-缺少必填键、已读取字段类型错误、非法实体ID语法、未知动态阵营类型或关系值会使该文件失败，日志记录错误后继续处理其他文件。两个加载器都会用本轮成功读取的规则替换旧表；坏文件对应的旧规则不会保留。未知字段被忽略，不提供版本兼容转换。空对象缺必填键；空白文本不是合法JSON。
+缺少必填键、已读取字段类型错误、非法实体ID语法、未知生物类别、未知生成类别、未知动态阵营类型或关系值会使该文件失败。实体规则如果`entity_types`、`entity_groups`、`spawn_groups`一个都没写，也会失败；非敌对关系设为主动同样会失败。日志记录错误后继续处理其他文件。两个加载器都会用本轮成功读取的规则替换旧表；坏文件对应的旧规则不会保留。未知字段被忽略，不提供版本兼容转换。空对象缺必填键；空白文本不是合法JSON。
 
-合法但尚未注册的实体ID可以加载，实际匹配时不会命中不存在的类型。空标签和空`entity_types`数组不命中；空阵营列表不贡献阵营。未知静态阵营ID会按需创建，不是错误。重复实体规则可以共同贡献；关系规则先比较较高优先级，同级时敌对优先于友好，友好优先于中立。
+合法但尚未注册的实体ID可以加载，实际匹配时不会命中不存在的类型。空标签和空匹配数组不命中；空阵营列表不贡献阵营。未知静态阵营ID会按需创建，不是错误。多条实体规则可以共同贡献；关系规则先比较较高优先级，同级时敌对优先于友好，友好优先于中立。
 
-若没有关系规则命中，双方共有阵营时视为友好，否则视为中立。显式规则可以覆盖这个共有阵营的默认结果。
+若没有关系规则命中，双方共有阵营时视为友好，否则视为中立。显式规则可以覆盖这个共有阵营的默认结果，包括行为方与目标方写同一个阵营的规则。
 
 ## 重载
 
-两个目录都是服务端数据资源，在启动和`/reload`时读取。重载替换规则表，后续阵营与关系查询使用新规则。这里没有把整张规则表同步给客户端的路径；玩家看到的声望报告与游戏结果来自运行时查询。
+两个目录都是服务端数据资源，在启动和`/reload`时读取。重载替换规则表，后续阵营与关系查询使用新规则。每种实体类型匹配到哪些规则会按类型缓存，规则或标签重载时清空。这里没有把整张规则表同步给客户端的路径；玩家看到的声望报告与游戏结果来自运行时查询。阵营归属能力随 Origins 能力加载器加载。
 
 ## 相关页面
 

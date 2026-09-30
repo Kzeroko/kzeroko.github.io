@@ -3,7 +3,7 @@ title: "Morph client presentation and compatibility"
 description: "Pulse-driven model swaps, first-person arms, cameras, input, HUD, textures and client extension hooks."
 category: client
 order: 115
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 Morph presentation is a client state machine layered over the server component. It coordinates the visible form with Particlize coverage while input, collision dimensions and native species simulation retain their own authority.
@@ -105,6 +105,14 @@ Keep four concerns separate: server phase, client visible presentation, collisio
 A new player-rig renderer must provide compatible body/arm names and first-person extraction. A new modular species can add preview, camera and passenger pose hooks without replacing the host input or world entity. Pair native tick ownership with detach cleanup, and restore all scoped textures, matrices and render pipeline state.
 
 UI updates belong on ModernUI's UI thread; gameplay input sampling remains on the client tick thread. Do not read or mutate the live world from an asynchronous UI animation callback. Test resource reload and reconnect because renderer registries and failed-integration flags have different lifetimes.
+
+`FirstPersonArmor` restores the registered armour feature after Player Animator filters the first-person feature list. The normal renderer then invokes it at the native feature stage, with Player Animator's own per-feature matrix handling. It delegates to the original chest-slot render, so vanilla materials, Fabric callbacks and GeckoLib providers keep their normal pose copying and render lifecycle. Helmet, leggings and boots are skipped for this pass. The visible arms in the player model determine which sleeves are shown.
+
+This bridge changes visibility only. The native slot-selection step is followed by an arm-only mask; final biped draws restore their prior visibility after completion or failure. GeckoLib retains its native bone transforms, buffers and render layers. `GeoArmorSleeveGeometryMixin` rejects cubes outside the requested arm branches while allowing traversal through a torso parent. Ordinary player draws reapply slot visibility. Morph bodies retain their equipment policy.
+
+Punchy's built-in sleeve pass owns idle armour. The bridge neither replaces that pass nor adds a second idle armour draw. The retired matrix replay and direct armour-draw invokers are absent from the packaged mod. Humanoid skin replacement preserves the native model traversal; see [humanoid runtime](/en/dev/humanoid-runtime/).
+
+In-game acceptance must cover idle and attacking arms, both hands, slim and standard players, dyed/trimmed vanilla armour, Fabric custom armour, GeckoLib sleeves, shaders and return to third person. Automated checks cover feature selection, visibility restoration and packaged hook targets; they do not establish visual alignment.
 
 ## Verifying
 

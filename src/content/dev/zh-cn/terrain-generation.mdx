@@ -3,10 +3,10 @@ title: "地形生成"
 description: "注册表归属、确定性地形、世界树持久状态、区块内装饰与光影源码覆盖。"
 category: systems
 order: 178
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
-地形子系统为 ReTerraForged 增加确定性区域、预整形地标与体积几何。它负责默认预设的注册表启动流程，以及每个生成器的环境；这些属于内部实现约定，不是公开地形 API。
+地形子系统为 ReTerraForged 增加确定性区域、预整形地标与体积几何。它负责默认预设的注册表启动流程，以及每个生成器的环境；这些属于内部实现约定。唯一的公开接口是 `TerrainAPI`：只读查询某个位置属于哪个地标或地形区域。
 
 ## 它做什么
 
@@ -111,6 +111,19 @@ Arona 兼容桥接仅在其层注入调用期间，为空境群岛、穹庭与�
 | 存档兼容 | 保持系列顺序与配色 ID。已配置奇境绑定缺失时，旧存档群系源可能在绑定阶段被拒绝。 |
 
 项目的可选 Iris 集成编译目标为 `1.7.6+1.20.1`。这只固定集成目标，不代表任意现行光影包版本都符合配方。
+
+### 公开查询
+
+`api.terrain.TerrainAPI` 让其他代码知道 KTM2 地形在哪里，而不必接触地形引擎。两个方法都读取生成器自己的规划，不请求也不生成区块。请在服务端线程调用。
+
+| 签名 | 返回 |
+| --- | --- |
+| `TerrainAPI.available(ServerWorld)` | 世界的群系源是 `TerrainBiomeSource`，且底层 ReTerraForged 生成器带有地形引擎时为 `true`。 |
+| `TerrainAPI.regionAt(ServerWorld, BlockPos)` | 拥有该位置的 `TerrainRegion`；没有归属、没有地形引擎或 `terrain.enabled` 关闭时为空。 |
+
+`TerrainRegion` 是一个 record。`family` 是系列的群系 ID，例如 `isekaiexpansion:great_plains`；`center` 是区域中心，位于地面高度；`radius` 是其所属地形的水平范围，单位为方块；`layer` 为 `SURFACE`、`ELEVATED` 或 `UNDERGROUND`。
+
+归属与生成保持一致。世界树或风息原野地标在混合权重超过 `0.5` 的位置拥有归属，返回自身的系列、半径和 `SURFACE`；其中的林地也报告为该地标。地形区域在占地权重超过 `0.5` 且规划拥有该处群系的位置拥有归属，半径报告为规划半径的 `80%`。奇境系列还要求该高度正好是其奇境群系，所以洞窟顶上、浮岛下方的地面都不算在区域内。IsekaiTweaks 的地图集就是这样记录已发现的区域。
 
 ## 扩展方式
 

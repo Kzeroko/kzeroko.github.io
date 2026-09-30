@@ -3,7 +3,7 @@ title: "命名API"
 description: "不可变姓名目录、NPC上下文解析器与可翻译的玩家身份。"
 category: api
 order: 115
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
 `NamingAPI`委托命名运行时完成服务端选择和NPC命名，`ClientNamingAPI`提供创建界面使用的独立客户端目录。玩家操作见[角色姓名](/zh-cn/wiki/character-names/)，内容格式见[姓名池数据](/zh-cn/wiki/name-pools/)。
@@ -79,7 +79,28 @@ NamingAPI.registerResolver(entity -> {
 
 没有解析器时，唯一的揭示条件是 `BaseNpcEntity.isTrust(viewer)`。普通实体使用实体类型称呼；伊维莉娜使用探求的魔导师，其他独特 NPC 使用旅人。未注册信任解析器的第三方实体始终显示类型称呼。隶属归属、命名牌或友善状态不会绕过信任条件。
 
-`DialogueNaming` 将 `isekaiexpansion:dialogue_name` 注册为 `Text` 会话元数据，以 `writeText`/`readText` 传输。打开普通对话或父对话时，按当前玩家与实体求值。`DialogueNameMixin` 让客户端会话名称访问器在本地解析此文本，因此标题与 `{name}` 一致。判断是打开对话时的快照，重新打开才再次检查信任。没有实体的旁白会话保留 Blabber 的说话者名称。世界名称牌、保存的姓名及 `{player}` 不受影响。
+`DialogueNaming` 将 `isekaiexpansion:dialogue_name` 注册为 `Text` 会话元数据，以 `writeText`/`readText` 传输。打开普通对话或父对话时，按当前玩家与实体求值。`DialogueNameMixin` 让客户端会话名称访问器在本地解析此文本，因此标题与 `{name}` 一致。判断是打开对话时的快照，重新打开才再次检查信任。没有实体的旁白会话保留 Blabber 的说话者名称。世界名称牌与保存的姓名不受影响。对玩家的称呼使用下述独立规则。
+
+### 对玩家的称呼
+
+`DialogueAddresses`是内部服务端适配器。符合条件的`BaseNpcEntity`或`VillagerEntity`开始普通对话或父对话前，会先打开`isekaiexpansion:address/introduction`。普通NPC处理器在记录交谈次数和推进任务之前暂存交互，并保留已经选定的菜单路线；脚本直接开始的对话则保留对话ID与说话者参数。
+
+每个玩家只保留一个待继续的交互。选定称呼后保存偏好，并且只继续一次。关闭、断线、死亡、战斗、跨世界、离开8格、成功重载数据或等待超过5分钟，都会丢弃待继续的交互。此队列不写入存档。
+
+| 存储字段 | 类型 | 默认值 | 含义 |
+| --- | --- | --- | --- |
+| `IsekaiAddresses` | compound | 不存在 | 保存在NPC上的映射，键为玩家UUID字符串。 |
+| UUID条目的值 | byte | 不存在 | `1`全名、`2`简称、`3`冒险者。无效取值、类型与UUID均忽略。 |
+
+不保存已经显示的玩家姓名。`isekaiexpansion:address_name`以`Text`传输当前姓名，`isekaiexpansion:address_style`传输称呼选择的字节。客户端先按本地语言解析姓名，再提取简称。`{address_full}`和`{address_short}`用于初次询问的选项，后续对话中的`{player}`遵循已保存的偏好。没有空白或间隔号的姓名保留完整；没有NPC的会话仍使用玩家全名。
+
+验证两个玩家分别选择称呼、实体保存与重载、玩家改名，以及两种语言。取消询问后重新开启初见任务，作答后应当只继续一次原本的初见对话。
+
+### 世界名牌缓冲区
+
+实体基础名牌渲染器使用内部渲染线程工具`NameplateRenderBuffers`。在一块名牌的绘制期间，每种文字或装饰层各占一个缓冲区；嵌套名牌另取一组。绘制返回前提交顶点，随后复用已完成的缓冲区，不跨资源重载保留渲染层键。文字与实体网格缓冲区分开；渲染异常仍正常上报。这只改变缓冲区归属，不改变命名或可见性规则。
+
+须在开启ModernUI文字、AcceleratedRendering与光影时检查有名字的村民，包含混合文字姓名与重叠名牌。无窗口检查覆盖格式交错、扩容、嵌套和复用；报告中的整合包崩溃仍需在游戏内核验。
 
 ### 配置
 

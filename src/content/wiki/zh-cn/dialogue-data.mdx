@@ -12,7 +12,7 @@ updated: 2026-09-30
 
 使用 `data/<namespace>/blabber/blabber_dialogues/<path>.json`。对话 ID 为 `<namespace>:<path>`，不含注册表文件夹或扩展名。NPC 自动查找在 `isekaiexpansion` 命名空间下构造 ID；其他命名空间可通过显式引用使用，不参与自动路径回退。
 
-整合包固定使用 Blabber `0.5.1-build34`。基础对话格式由该依赖提供，下述约定已对照本地 Blabber 源码与模组自带数据核对。上游 schema 提示不保证覆盖所有本地扩展。
+整合包固定使用 Blabber `0.5.1-build36`。基础对话格式由该依赖提供，下述约定已对照本地 Blabber 源码与模组自带数据核对。上游 schema 提示不保证覆盖所有本地扩展。
 
 ### NPC 查找路径
 
@@ -119,6 +119,7 @@ NPC 已与其他玩家结婚时，`talk`、`trade`、`farewell` 及显式启用�
 | `isekaiexpansion:reveal_energy` | 必填字符串 `value` | 显示玩家能量条，忽略字符串内容。 |
 | `isekaiexpansion:reveal_rank` | 必填字符串 `value` | 显示玩家阶位牌，忽略字符串内容。 |
 | `isekaiexpansion:open_npc_trade` | 无载荷 | 仅当会话 NPC 存活、距离不超过 4 格且玩家受到信任时，在对话中打开交易。 |
+| `isekaiexpansion:exchange_valuables` | 无载荷 | 与4格内当前可交易的村民打开背包估价面板。确认前显示选中整组的数量与收款；人形NPC不能使用。 |
 | `isekaiexpansion:emote` | `emote`，可选 `force` | 让会话 NPC 播放身体动作表情。 |
 | `isekaiexpansion:emoji` | emoji 播放字段 | 见完整的[emoji 动作字段](/zh-cn/wiki/emoji-data/)。 |
 
@@ -159,6 +160,8 @@ NPC 已与其他玩家结婚时，`talk`、`trade`、`farewell` 及显式启用�
 对话模板属于 Blabber 的同步数据注册表，随数据包重载。重载后应开启新对话测试；已有会话保留捕获的状态映射。资源／语言重载另行处理翻译文本。
 
 仅添加对话 JSON 不会创建新的代码父菜单或动作编解码器；这些接口见[运行时扩展参考](/zh-cn/dev/npc-dialogue/)。
+
+说话者名称占位符使用当前对话标题中的称呼；尚未熟识时，这可能是职业。普通商人的开场应围绕自己的工作；唯一角色主动自我介绍时，台词直接使用该角色的作者设定姓名。标题仍遵守原有称呼规则。
 
 ## 相关页面
 

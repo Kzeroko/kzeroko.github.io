@@ -1,18 +1,18 @@
 ---
 title: "问路 API"
-description: "服务端线程上的目的地搜索、工作上限、结果处理、对话集成与指南针状态。"
+description: "服务端线程上的目的地搜索、结构勘测、工作上限、结果处理、对话集成与指南针状态。"
 category: api
 order: 130
 updated: 2026-09-30
 ---
 
-`WayfindingAPI` 搜索当前维度中的群系、地形家族或结构，不接管调用方的交互。回调给出受工作预算限制的搜索结果；使用前仍须验证玩家、世界与当前交互是否有效。
+`WayfindingAPI` 搜索当前维度中的群系、地形家族或结构，不接管调用方的交互。回调给出受工作预算限制的搜索结果；使用前仍须验证玩家、世界与当前交互是否有效。`survey` 查找一组结构最近的已生成起始点，并附带边界。
 
 ## 入口
 
-门面为 `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`。公开记录 `LocateTarget`、`LocateRequest`、`LocateResult` 位于同包，实现位于 `internal.wayfinding` 与 `world.terrain.runtime`。
+门面为 `net.kzeroko.isekaiexpansion.api.wayfinding.WayfindingAPI`。公开记录 `LocateTarget`、`LocateRequest`、`LocateResult`、`SurveyRequest`、`SurveyResult` 位于同包，实现位于 `internal.wayfinding` 与 `world.terrain.runtime`。
 
-在逻辑服务端线程使用已存在的 `ServerWorld`。`locate` 与 `cancel` 在其他线程会抛出 `IllegalStateException`；惰性目录没有线程断言，但使用未同步的映射，因此也须遵守同一要求。世界创建前没有可用入口。
+在逻辑服务端线程使用已存在的 `ServerWorld`。`locate`、`cancel`、`survey` 与 `cancelSurvey` 在其他线程会抛出 `IllegalStateException`；惰性目录没有线程断言，但使用未同步的映射，因此也须遵守同一要求。世界创建前没有可用入口。
 
 ## 常见用法
 
@@ -48,6 +48,24 @@ static void cancelSearch(ServerPlayerEntity player) {
 
 示例使用 `java.util.List` 和 Minecraft 的 `ServerWorld`、`ServerPlayerEntity`。取消依据所有者 UUID，不依据维度；传入世界用于服务端线程检查。所有者没有任务时不执行任何变更。
 
+### 勘测最近的村庄
+
+```java
+static void nearestVillages(ServerPlayerEntity player) {
+    var world = player.getServerWorld();
+    var request = new SurveyRequest(List.of("#minecraft:village"),
+            player.getBlockPos(), 2048, 5);
+    WayfindingAPI.survey(world, player.getUuid(), request, result -> {
+        if (world.getServer().getPlayerManager().getPlayer(player.getUuid()) != player) return;
+        for (var found : result.structures())
+            player.sendMessage(Text.literal(found.structure() + " at "
+                    + found.center().toShortString()), false);
+    });
+}
+```
+
+示例使用同包的 `SurveyRequest`，以及 `java.util.List` 和 Minecraft 的 `Text`。选择器是结构 ID 或 `#tag`。每个结果都带有结构 ID、起始区块、完整包围盒和包围盒中心，调用方可以标出真实占地，而不只是一个定位点。`WayfindingAPI.cancelSurvey(world, owner)` 会以 `CANCELLED` 结束该所有者的勘测。
+
 ## 方法一览
 
 ### 门面与记录
@@ -57,10 +75,15 @@ static void cancelSearch(ServerPlayerEntity player) {
 | `destinations(ServerWorld, LocateTarget.Kind)` | 按目标 ID 排序、去重的不可变列表；按世界对象与类别惰性缓存。 |
 | `locate(ServerWorld, UUID, LocateRequest, Consumer<LocateResult>)` | 返回 void；接收任务或立即回调终态结果。 |
 | `cancel(ServerWorld, UUID)` | 移除所有者任务，取消存在的地形 future，并回调 `CANCELLED`。 |
+| `survey(ServerWorld, UUID, SurveyRequest, Consumer<SurveyResult>)` | 返回 void；接收勘测或立即回调终态结果。 |
+| `cancelSurvey(ServerWorld, UUID)` | 移除所有者的勘测并回调 `CANCELLED`；所有者没有勘测时不执行任何变更。 |
 | `new LocateTarget(Kind, Identifier)` | 两字段不可为空；类别为 `TERRAIN`、`BIOME`、`STRUCTURE`。 |
 | `LocateTarget.name()` | 带回退的可翻译标签，规则见下文。 |
 | `new LocateRequest(target, origin, minimumDistance, radius)` | 目标不可为空，起点保存不可变副本；水平格数须满足 128 ≤ minimumDistance < radius ≤ 64000。 |
 | `new LocateResult(status, target, dimension, position)` | 位置保存不可变副本；`FOUND` 必须有位置，其余状态不能有。构造器仅检查此约定，不检查世界安全或目标注册。 |
+| `new SurveyRequest(structures, origin, radius, limit)` | 选择器列表不能为空，保存不可变副本，每项须是可解析的 ID 或 `#tag`；起点保存不可变副本；水平格数须满足 128 ≤ radius ≤ 16384；1 ≤ limit ≤ 32。此处不检查是否已注册。 |
+| `new SurveyResult(status, dimension, structures)` | 起始点保存不可变副本。服务按由近到远的顺序提供，且只在 `COMPLETE` 和 `PARTIAL` 时提供。 |
+| `SurveyResult.Found(structure, start, bounds, center, distance)` | 结构 ID、起始 `ChunkPos`、完整 `BlockBox`、包围盒中心，以及起点到放置定位点的水平距离。 |
 
 请求起点的 Y 是群系采样输入之一，不是唯一采样高度。半径为水平距离，候选检查包含边界。搜索顺序与粗粒度采样不保证返回最近的目的地。
 
@@ -109,11 +132,38 @@ static void cancelSearch(ServerPlayerEntity player) {
 
 地形准备在服务端线程捕获引擎、采样器与边界，再提交采样任务。世界树相关家族检查共享区域，平原检查规划区域。其他家族先检查确定性加权顺序中目标家族排首位的分区，避免构造无关几何；首轮未找到结果时，再完整枚举分区并保留正常竞争规则。这只改变搜索顺序，不改变生成归属，也不保证返回最近结果。使用 64 格环形采样、对齐到 4 格的坐标、家族与群系确认及请求水平范围；区域采样还要求权重大于 0.6。返回位置的 Y = 0，仅供方向或指南针引用，不是已验证的传送安全点。枚举与确认期间检查线程中断。
 
+### 结构勘测
+
+勘测回答「这些结构最近的已生成起始点在哪里」，并给出真实边界。它与 `locate` 共用结构预测规则，但在独立的服务中运行，同一个所有者可以同时持有一个搜索任务和一个勘测。
+
+| 状态 | 含义 |
+| --- | --- |
+| `COMPLETE` | 列表包含范围内最近的 `limit` 个起始点；范围内不足这么多时包含全部。 |
+| `PARTIAL` | 期限或确认预算先用完。列表按由近到远包含已确认的起始点，可能还有更近但未确认的。 |
+| `UNAVAILABLE` | 没有任何选择器解析到在此世界有放置规则的结构。 |
+| `BUSY` | 所有者已有勘测，或已有 4 个勘测在运行。 |
+| `CANCELLED` | `cancelSurvey`、数据重载成功或服务器停止。 |
+| `FAILED` | 准备或推进时抛出异常，见服务器日志。 |
+
+| 上限 | 数值与范围 |
+| --- | --- |
+| 活动勘测 | 全局最多 4 个；每个所有者 UUID 最多 1 个。与搜索任务的上限相互独立。 |
+| 共享 tick 预算 | 3,000,000 纳秒（3 ms），勘测顺序轮换。 |
+| 区块请求 | 每个勘测同时最多 3 个。 |
+| 确认次数 | 每个勘测最多 96 个候选区块。 |
+| 期限 | 现实时间 120 秒；到期后以 `PARTIAL` 返回已有结果。 |
+
+选择器按给定顺序在当前结构注册表中解析，未知的 ID 和标签会被跳过并记录警告。候选来自半径和世界边界内的随机分布网格与同心环位置，其他放置类型不产生候选。共用同一放置规则的结构共享候选区块，每个区块只被认领一次。候选按放置定位点的水平距离由近到远尝试，这个距离也就是结果里的 `distance`。
+
+候选须先通过 `shouldGenerate` 和结构存在检查；后者应用每个结构自己的选址规则，并在存档里已有区块数据时读取它。随后通过原版调度器把区块请求到 `STRUCTURE_STARTS` 来确认，每 tick 重新请求，从不阻塞等待。记录该组中第一个拥有子结构的起始点。不放置任何方块，也不把起始点标记为已探索。当确认了 `limit` 个起始点，且没有尚未测试或仍在请求中的候选比保留的最远一个更近时，勘测结束。
+
 ## 线程与生命周期
 
 `LocateService` 在 `END_SERVER_TICK` 推进任务。回调位于服务端线程，包括立即返回的 `BUSY`、`UNAVAILABLE` 与准备失败。通常的任务完成会捕获并记录回调异常；最初的所有者已忙或全局上限分支直接调用回调，异常会传播给调用方。
 
 数据重载成功与服务器停止时，会将当前任务以 `CANCELLED` 结束，中断地形任务、关闭工作线程并清空目录。失败重载不重置此服务。没有持久任务队列。内置对话适配器之外的调用方须自行处理断线或交互取消。完成回调应能在停服期间安全执行，避免在重置回调中启动替代任务。
+
+`SurveyService` 同样在 `END_SERVER_TICK` 推进，使用自己的预算。`BUSY`、`UNAVAILABLE` 与准备阶段的 `FAILED` 在调用 `survey` 时就会回调。完成回调的异常会被捕获并记录，只有 `BUSY` 分支直接调用回调。数据重载成功与服务器停止会以 `CANCELLED` 结束所有勘测。
 
 ### 村民适配器与指南针写入
 

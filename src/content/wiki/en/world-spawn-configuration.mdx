@@ -1,0 +1,119 @@
+---
+title: "World spawn configuration"
+description: "Every option in the spawn section of the server config, with defaults, ranges and failure behaviour."
+category: data
+order: 179
+updated: 2026-09-30
+tags: ["spawn", "config"]
+---
+
+The `spawn` section decides where a new Overworld puts its spawn and how players arriving there are placed. Server operators and pack authors edit it; clients never read it. [World spawn](/en/wiki/world-spawn/) explains what the rules do in play.
+
+## Where the files live
+
+Edit the `spawn` object in `config/isekaiexpansion.json`. It is a configuration file, not a data-pack format: there is one copy per server or single-player installation, and data packs cannot override it. In game, the same options appear under **World Spawn (Server)** in the mod's config screen.
+
+## Minimal example
+
+This fragment only switches the system on, which is already the default. Merge it into the existing file; every omitted option keeps its default.
+
+```json
+{
+  "spawn": {
+    "enabled": true
+  }
+}
+```
+
+## Fields
+
+Distances are in blocks. Elevations are measured from sea level. Ranges are inclusive, and a value outside its range invalidates the whole section rather than being clamped.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn` | `object` | defaults below | Spawn selection and arrival settings. A missing or null object is restored to its defaults at load. |
+| `spawn.enabled` | `boolean` | `true` | Chooses the world spawn by these rules and places arriving players on safe ground. `false` leaves both to vanilla. |
+| `spawn.search` | `object` | defaults below | Where to look. See [Search](#search). |
+| `spawn.ground` | `object` | defaults below | What ground is acceptable. See [Ground](#ground). |
+| `spawn.preferences` | `object` | defaults below | Biome and terrain weights. See [Preferences](#preferences). |
+| `spawn.settlements` | `object` | defaults below | Villages to seek and structures to avoid. See [Settlements](#settlements). |
+| `spawn.arrival` | `object` | defaults below | How arriving players are placed. See [Arrival](#arrival). |
+
+### Search
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn.search.centerX` | `integer` | `0` | Block X the search rings out from. Any integer. |
+| `spawn.search.centerZ` | `integer` | `0` | Block Z the search rings out from. Any integer. |
+| `spawn.search.radius` | `integer` | `3072` | Farthest distance from the centre at which a spawn may be chosen, `256–16384`. |
+| `spawn.search.spacing` | `integer` | `48` | Distance between surveyed columns, `16–512`. Each column is shifted by up to `40%` of this so the grid does not show. Smaller values find more candidates and take longer. |
+| `spawn.search.comfortRadius` | `integer` | `768` | Candidates within this distance of the centre keep their full score; one comfort radius further out, the score has halved. `0–16384`. |
+| `spawn.search.chunkChecks` | `integer` | `12` | How many of the best candidates may be generated and searched for a safe block, `1–64`. The shortlist holds `32` candidates or twice this number, whichever is larger. |
+
+### Ground
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn.ground.minElevation` | `integer` | `2` | Lowest acceptable ground above sea level, `1–128`. |
+| `spawn.ground.maxElevation` | `integer` | `64` | Highest acceptable ground above sea level, from `minElevation` to `256`. Ground more than `40` blocks up scores up to `40%` lower. |
+| `spawn.ground.maxRelief` | `integer` | `9` | Largest height difference allowed across `8` samples `10` blocks from the candidate, `1–64`. |
+| `spawn.ground.shoreClearance` | `integer` | `32` | Outer radius of `16` water samples that lower the score, ocean counting twice, `0–256`. `0` skips them. Water at the fixed samples `10` and `24` blocks out always rejects the candidate, whatever this value. |
+| `spawn.ground.landmassRadius` | `integer` | `96` | Radius of the inner of two rings of `16` land samples; the outer ring is twice as far. `16–512`. |
+| `spawn.ground.landmassShare` | `number` | `0.85` | Share of those `32` samples that must be dry land, `0–1`. Rejects islets and narrow spits. |
+
+### Preferences
+
+Both lists hold rules written as `id=weight`. Rules are tried in order and the first one that matches wins. A weight of `0` forbids the match, `1` is neutral and `4` is the maximum.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn.preferences.unlistedBiomeWeight` | `number` | `0.45` | Weight of a biome no biome rule matches, `0–4`. |
+| `spawn.preferences.biomeWeights` | `array<string>` | 36 rules | Biome rules. Each is a biome ID or a `#tag` followed by `=weight`, such as `#minecraft:is_ocean=0` or `minecraft:plains=1`. An empty list gives every biome the unlisted weight. |
+| `spawn.preferences.terrainWeights` | `array<string>` | 20 rules | Terrain family rules, such as `isekaiexpansion:great_plains=1.2`. Tags are not accepted. A family with no rule, and ground outside any family, weighs `1`. |
+
+The default biome rules forbid `#minecraft:is_ocean`, `#minecraft:is_river`, `minecraft:mushroom_fields`, `minecraft:deep_dark`, `minecraft:frozen_peaks`, `minecraft:jagged_peaks` and `minecraft:stony_peaks`, and weigh `isekaiexpansion:great_plains` at `1.2`. The default terrain rules forbid `isekaiexpansion:world_tree`, `isekaiexpansion:halo_crown`, `isekaiexpansion:sentinel_isles`, `isekaiexpansion:verdant_knives` and every exotic family, weigh `isekaiexpansion:luminous_grove` and `isekaiexpansion:starlit_glade` at `0.6` and `isekaiexpansion:amber_basin` at `0.3`. Open the generated file to see every default rule.
+
+### Settlements
+
+Structure selectors are structure IDs or `#tags`, such as `#minecraft:village` or `minecraft:pillager_outpost`.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn.settlements.bonus` | `number` | `0.35` | Score raise for a forecast settlement at the preferred distance, `0–4`. `0.35` raises a candidate by up to `35%`; `0` turns the settlement pass off. |
+| `spawn.settlements.minDistance` | `integer` | `64` | Closer settlements give partial credit, down to half at the candidate itself. `0–4096`. |
+| `spawn.settlements.maxDistance` | `integer` | `512` | Settlements up to this far give full credit; credit fades to none at twice this distance. From `minDistance` (at least `1`) to `4096`. |
+| `spawn.settlements.structures` | `array<string>` | `["#minecraft:village"]` | Structures that count as settlements. An empty list turns the settlement pass off. |
+| `spawn.settlements.avoidStructures` | `array<string>` | 18 structures | Structures a spawn keeps away from: ancient cities and pillager, illager, witch, dragon and boss structures from vanilla and the pack's mods. A candidate with one forecast in range keeps `10%` of its score. An empty list turns the check off. |
+| `spawn.settlements.avoidRadius` | `integer` | `160` | How far a hostile structure reaches, `0–1024`. `0` turns the check off. |
+
+### Arrival
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `spawn.arrival.safeArrival` | `boolean` | `true` | Places a player joining for the first time, or respawning without a respawn point, on a safe block inside the `spawnRadius` game rule instead of vanilla's scatter. |
+| `spawn.arrival.searchRadius` | `integer` | `24` | When the spawn radius has no safe block, how far around the world spawn to search, `0–64`. |
+
+## Validation
+
+The server checks the whole section each time a search runs. One bad value makes the section invalid; nothing is clamped or skipped.
+
+- **Out-of-range number, malformed rule or invalid ID.** At world creation, the server logs an error naming the option and uses vanilla spawn selection. `/ise spawn survey` and `/ise spawn relocate` print the same message and change nothing.
+- **Weight rules.** A rule needs an `=` with text on both sides. The key is lowercased; the weight must be a number in `0–4`. A `#tag` in `terrainWeights` is an error. A well-formed ID that names no biome, tag or family is accepted and never matches.
+- **Structure selectors.** Only the syntax is checked in the config. An ID or tag that names nothing is skipped with a warning in the log when a search runs.
+- **Duplicate rules.** The first matching rule wins; later duplicates are ignored.
+- **Missing keys and null sections.** A missing key takes its default. A null section is restored to its defaults when the file loads. A null list is an error.
+- **Unknown keys.** Ignored. A misspelt option is silently left at its default.
+
+`spawn.arrival` is read without the full check: arrival placement uses `enabled`, `safeArrival` and `searchRadius`, clamping the last to `0–64`, so it keeps working while another option is invalid.
+
+## Reloading
+
+The file is read when the game starts. Every search and every player arrival reads the loaded settings afresh; nothing is cached between searches. The settings are server-local and never sent to clients.
+
+Changing the settings does not move an existing world's spawn. The world spawn is chosen once, when the world is created; to apply new settings to an existing world, run `/ise spawn relocate`.
+
+## Related
+
+- [World spawn](/en/wiki/world-spawn/) — how the rules pick a spawn, and the two commands.
+- [Terrain configuration](/en/wiki/terrain-configuration/) — the terrain families these weights refer to.
+- [Terrain and landmarks](/en/wiki/terrain/) — what each family looks like.

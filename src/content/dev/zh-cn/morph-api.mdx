@@ -3,7 +3,7 @@ title: "变身服务与扩展接口"
 description: "启动形态，注册能力、形态技能、tick、移动、乘坐处理器和变体。"
 category: api
 order: 115
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 变身包在 `net.kzeroko.isekaiexpansion.api.morph` 下公开服务端服务及注册接口。现有入口名为 `MorphService`，并非仓库标准的 `MorphAPI` 门面，部分公开上下文还暴露内部类型。应将这些耦合视为当前实现约定，不代表所有内部辅助类型都稳定。
@@ -75,12 +75,12 @@ void registerFormSkill(EntityType<? extends LivingEntity> formType) {
 
 | 方法 / 值 | 侧别 | 约定 |
 | --- | --- | --- |
-| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | 服务端 | 进入能力形态，或从匹配来源返回；布尔值表示是否接受。 |
+| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | 服务端 | 以能力的 `durationTicks` 进入能力形态，或从匹配来源返回；布尔值表示是否接受。 |
 | `morph(ServerPlayerEntity, Identifier, NbtCompound, Identifier, Identifier, Identifier, Identifier, int, int)` | 服务端 | 玩家之后依次为形态类型、视觉 NBT、来源 ID、主 ID、副 ID、可选皮肤、过渡和时长。检查实体、空间、骑乘，允许替换已有状态。 |
 | `morphFromEntity(ServerPlayerEntity, LivingEntity, Identifier, Identifier, Identifier, Identifier, int, int)` | 服务端 | 捕获并清理来源实体 NBT，再委托 `morph`。 |
 | `unmorph(ServerPlayerEntity)` | 服务端 | 开始正常退出；没有形态、已在退出或站立空间不足时返回 false。 |
 | `canReturn(ServerPlayerEntity)` | 服务端查询 | 检查当前位置的站立玩家空间，不依赖激活阶段。 |
-| `expire(ServerPlayerEntity)` | 服务端 | 仅从 `ACTIVE` 且有空间时开始退出。它本身不检查时长或截止点，组件负责该决定。 |
+| `expire(ServerPlayerEntity)` | 服务端 | 仅从 `ACTIVE` 且有空间时开始退出，然后通过 `SkillPowerUtil.startCooldown` 开始来源能力的冷却；来源不是已持有的能力时忽略。它本身不检查时长或截止点，组件负责该决定。 |
 | `UNLIMITED_DURATION` | 常量 | 0。 |
 | `MorphFormRequest(...)` | 值构建 | 要求形态、主、副 ID；可空 NBT 复制为空 compound，过渡最少 4，时长最少 0；皮肤可为 null。 |
 | `timed(Identifier, int, int)` | 值构建 | 无 NBT，两项能力为 `none`，无皮肤。虽然名为 timed，传入时长 0 仍是无限请求。 |
@@ -119,7 +119,7 @@ void registerFormSkill(EntityType<? extends LivingEntity> formType) {
 
 `MorphFormSkillRegistry.register(formType, actionId, handler)` 拒绝重复组合。解析要求当前激活形态的实体类型精确匹配。`canTrigger`、`canTriggerOnCooldown` 和 `trigger` 捕获处理器运行时异常，记录并返回 false，不取消注册。`trigger` 执行前先检查 `canTrigger`。
 
-`MorphFormSkillHandler` 必须实现 `trigger`；资格默认 true，冷却绕过默认 false。上下文提供动作 ID、技能上下文、组件、形态、服务端玩家和 `metaInt`。支持冷却中再次触发时，桥接器保留剩余冷却，而非重启配置时长。
+`MorphFormSkillHandler` 必须实现 `trigger`；资格默认 true，冷却绕过默认 false。上下文提供动作 ID、技能上下文、组件、形态、服务端玩家和 `metaInt`。支持冷却中再次触发时，桥接器保留剩余冷却，而非重启配置时长，也不会再次对这段沿用的冷却应用技能急速。
 
 `MorphFormTickRegistry.register(formType, handler)` 对每个精确类型只接受一个处理器。`tick` 在双侧激活形态上执行，使用 `MorphFormTickContext.isClient()` 区分。`preservesNativeRotation()` 默认 false，`detach` 默认无操作。tick 异常会在出错侧移除该类型处理器；detach 异常只记录，不移除。若处理器已因 tick 失败被移除，就不能依赖它继续收到 detach。
 

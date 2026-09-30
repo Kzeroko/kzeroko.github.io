@@ -3,10 +3,10 @@ title: "Terrain generation"
 description: "Registry ownership, deterministic landforms, world-tree persistence, chunk-local decoration and shader overlays."
 category: systems
 order: 178
-updated: 2026-09-26
+updated: 2026-09-30
 ---
 
-The terrain subsystem augments ReTerraForged with deterministic districts, prepared landmarks and volumetric geometry. It owns the default preset's registry bootstrap and a per-generator environment; these are internal implementation contracts, not a public terrain API.
+The terrain subsystem augments ReTerraForged with deterministic districts, prepared landmarks and volumetric geometry. It owns the default preset's registry bootstrap and a per-generator environment; these are internal implementation contracts. `TerrainAPI` is the one public surface: read-only queries about which landmark or district owns a position.
 
 ## What it does
 
@@ -111,6 +111,19 @@ The reader records validation failures in an `invalid` state instead of throwing
 | Save compatibility | Preserve family order and palette IDs. Missing configured exotic bindings can reject an older saved biome source on bind. |
 
 The project compiles its optional Iris integration against `1.7.6+1.20.1`. This pins the integration target, not proof that arbitrary current shader-pack versions match the recipe.
+
+### Public queries
+
+`api.terrain.TerrainAPI` tells other code where KTM2 landscape lies without exposing the engine. Both methods read the generator's own plans and never request or generate chunks. Call them on the server thread.
+
+| Signature | Returns |
+| --- | --- |
+| `TerrainAPI.available(ServerWorld)` | `true` when the world's biome source is a `TerrainBiomeSource` backed by a ReTerraForged generator with a terrain engine. |
+| `TerrainAPI.regionAt(ServerWorld, BlockPos)` | The `TerrainRegion` that owns the position; empty when none does, when the engine is absent or when `terrain.enabled` is off. |
+
+`TerrainRegion` is a record. `family` is the family biome ID, such as `isekaiexpansion:great_plains`; `center` is the region centre at ground height; `radius` is the horizontal reach of its owned landscape in blocks; `layer` is `SURFACE`, `ELEVATED` or `UNDERGROUND`.
+
+Ownership follows generation. A World Tree or Great Plains landmark owns positions where its blend weight exceeds `0.5` and reports its own family, radius and `SURFACE`; groves inside it report the landmark. A district owns positions where its footprint weight exceeds `0.5` and its plan owns the biome, and reports `80%` of its planned radius. Exotic families also require their exotic biome at that exact height, so a cavern roof or the ground beneath a floating island lies outside the region. The IsekaiTweaks atlas records discovered regions this way.
 
 ## Extending it
 

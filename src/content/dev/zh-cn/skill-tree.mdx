@@ -3,7 +3,7 @@ title: "技能树运行时"
 description: "Puffish 图形桥接、服务端条件检查、可习得能力奖励与快照式客户端界面。"
 category: systems
 order: 70
-updated: 2026-09-24
+updated: 2026-09-30
 ---
 
 技能树集成为 Puffish Skills 增加本地解锁条件与可习得能力奖励，并通过 Modern UI 界面展示其状态。这些接入点位于 `internal.skills`、`util.skills`、`util.origins` 与 `client.screen.skilltree`，属于内部实现；此子系统没有异界扩展公共 API 门面。
@@ -127,7 +127,7 @@ node tools/puffish_main_tree/validate_main_tree.mjs
 
 基类分配 `isekaiexpansion:learnable_active_<path>`，并将 `onTrigger` 转发至 `execute`。对应 Origins 资源使用类型 `isekaiorigins:triggerable_skill`、侧别 `ACTIVE`、类别 `LEARNED` 与该处理器 ID。`meta` 中包含 `max_level = 3`、`cooldown = "0"` 和 `energy = "0"`。冷却与能量表达式必须经 `SkillUpgradeMeta` 求值为非负整数；资源不使用旧的顶层升级键。
 
-在已注册处理器中实现效果，并通过现有触发路径读取等级与消耗上下文。`SkillPowerUtil.tryTriggerSkill` 检查激活策略、冷却与能量；执行被接受后，扣除能量并设置经过急速调整的冷却。空骨架仍会走被接受的路径，所以只改元数据，可能让玩家为一个空效果付费。处理器、生成的元数据、校验器假设与玩家文档应一起更新。
+在已注册处理器中实现效果，并通过现有触发路径读取等级与消耗上下文。`SkillPowerUtil.tryTriggerSkill` 检查激活策略、冷却与能量；执行被接受后，扣除能量并设置经过急速调整的冷却。`DynamicCooldownSkill` 可以自行决定冷却，并在固定锁定或沿用中的冷却上让 `appliesAbilityHaste` 返回 false。空骨架仍会走被接受的路径，所以只改元数据，可能让玩家为一个空效果付费。处理器、生成的元数据、校验器假设与玩家文档应一起更新。
 
 生成器边框名称对应已提供的 `circle_rank_1`、`circle_rank_2`、`circle_rank_3`、`hexagon_rank_2` 与 `hexagon_rank_3` 纹理族，并带有对应的暗色变体。新增奖励或图标时，应先通过素材与翻译校验，再发布重新生成的图形。
 

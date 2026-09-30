@@ -3,7 +3,7 @@ title: "Morph services and extension interfaces"
 description: "Starting forms and registering abilities, form skills, tickers, travel, passenger handlers and variants."
 category: api
 order: 115
-updated: 2026-09-19
+updated: 2026-09-30
 ---
 
 The morph package exposes server services and registration interfaces under `net.kzeroko.isekaiexpansion.api.morph`. The existing entry point is named `MorphService`, not a repository-standard `MorphAPI` facade, and several public contexts expose internal types. Treat those couplings as current implementation contracts, not a promise that every internal helper is stable.
@@ -75,12 +75,12 @@ This creates a form/action handler, not a power execution registration. The mod'
 
 | Method / value | Side | Contract |
 | --- | --- | --- |
-| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | server | Enter the owned power's form or return from a matching source; boolean reports acceptance. |
+| `MorphService.toggle(ServerPlayerEntity, MorphingSkillPower)` | server | Enter the owned power's form, with the power's `durationTicks`, or return from a matching source; boolean reports acceptance. |
 | `morph(ServerPlayerEntity, Identifier, NbtCompound, Identifier, Identifier, Identifier, Identifier, int, int)` | server | Form type, visual NBT, source ID, primary ID, secondary ID, optional skin, transition and duration after the player. Checks entity/space/riding; permits replacing existing state. |
 | `morphFromEntity(ServerPlayerEntity, LivingEntity, Identifier, Identifier, Identifier, Identifier, int, int)` | server | Captures/sanitises the source entity NBT and delegates to `morph`. |
 | `unmorph(ServerPlayerEntity)` | server | Starts normal exit; false when absent, already exiting or blocked by standing clearance. |
 | `canReturn(ServerPlayerEntity)` | server query | Checks standing-player space at the current position, independently of active phase. |
-| `expire(ServerPlayerEntity)` | server | Starts exit only from `ACTIVE` with clearance. It does not itself check duration or deadline; the component owns that decision. |
+| `expire(ServerPlayerEntity)` | server | Starts exit only from `ACTIVE` with clearance, then starts the source power's cooldown through `SkillPowerUtil.startCooldown`; a source that is not a held power is ignored. It does not itself check duration or deadline; the component owns that decision. |
 | `UNLIMITED_DURATION` | constant | 0. |
 | `MorphFormRequest(...)` | value construction | Requires form/primary/secondary IDs, copies nullable NBT to an empty compound, clamps transition to at least 4 and duration to at least 0. Skin may be null. |
 | `timed(Identifier, int, int)` | value construction | Uses no NBT, both abilities `none`, no skin. Passing 0 duration still makes an unlimited request despite the method name. |
@@ -119,7 +119,7 @@ The packet layer does not catch arbitrary ability callback exceptions. Keep call
 
 `MorphFormSkillRegistry.register(formType, actionId, handler)` rejects duplicate pairs. Resolution requires an active form of that exact entity type. `canTrigger`, `canTriggerOnCooldown` and `trigger` catch handler runtime exceptions, log and return false without unregistering. `trigger` checks `canTrigger` before executing.
 
-`MorphFormSkillHandler` requires `trigger`; eligibility defaults true and cooldown bypass defaults false. Its context exposes action ID, skill context, component, form, server player and `metaInt`. The bridge keeps remaining cooldown when an accepted cooldown bypass is supported, rather than restarting the configured duration.
+`MorphFormSkillHandler` requires `trigger`; eligibility defaults true and cooldown bypass defaults false. Its context exposes action ID, skill context, component, form, server player and `metaInt`. The bridge keeps remaining cooldown when an accepted cooldown bypass is supported, rather than restarting the configured duration, and does not apply ability haste to that carried-over clock a second time.
 
 `MorphFormTickRegistry.register(formType, handler)` accepts one handler per exact type. `tick` runs for active forms on both logical sides; `MorphFormTickContext.isClient()` distinguishes them. The handler defaults `preservesNativeRotation()` to false and `detach` to no action. A tick exception removes that type's handler from the registry on the failing side. A detach exception is logged without removal. Do not rely on detach being called through a handler already removed by a tick failure.
 
