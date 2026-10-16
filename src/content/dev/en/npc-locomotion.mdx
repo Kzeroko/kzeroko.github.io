@@ -3,7 +3,7 @@ title: "NPC locomotion"
 description: "Ground gait, navigation caches, obstacle flight, landing and swimming contracts for NPC controllers."
 category: systems
 order: 61
-updated: 2026-09-30
+updated: 2026-10-10
 ---
 
 NPC movement combines a continuous ground-speed solver with a phase-based flight/swim controller. These are internal runtime classes under `internal.ai.travel`, not public API facades; use them when extending the mod's NPC implementation.
@@ -74,7 +74,7 @@ Fallback mode follows actual state: air while flying; swim when the NPC can swim
 
 These ranges expand the bounding box between endpoints; they are not maximum travel distances. Exhausted searches may return partial paths. Ground candidates require support, no feet water/lava, loaded body chunks and body clearance. Air candidates require loaded clearance; swim candidates accept water at feet/head and may also use standable nodes. Segment clearance samples the translated body box at intervals no greater than `0.5` blocks.
 
-Ground reachability reuses its result for less than `20` ticks while the destination stays within `1.5` blocks. A moved destination bypasses that cache. Air/swim routes rebuild when absent, finished, mode-changed, target moved more than `1.5` blocks, age exceeds `30` ticks, or the next segment loses clearance. Thus `30` ticks is an age limit, not a minimum interval between searches. Missing routes are not negatively cached.
+Ground reachability reuses its result for less than `20` ticks while the destination stays within `1.5` blocks. A moved destination bypasses that cache. Air/swim routes rebuild when absent, mode-changed, target moved more than `1.5` blocks, age exceeds `30` ticks, or the next segment loses clearance. Finished routes rebuild except while a swim route retains a clear final approach. Thus `30` ticks is an age limit, not a minimum interval between searches. Failed water routes use a `10`-tick retry delay; missing air routes are not negatively cached.
 
 Clear direct travel returns the destination without a route. Waypoint completion radii are `0.85` blocks for air and `0.7` for swim; selection looks up to `7` nodes ahead for a clear segment. A client waypoint query simply returns its requested destination. Starting/stopping normal navigation clears route caches. `stopGroundNavigation()` releases only the walking path, preserving air/swim routes during movement ownership transfer.
 
@@ -124,7 +124,7 @@ Water takeoff requires a swimming-capable flyer in water, a dry non-swimming fol
 
 ### Destination flight and landing
 
-Ground-destination flight stores a landing pad and the anchor used to resolve it. Airborne escort, manual flight, airborne commands, active water takeoff and fluid escape use direct waypoint steering instead. A current destination is reused only while younger than `30` ticks and its anchor stays within `3.0` blocks; either condition failing allows another pad search. When refresh fails, an existing route is retained. Failed initial resolution waits `30` ticks.
+Ground-destination flight stores a landing pad and the anchor used to resolve it. Outside combat, airborne escort follows the owner; combat retreat and committed combat landing suspend that owner-follow mode. Combat retreat, airborne escort, manual flight, airborne commands, active water takeoff and fluid escape use direct waypoint steering instead. A current destination is reused only while younger than `30` ticks and its anchor stays within `3.0` blocks; either condition failing allows another pad search. When refresh fails, an existing route is retained. Failed initial resolution waits `30` ticks.
 
 For stationary destinations and routed waypoints, `NpcArrivalMotion` tapers desired velocity toward zero with remaining distance and blends velocity each tick. The step is capped by both maximum speed and remaining distance. Hover arrival tests the final destination, independently of route waypoint completion; an intentional follow hold never falls through to an old walking target. Travel facing uses horizontal velocity when the waypoint has a meaningful horizontal offset, with the existing bounded turn rate.
 
@@ -136,17 +136,17 @@ Direct, unobstructed escort adds sampled owner velocity to position correction a
 
 The route follows live air waypoints toward a point `0.6` blocks above the pad. Handoff requires the horizontal and signed vertical band in the table. A committed pad remains fixed while support and body clearance remain valid. Gliding pauses vertical motion while aligning, then descends; after `60` ticks it descends even without alignment. Descent speed is `-min(0.20, max(0.035, heightAbovePad × 0.2))` blocks/tick. Alignment never requests an upward impulse.
 
-A resolved-pad descent is committed. Airborne escort, distant-owner rescue, deep/free swimming or an aquatic command can interrupt it; ordinary renewed flight demand cannot. Physical ground contact completes landing. Touchdown stops navigation, restores gravity, clears horizontal velocity and removes positive vertical velocity. Followers turn toward their owner at the bounded settling rate; commanded NPCs retain travel facing. The owner-facing hold stops early when horizontal motion exceeds its threshold.
+A resolved-pad descent is committed. A renewed combat retreat request, airborne escort, distant-owner rescue, deep/free swimming or an aquatic command can interrupt it; ordinary renewed flight demand cannot. Physical ground contact completes landing. Touchdown stops navigation, restores gravity, clears horizontal velocity and removes positive vertical velocity. Followers turn toward their owner at the bounded settling rate; commanded NPCs retain travel facing. The owner-facing hold stops early when horizontal motion exceeds its threshold.
 
 Missing waypoints damp velocity and count stalls. The progress watchdog also invalidates the route when displacement stays below its threshold. A successful steering tick resets the consecutive stall counter before that watchdog runs, so repeated watchdog triggers alone do not guarantee the hover threshold will accumulate. In descent evaluation, sustained hover widens the landing search and ultimately starts vertical descent even without a pad. New flight requests can still change the phase; this is not an unconditional bound on total airborne time.
 
 ### Swimming and presentation
 
-Swimming requires enabled settings and capability, with submerged/deep water or an aquatic command in contact with water. A current airborne-free swim phase may continue with fluid height at least `0.35` while not grounded. Shallow foot contact alone does not force the free-swim phase.
+Swimming requires enabled settings, capability and measured water contact. Entry requires submersion or water height at least `0.5` blocks. An existing swim phase or aquatic command can continue while off the ground with water height at least `0.12` blocks. Pose and command flags cannot keep a dry NPC swimming or turn shallow grounded contact into free swimming. Leaving water control clears forward, sideways, upward and jump inputs, resets pitch and invalidates the swim route before ground or flight control runs.
 
-Command targets take precedence. An arrived aquatic hold has no movement target. Ordinary follow swimming stops within `SwimSettings.followStopRange`; when the owner is dry, the controller probes nearby dry land every `20` ticks and tightens the remaining follow stop distance to at most `1.0` block. A failed swim waypoint search falls back to the raw requested target.
+Command targets take precedence. An arrived aquatic hold has no movement target. Follow swimming uses the formation target horizontally and the wet player's current feet height vertically, including during cohesion. Stationary arrival requires both `SwimSettings.followStopRange` horizontally and a depth difference no greater than `0.5` blocks; an existing hold adds `0.25` blocks of release padding to both limits. Moving owners never enter this hold. The follow task releases walking navigation and traversal while swimming; the controller uses configured walk speed, with a minimum of `0.15`, independently of the last walking command. A dry owner triggers a nearby land probe every `20` ticks; swimming continues toward the exit until ground control takes over. A failed swim waypoint search stops steering and retries after `10` ticks unless the destination changes substantially or becomes directly reachable. A completed route retains its validated final approach so waypoint tolerance does not strand the NPC below a bank.
 
-Active swimming is a separate tracked animation state: entry uses `NpcConfig.swimRange`, continuation uses `swimStopRange`, and a changed decision must persist for `3` ticks. Nonpositive thresholds use `0.2` blocks. Clearing a target clears this state; the state itself does not stop the steering calculation.
+Active swimming is a separate tracked animation state: entry uses `NpcConfig.swimRange`, continuation uses `swimStopRange`, and a changed decision must persist for `3` ticks. Nonpositive thresholds use `0.2` blocks. Clear-water pursuit of a moving owner also requests the active state. Clearing a target clears this state; the state itself does not stop the steering calculation.
 
 The base entity's swim visual has its own hysteresis:
 
@@ -156,13 +156,17 @@ The base entity's swim visual has its own hysteresis:
 | Entry stability | `2` ticks; aquatic commands use `1`. |
 | Minimum visual hold | `30` ticks; continued contact renews it to at least `15`. |
 | Exit stability | `12` ticks after the minimum hold expires. |
-| Immediate exit | Capability lost, flying, riding, sleeping, dead, or grounded with no submersion and water height below `0.12` blocks. |
+| Immediate exit | No measured water contact, flying, riding, sleeping, dead, or grounded with no submersion and water height below `0.12` blocks. |
 
-Water contact also samples the entity column at offsets `0.05`, `0.45`, `0.95`, and `-0.15` while already in swimming pose. Visual state controls `SWIMMING` versus `STANDING` pose. Water movement input is divided by the movement attribute with a floor of `1.0E-5`.
+Water contact requires the entity's touching-water flag and positive measured fluid height. It does not sample water above or below the body. Visual state controls `SWIMMING` versus `STANDING` pose. Water movement input is divided by the movement attribute with a floor of `1.0E-5`. Steering uses the full three-dimensional target direction, slows within `1.0` block of a waypoint and is independent of visual pitch. A directly vertical destination produces no horizontal input. During water control, body facing follows controller yaw without the walking backwards-motion correction. Buoyancy is suppressed while steering downward. Clear-water follow adds an `8`-tick lead from sampled owner velocity to the steering demand, only when that lead remains a clear aquatic position. Routed obstacle turns do not use the lead. Movement still runs through vanilla water travel and drag; a moving, directly pursued sprinting owner also enables NPC sprint swimming.
 
-Shore assistance applies within horizontal distance `1.65` and vertical delta `-0.75–1.5` blocks when the target fluid is empty. It activates jumping and adds `0.035` horizontal and `0.08` vertical velocity; upward input is at least `0.7` of the scaled swim speed.
+Shore assistance requires actual water contact, horizontal collision and a dry, standable target within horizontal distance `1.65` blocks and vertical delta above `0.05` and at most `1.5` blocks. It activates jumping, adds `0.035` horizontal velocity and raises vertical velocity to at least `0.08` without adding another vertical impulse. A `10`-tick cooldown limits repeat attempts. Level or lower dry targets receive no shore lift.
 
 Aquatic wandering can replace a block target's height with the NPC's current height if that water position has clearance, only in `WANDER`/`WANDER_BY_RADIUS` without command/anchor or flight. Arrival uses at least `2.0` blocks horizontal range and an aquatic target column. The qualifying condition already requires water contact, so the current successful branch does not enforce the helper's later `3.0` vertical fallback.
+
+### Combat movement ownership
+
+`NpcConfig.rangedCombat` owns bounded ground footwork, configurable escape leaps, finite guard/evasion windows and pressure-aware casting. Actions remain available during unlocked movement; a failed route does not reserve combat. It does not request flight or own a landing sequence. Ordinary follower flight is suppressed while a hostile target is present. Actions declare `GROUND`, `GROUND_OR_WATER`, `WATER`, `AIR` or `ANY`; Evelina uses GROUND_OR_WATER, allowing submerged casting without aerial attacks. Brief knockups pause only ground windups, never airborne delivery. See [NPC combat](/en/dev/npc-combat/) for all tuning groups and action requirements.
 
 ## Contracts
 
@@ -193,7 +197,7 @@ While riding or flying, step assist returns the supplied vanilla height. A swimm
 | `preferFlight` | `boolean` | `false` | Prefer eager automatic flight over ground-route and traversal acquisition; enables unsupported-owner air following. Beyond followRange, distance rescue applies with either preference. |
 | `flyOutOfFluid` | `boolean` | `false` | Requests fluid escape when in water/lava and unable to use swimming. |
 | `followStartRange` | `double` | `12.0` | Ground takeoff distance in blocks, compared as a square. |
-| `followStopRange` | `double` | `4.0` | Owner-flight continuation distance outside GROUND, squared for comparison. |
+| `followStopRange` | `double` | `1.0` | Owner-flight continuation distance outside GROUND, squared for comparison. |
 | `maxGlideDropRange` | `double` | `6.0` | Downward fallback landing/ground-probe distance in blocks. |
 | `hoverRadius` | `double` | `3.0` | Near-owner distance used when choosing hover after no landing pad is found. |
 | `flightSpeed` | `float` | `2.0` | Multiplies movement attribute before arrival taper. |
@@ -210,17 +214,16 @@ The switch is part of the entity's Java configuration, not saved NBT or a global
 
 ### Swim settings
 
-`NpcMoveControl.SwimSettings.defaultSettings()` supplies these values. Its constructor and factory also store values without validation. `disabled()` uses `false, false, 0, 0, 1.0, 1.0, 0.0` in field order.
+`NpcMoveControl.SwimSettings.defaultSettings()` supplies these values. Its constructor and factory also store values without validation. `disabled()` uses `false, false, 0, 0, 1.0, 0.0` in field order.
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `enabled` | `boolean` | `true` | Must also pass canNpcSwim(). |
-| `buoyant` | `boolean` | `true` | Adds 0.005 blocks/tick to vertical velocity while touching water. |
+| `buoyant` | `boolean` | `true` | Adds 0.005 blocks/tick to vertical velocity during water control unless steering downward. |
 | `pitchChange` | `int` | `45` | Pitch target is clamped to ±45 degrees by default; actual interpolation turns at 5 degrees/tick. |
 | `yawChange` | `int` | `45` | Maximum yaw change in degrees/tick. |
 | `speedInWater` | `float` | `0.1 / 0.3` | Movement-speed multiplier in water; default is the ratio of the declared player/NPC base scales. |
-| `speedInAir` | `float` | `1.0` | Fallback movement-speed multiplier outside touching-water state. |
-| `followStopRange` | `double` | `4.0` | Distance to stop choosing the follow swim target; separate from active-swim pose hysteresis. |
+| `followStopRange` | `double` | `1.0` | Horizontal follow arrival distance; also requires depth difference at most 0.5 blocks. Separate from active-swim pose hysteresis. |
 
 ### Ownership and persistence
 
@@ -240,7 +243,7 @@ Exercise slow walking, sustained sprinting, short sprint bursts, arrival and res
 
 Check step transitions while walking, riding, flying and leaving water. For flight, test a nearby unreachable ledge, a distant owner, a ceiling, a moved destination, no valid pad, a pad slightly above/below the NPC, and a commanded landing away from the owner. Inspect cache invalidation as well as successful arrival.
 
-For water, test shallow contact, depth transitions, an aquatic arrived hold, a dry owner above water and land exit. Observe phase, active-swim flag and visual pose independently. Reloading an NPC should rebuild runtime movement state rather than resume a saved route.
+For water, test a player diving directly below a nearby follower, ascending, crossing the surface and leaving onto flat land, slabs and a raised bank. Also test idle and wandering NPCs, underwater commands, an aquatic arrived hold, shallow contact and a dry owner above water. Observe phase, upward input, active-swim flag and visual pose independently. Recheck walking, stairs, ladders, parkour and flyer water takeoff after leaving water. Reloading an NPC should rebuild runtime movement state rather than resume a saved route.
 
 ## Related
 

@@ -1,0 +1,192 @@
+---
+title: "游戏活动与开发公告"
+description: "世界级活动调度、ModernUI 冒险纪事与多语言公告文档。"
+category: systems
+order: 56
+updated: 2026-10-07
+---
+
+异界扩展负责活动定义、说明与插画，IsekaiCore 负责调度、同步当前与待开放的活动和每日额度计算。玩家侧规则见[等级与经验](/zh-cn/wiki/leveling/)。
+
+## 它做什么
+
+`IsekaiGameEvents` 注册三个游戏活动。页面展示当前和待开放的活动，Beta 测试致谢始终排在活动首位。周末活动在工作日仍然可见，并标出下次开放时间。同一纪事也展示从客户端资源加载的开发公告与更新日志。纪事可以从暂停菜单打开，也可以从标题菜单打开，标题菜单中只有公告；两处入口都会标出未读条目的数量。
+
+| 活动 | 调度 | 展示顺序 |
+| --- | --- | --- |
+| `isekaiexpansion:ktm2_beta_test` | 常驻，向支持者和 Beta 测试玩家致谢。 | 0 |
+| `isekaiexpansion:gacha_riven_sky` | 从每个世界首次开放起，持续完整的 7 个游戏日。 | 10 |
+| `isekaiexpansion:adventurers_ascent` | 每个游戏周的第 6、7 天。 | 20 |
+
+冒险者的进境生效时，为每日战斗和战利品经验上限各增加 20%，不改变玩家最高等级，也不改变单次奖励的经验量。
+
+Core 的公共门面为 `net.kzeroko.isekaicore.api.GameEventAPI`。`EventDefinition`、`EventSnapshot` 和 `GameEventHook` 是 Core 的 `internal.gameevent` 包中的公开契约类型，并非独立门面。下述 Core 契约已对照本地源码及重新构建的 `0.4.0-build65` 依赖检查。
+
+## 运行时模型
+
+在通用初始化阶段注册定义与可选钩子。服务端首次计算活动时，Core 冻结两个注册表；重复 ID 和过晚注册都会抛出异常。定义可以引用未注册回调的钩子 ID，调度与额度加成仍然有效。
+
+每个计分板组件持有不可变目录，包含当前和待开放的活动。资格、钩子与额度加成只计算 `active()` 为真的条目。Core 在服务端启动、玩家加入和每 20 ticks（1 秒）计算一次。先发布完整的新状态，再执行结束与开始回调；回调异常会被隔离，状态变化才同步给客户端。服务端停止时结束活动钩子。重启后重新推导生效状态，不把已开始标记存盘恢复。启动过程没有 HTTP 拉取。定长活动将首次开放的 tick 写入世界存档，结束后仍保留；重新连接和重启不会让它再次开始。
+
+纪事通过 `GameEventAPI.scheduledEvents(world)` 读取当前或下一轮活动，按活动 ID 排序，并忽略已经结束的一次性活动。玩法调用方仍可使用 `GameEventAPI.activeEvents(world)`，其结果只包含生效活动。`JournalSnapshots.capture` 在 Minecraft 客户端线程解析标题、说明、时间文本和界面文字，再把一份不可变快照交给 ModernUI。标题菜单、暂停菜单和纪事打开期间每秒刷新一次快照，ModernUI 在自己的线程消费它。没有世界时，快照只包含公告。断线后，世界级活动状态随世界替换。
+
+## 约定
+
+### 调度与额度
+
+| 调度类型 | 契约 |
+| --- | --- |
+| `PERMANENT` | 始终生效。 |
+| `REAL_TIME` | UTC 纪元毫秒；包含开始时刻，不包含结束时刻。 |
+| `REAL_WEEKLY` | 指定星期几，以 UTC 午夜划分当天。 |
+| `REAL_MONTHLY` | 日期为 1–31；短月默认在月末触发，关闭夹取时跳过。 |
+| `GAME_TIME` | 从 1 起算的主世界已流逝日数与正数持续天数；结束日不包含在内。 |
+| `GAME_DURATION` | 从首次开放开始计算的正数时长，每个游戏日为完整的 24000 ticks。 |
+| `GAME_WEEKLY` | 已流逝世界日数能被 7 整除时生效。 |
+| `GAME_WEEKEND` | 第 6、7 天生效；两天共用下一周第 1 天的排他结束时刻。 |
+| `GAME_MONTHLY` | 月内日期从 1 起算，月长可设为 1–31 天，默认 30 天。 |
+
+日数使用世界年龄，不使用昼夜时钟。睡眠或调整昼夜时间不推进这些调度；世界未加载时不倒计时。`EventSnapshot` 包含 `active()`、`startGameTick()`、`endGameTick()`、`startEpochMillis()` 和 `endEpochMillis()`。tick 边界使用绝对世界年龄，epoch 边界使用 UTC 毫秒，未使用的时钟边界为零。界面将游戏日倒计时向上取整；待开放活动显示下次开放时间，生效的周末活动显示周期说明。现实截止时间按客户端本地时区显示。
+
+Core 在计分板组件中保存定长活动的起点：
+
+| NBT 字段 | 类型 | 默认值 | 校验与含义 |
+| --- | --- | --- | --- |
+| `firstAvailability` | compound | 空 | 活动 ID 对应首次起点，最多载入 1024 项。 |
+| `firstAvailability.<eventId>` | long | 首次计算时创建 | 非负的世界 tick；忽略非法 ID 或值，启动时清理已移除的定义。 |
+
+客户端与服务端须使用一致的当前活动数据包格式。
+
+`withDailyExpCapBonus(combatPercent, lootPercent)` 为两个类别分别接受 0 到 1000 的整数百分比。生效活动的百分比相加。有效上限为 `base + floor(base × totalPercent / 100)`，最大不超过整数上限。Core 的 `getDailyCombatBaseCap()` 与 `getDailyLootBaseCap()` 读取存储额度；`getDailyCombatCap()` 与 `getDailyLootCap()` 包含活动加成。写入器仍写基础额度。已得经验、休息重置与单次奖励量独立处理。异界扩展的家园休息和命运天平协调逻辑比较基础额度，因此活动不会重复叠乘自身。
+
+### 展示与线程
+
+`FrontendAPI.EventPresentation(eventId, title, summary, description, artwork, accent, order)` 提供客户端元数据。ID 须与服务端定义一致；标题、短摘要和说明为非空 `Text`，插画为可空的纹理 `Identifier`，强调色为 ARGB 整数。卡片先按整数顺序升序排列，再按 ID 排列；缺失展示使用顺序 100。在客户端初始化期间、页面打开前注册。再次注册会替换该 ID 的元数据。缺失元数据时使用本地化的邀约标题、通用说明与主题强调色。
+
+内置横幅位于 `assets/isekaiexpansion/textures/gui/events/`：`ktm2_beta_test.png`、`riven_sky.png` 与 `adventurers_ascent.png`，均为 800 × 200。生成提示词仍记录在 `docs/event-art-manifest.json`。除了这些横幅和暂停菜单所用的冒险者图标图集，纪事的面板、徽记、标签、角标与分隔线都以矢量图形绘制。
+
+纪事是一个独立的全屏界面。所选条目的横幅放大并压暗后铺满背景，每次切换都会交叉淡化，上方飘着染上条目强调色的星尘。鎏金面板上依次是带未读数量的徽记标题栏、分类标签、插画条目列表、阅读区和操作提示页脚。
+
+| 纪事元素 | 尺寸或行为 |
+| --- | --- |
+| 主面板 | 最大 920 × 560 dp，与窗口各边至少相距 14 dp。 |
+| 条目列表 | 宽 252 dp，卡片高 84 dp。 |
+| 阅读页横幅 | 阅读区宽度的 30%，限制在 136–188 dp；随正文一起滚动。 |
+| 紧凑布局 | 面板宽度低于 640 dp 时，列表与阅读页共用同一区域。 |
+| 切换文章 | 新文章在旧文章上方升起或滑入，持续 280 ms；正文各段间隔 45 ms 依次出现。 |
+| 减少动态效果 | 淡入淡出最长 90 ms，取消位移、循环动画、横幅缩放与数字滚动。 |
+
+卡片在靠右的横幅上显示类型标签、状态或发布日期、标题，以及倒计时、作者或摘要。进行中的活动带有呼吸闪烁的标记，未读条目带有 NEW 角标。悬停时有一道光泽扫过卡片，选中时强调色竖条伸长并出现鎏金边框；变化的只是光效，卡片本身不会在指针下移动。每个分类标签显示条目数量，含未读条目时带一个红点。除「全部」外，空分类自动隐藏，同一个指示块在标签之间滑动。
+
+文章打开时，横幅从轻微放大的状态落定，随后按阅读顺序展开：活动时钟、作为引言的摘要、数值逐渐增长到百分比的加成徽章、分隔线和原文正文。公告与更新日志以一枚印记收尾。横幅以不到一半的滚动速度移动；文章高于阅读区时，阅读区边缘的细轨显示阅读进度。「全部」分类先列出已排期活动。紧凑布局中，点选条目进入阅读页，Escape 先返回列表，再离开纪事。所选条目被移除或活动到期后，由第一个未读条目接替，没有未读时由第一个条目接替；紧凑布局返回列表。
+
+活动时钟是一张独立的带框卡片，与横幅隔开，不贴在横幅边缘。它显示距离下一个时间点还有多久。现实时钟的调度按「天和小时」「小时和分钟」或「分钟」倒数，并给出本地截止时间。游戏时钟的调度按完整游戏日倒数，不足一日按一日计，并按每秒 20 ticks 估算剩余游戏时长。时钟表盘环绕一个沙漏；同时具有开始与结束时间的进行中活动，表盘圆环表示剩余比例，文章打开时从满环消退到该比例。常驻活动不显示时钟。待开放活动的加成会压暗显示，标题注明开放后才生效。
+
+| 控件 | 作用 |
+| --- | --- |
+| 上 / 下 | 选择上一个或下一个条目；紧凑布局中改为移动焦点。 |
+| 左 / 右 | 切换到上一个或下一个可见分类。 |
+| Page Up / Page Down | 滚动当前文章。 |
+| Enter 或点击 | 打开条目并标为已读。 |
+| Escape | 先离开紧凑布局中的文章，再离开纪事。 |
+
+`JournalSnapshot` 携带条目、已解析的界面文字和公告目录修订号。Minecraft 线程通过 volatile 字段发布快照，视图的构建、测量与动画均在 ModernUI 线程执行。每个条目把内容与实时时间分开：如果刷新只改变倒计时或进度，现有卡片与文章会就地更新，保留阅读位置和正在播放的动画。只有内容或目录修订号变化时，文章才会重建。列表变化时，保留下来的卡片滑到新位置，新卡片升起出现。快速切换文章时，最多保留正在进入和正在离开的两篇。返回键回调只读取 volatile 紧凑阅读标记，并通过 `MuiModApi.postToUiThread` 投递操作。视图分离时取消动画、释放渐变。每个纹理在一次纪事中只查找一次，缺失的纹理也一样；图片本身仍由 ModernUI 图片存储管理。
+
+### 已读状态
+
+通过点击或 Enter 打开条目时，条目立即标为已读。纪事自动选中的条目——打开时、切换分类后或用方向键浏览时——要保持选中 1.4 秒才会标为已读。有未读条目时，纪事打开后先选中第一个未读条目；标题栏的全部已读按钮可以一次清空其余未读。标题栏数量、分类红点，以及暂停菜单和标题菜单入口上的未读角标，读取的都是同一份状态。
+
+已读键对应一次活动或一个公告版本。活动的键是 `event/<id>@<start>`，start 是纪元毫秒或游戏 tick 形式的开始时间；公告的键是 `notice/<id>@<date>`，清单带有版本时再追加 `#<version>`。因此循环活动每次重新排期都会显示为新条目，公告在日期或版本变化后也会重新显示为新条目。客户端在 `config/isekaiexpansion-journal.json` 中保存最近的 512 个键，由 Minecraft 的 IO 工作线程写入。这个文件属于客户端，所有世界和服务器共用。
+
+### 公告文档
+
+开发公告完全属于异界扩展的客户端资源，不创建 Core 活动，不改变玩法，也不需要服务端数据包。每则公告的清单放在 `assets/<namespace>/announcements/entries/<id>.json`，对应 ID 为 `<namespace>:<id>`；正文放在 `assets/<namespace>/announcements/documents/<language>/<id>.txt`。资源包优先级分别决定清单与所引用正文的实际来源。移除资源后，下次成功重载会移除对应公告。
+
+内置 `developer_letter.json` 是 @Kzeroko 的个人来信，提供英文与简体中文，`author` 为 `@Kzeroko`。异界扩展不附带示例更新日志；Release Studio 以同一 `changelog` 类型导出客户端更新公告，整合包版本写入 `version`，`author` 为 `@Kzeroko`；超过 32 个字符的整合包版本无法导出。可选语言版本遵循下文的回退规则。最小清单示例：
+
+```json
+{
+  "kind": "announcement",
+  "date": "2026-10-07",
+  "locales": {
+    "en_us": {
+      "title": "A few words from me",
+      "summary": "From @Kzeroko: beta testing, your feedback, and a thank-you.",
+      "document": "isekaiexpansion:announcements/documents/en_us/developer_letter.txt"
+    }
+  }
+}
+```
+
+使用全部可选字段的更新日志示例：
+
+```json
+{
+  "kind": "changelog",
+  "date": "2026-10-20",
+  "order": 10,
+  "author": "@Kzeroko",
+  "version": "v0.4.1",
+  "artwork": "my_pack:textures/gui/notices/update.png",
+  "locales": {
+    "en_us": {
+      "title": "Update notes",
+      "summary": "Fixes and polish for this release.",
+      "document": "my_pack:announcements/documents/en_us/update.txt"
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `kind` | `enum(announcement, changelog)` | required | 指定公告或更新日志分类。 |
+| `date` | `string` | required | 合法的 ISO 本地日期，例如 `2026-10-07`。仅用于展示和排序，不控制发布时间或过期时间。 |
+| `order` | `integer` | `100` | 有符号 32 位整数优先级，升序排列；相同优先级先按日期降序，再按 ID 排序。 |
+| `author` | `string` | `null` | 非空白的单行文本，最多 64 个字符，作为署名显示在日期旁；直接显示。 |
+| `version` | `string` | `null` | 非空白的单行文本，最多 32 个字符；显示在版本标签和卡片信息行中，并计入已读键；直接显示。 |
+| `artwork` | `identifier` | `null` | 提供时须指向 `textures/*.png`。没有任何资源提供该纹理时，重载阶段会记录警告并忽略插画，公告仍正常加载并显示主题横幅底色。 |
+| `locales` | `object` | required | 最多 16 个语言版本，必须包含 `en_us`。语言代码匹配 `[a-z0-9_]{2,32}`，内容字段见下方。 |
+| `locales.<language>.title` | `string` | required | 非空白的单行标题，最多 160 个字符；直接显示，不作为翻译键。 |
+| `locales.<language>.summary` | `string` | required | 非空白的单行摘要，最多 320 个字符；直接显示。 |
+| `locales.<language>.document` | `identifier` | required | `announcements/documents/` 下实际存在的 UTF-8 `.txt` 正文资源。 |
+
+正文保留行首空格、连续空格、制表符、空行和末尾空白，只移除开头的 UTF-8 BOM，并把 CRLF、CR 换行统一为 LF。长行按阅读区宽度折行。标记、翻译键语法与链接均按原文显示，不进行解析。空文件或仅有空白的正文无效。每则公告独立查找当前 Minecraft 语言；没有对应版本时回退到 `en_us`，查询不区分大小写。
+
+| 资源限制 | 上限 |
+| --- | --- |
+| 清单 | 32768 字节 |
+| 正文 | 每种语言 65536 字节 |
+| 语言版本 | 每则 16 个 |
+| 已加载公告 | 256 则，按资源 ID 顺序检查 |
+
+清单或语言内容中出现未知字段、非法值、缺失正文、错误的 UTF-8 或超出大小限制时，会记录警告并跳过整则公告。无效的高优先级覆盖不会回退到低优先级清单，其余公告仍可加载。准备阶段在 UI 线程之外读取资源，应用阶段原子替换不可变目录并递增修订号。资源重载或切换语言后，已打开的纪事在下一次展示刷新时更新。
+
+模组在客户端初始化期间调用一次 `AnnouncementAPI.initClient()`，注册资源加载器。`net.kzeroko.isekaiexpansion.api.client.AnnouncementAPI.snapshot(language)` 返回客户端不可变 `Snapshot(revision, entries)`。其中每个 `Announcement` 包含 ID、类型（`ANNOUNCEMENT` 或 `CHANGELOG`）、日期、顺序、可空插画、可空作者、可空版本、标题、摘要与正文。重载时被忽略的插画为空。客户端任意线程均可读取已发布快照；首次资源重载前为空。公告通过资源编写，不提供运行时注册。调用方自行传入语言代码，API 不读取 Minecraft 语言管理器。
+
+## 扩展方式
+
+通过 Core 注册通用定义，通过异界扩展客户端门面注册同 ID 的展示。以下两次调用分别放入通用和客户端初始化器：
+
+```java
+GameEventAPI.register(EventDefinition.permanent("my_pack:expedition", "my_pack:progression")
+        .withDailyExpCapBonus(20, 20));
+
+FrontendAPI.registerEvent(new FrontendAPI.EventPresentation("my_pack:expedition",
+        Text.translatable("my_pack.event.title"), Text.translatable("my_pack.event.summary"),
+        Text.translatable("my_pack.event.description"),
+        new Identifier("my_pack", "textures/gui/events/expedition.png"), 0xFFE5C785, 30));
+```
+
+服务端回调使用 `GameEventAPI.registerHook(id, hook)`，资格查询使用 `GameEventAPI.isActive(world, id)`。调用方通过门面操作，不直接改运行时注册表。展示元数据不授予活动资格，也不消耗召唤货币。
+
+## 验证
+
+运行 Core 的 `EventScheduleTest` 检查 UTC 边界、短月、从 1 起算的游戏月份、非法调度及额度舍入与溢出；重新构建 Core 后再编译异界扩展。检查开始与结束、重新连接、重启和切换世界。确认旧世界中途引入的 7 日活动获得完整的 7 天，保存重载后维持倒计时，结束后不会重开。检查周末前后的第 5/6/7/8 天，确保第 6 天转入第 7 天时不重启钩子。运行 `EventSyncTest` 验证数据包往返、工作日可见性，以及只有生效期间才提高战斗和战利品额度。工作日应显示下次周末开放时间，但不提前给予加成。活动生效时 100 的额度应变为 120，已获得的 80 经验在两个状态切换中均保持 80。活动期间切换家园休息和命运天平效果，确认重复 tick 不改变存储的基础额度。
+
+运行 `AnnouncementParserTest`，检查原文空白、语言回退、非法元数据、作者与版本长度限制、UTF-8 大小限制与内置双语正文。在游戏中分别从暂停菜单和标题菜单打开纪事，检查各分类、键盘浏览、快速切换和独立滚动。确认 NEW 角标、标题栏数量和两处菜单角标会在点击、停留 1.4 秒和全部已读后清除，并在重启后保持清除。观察进行中活动的倒计时与表盘推进时，文章动画不会重新播放，时钟卡片也不与横幅重叠。阅读时跨越 640 dp 调整窗口，再检查紧凑布局的返回与 Escape、英中文折行、UI 缩放和减少动态效果。用资源包覆盖正文，在文章打开时重载，再移除公告或等待活动到期。编译与解析测试不能代替这轮视觉验收。
+
+## 相关页面
+
+- [等级与经验](/zh-cn/wiki/leveling/)
+- [成长运行时](/zh-cn/dev/leveling/)

@@ -1,0 +1,119 @@
+---
+title: "Projectile attachments and patterns"
+description: "Reusable attachment sets, homing volleys and overhead projectile rain."
+category: systems
+order: 35
+updated: 2026-10-15
+---
+
+`AttachmentAPI` owns groups of orbiting projectiles. `ProjectilePatternAPI` combines the existing `MagicProjectileAPI` delivery with delayed volleys and rain. Art, damage policy, targeting, placement and release timing remain separate inputs.
+
+## What it does
+
+Sets let racial powers and spells coexist without blocking one another. Each set has its own capacity, merge rule and input trigger; a category lets callers find related sets. `SpellCatalog` registers the configured spell family under `spell.instance.catalog`, with `ConfiguredSpell` as its shared base. Canonical spell identifiers are registered without retired aliases.
+
+Arcane Volley (`isekaiexpansion:arcane_volley`) channels 12 Magic Missile projectiles over 24 ticks (1.2 seconds). A seed chosen for each cast distributes shots through a randomized radial formation behind the caster, with radius 2.4 blocks. Each waits 5 ticks (0.25 seconds) before flight, uses ×2.5 speed and up to 28 degrees of turning per tick, and loses 0.025 of its damage multiplier per shot. The last shot deals ×0.725; the profile floor is ×0.65. Stopping the channel prevents further paid deliveries while emitted shots finish. The 8-second full-channel cooldown scales with held duration through the same proportional cooldown policy as channel beams.
+
+Meteor Rain (`isekaiexpansion:meteor_rain`) uses Shooting Star's entity, summon prelude, intro and impact presentation. A disk with a 4-block radius appears 16 blocks above the target, offset horizontally for a 45-degree descent from vertical. It can lower to 6 blocks if the upper position is blocked. After a 20-tick (1-second) reveal it emits 12 projectiles, 3 ticks (0.15 seconds) apart. The rain spell owns its damage attribution.
+
+## Runtime model
+
+The server owns membership, aim and release times. A launch request reserves selected shots; each remains in its formation until its own absolute launch tick, then detaches with flight age zero and an explicit velocity update. Other shots keep their slots. Initial delay and per-set interval come from the profile; interval 0 releases a selected batch together. Repeated swing callbacks cannot reserve a queued shot twice. Attached time does not consume flight lifetime, and queued shots finish their release schedule even if their prepared lifetime expires.
+
+Any main-hand swing, empty or holding any item, and Better Combat weapon swings use `AttachmentAPI.swing`. `EntityUtil.spellCursor` resolves the cursor against terrain and eligible entities using spell relations and visibility; the impact policy supplies additional exclusions. Range is the larger of the configured target range and 15 blocks plus Magic Sword Sense, capped at 64 blocks. A selected enemy may be tracked after launch; otherwise shots fly toward the captured cursor point. Prepared shots never acquire or release at nearby enemies automatically, and do not search for replacements after losing a selected target.
+
+Kitsune Foxfire uses the same set policy. Activating an existing set without a valid target returns failure before skill energy and cooldown are spent. One or two enemies can receive all available flames through round-robin assignment. Damage must apply before an entity impact consumes the flame; protected targets do not attract it. Reform adds one flame through the same capacity and spawn checks as summoning.
+
+`AttachablePositioner` samples one pose for simulation and presentation. Models, sprites and `EntityEffekAPI` use the owner's interpolated position, yaw and pitch while attached; yaw interpolation follows the shortest turn across the wrap boundary. Formation positions stay level as the owner looks up or down, while the shots face the aim direction. Orbiting arrays share the same geometry and continuous world-time phase. Rendering has no accumulated position filter and performs no target search.
+
+`EntityEffekAPI` moves and rotates the complete native effect while prepared, including during a queued delay. A `WORLD_WAKE` binding ends that prepared simulation when attachment ownership changes and starts flight using the native world-space position, rotation and scale APIs with an identity base frame. This keeps authored emission direction and trail inheritance consistent for direct shots and angled rain. `RIGID` retains the full-body transform throughout flight. Flight facing interpolates client velocity; unchanged transforms are not resubmitted.
+
+## Contracts
+
+### Attachment sets
+
+`AttachmentAPI.Set` requires an ID, category, capacity, merge policy and trigger. Capacity is 1–64; the owner also has a 64-attachment total limit. Category is a query label, not a mutual-exclusion lock.
+
+| Policy | Behaviour |
+| --- | --- |
+| `REPLACE` | Stage the requested set, then remove only the old members of that set. A failed spawn leaves the old set intact. |
+| `APPEND` | Add the requested count up to the set and owner limits. |
+| `REFILL` | Add only enough to reach the requested count, up to the same limits. |
+| `MANUAL` | Release only through explicit API calls. |
+| `SWING` | Queue release toward the cursor on a main-hand swing with any item or an empty hand. |
+
+
+
+`AttachmentAPI.Profile` additionally supplies count, formation style and spacing, attached and flight lifetimes, speed, turn degrees, target range, initial delay, inter-projectile interval, array rotation and impact ID. Lifetimes are positive ticks. Spacing is 0.1–16 blocks, speed is greater than 0 and at most 16 blocks per tick, turn is 0–180 degrees per tick, and target range is 0–64 blocks. Delay is 0–1200 ticks (0–60 seconds), interval is 0–100 ticks (0–5 seconds), and rotation is −360–360 degrees per tick. Invalid profiles throw before spawning.
+
+Fireball uses entity ID `isekaiexpansion:fireball`, with no alias for its retired prototype ID.
+
+Current save data retains membership, phase age, formation slots and motion settings in the `Attachment` compound. Its `Launch` compound records timing, absolute release tick, aim point and optional target UUID. This is entity save data, not a pack-author schema. Removed automatic trigger modes, detached waiting state and older save formats have no compatibility aliases; invalid attachment state is discarded.
+
+### Flight, placement and rain
+
+`MagicProjectileAPI.Flight` supplies speed multiplier, turn degrees, target range, wait ticks, damage multiplier and scale. Speed and damage multipliers are greater than 0 and at most ×8, turning is 0–180 degrees, range is 0–64 blocks, wait is 0–100 ticks (0–5 seconds), and scale is ×0.25–×3. Scale grows the projectile's collision box, its native effect size, its impact presentation and any splash radius together. `Flight.tuned` builds a spell's own flight from the velocity, potency and magnitude of its `SpellTuning`; `compose` multiplies a pattern's per-shot flight by the same three. `Fan(count, degrees)` spreads 1–8 copies of one direct cast across a horizontal arc around the aim, 0–45 degrees apart. Direct delivery without a flight uses the projectile's default tuning.
+
+`MagicProjectileAPI.Placement` supplies signed forward, lateral and vertical offsets plus search radius, search height and step. Negative forward offsets place circles behind the caster. The search checks up to 512 nearby poses for loaded space, cover and existing circle separation; exhaustion returns false. It does not stack several circles at the caster's feet when the preferred position is unavailable.
+
+`ProjectilePatternAPI.Volley` bounds the count to 1–64, interval to 1–100 ticks, wait to 0–100 ticks, and formation radius to 0.5–4 blocks. It also accepts flight speed, turning, range and damage decay/floor. Call `volleyShot` for each shot with its index, the cast's total shot count, the same seed for that cast and its `SpellTuning`; an index outside the count delivers nothing, and the tuning compounds into each shot's flight. Arcane Volley's formula spreads 6, 12, 24 or 36 shots across its 12 paid deliveries; damage falloff still follows the shot index down to the floor. The internal `backGate` sampler uses angular spacing and bounded radial jitter behind the caster; it has no ascending row counter or retry loop. Placement still rejects cover and unloaded space.
+
+`ProjectilePatternAPI.Rain` requires a unique logic ID, direct projectile profile, circle design, radius, preferred and minimum height, angle, count, interval, reveal and fade times. Radius is greater than 0 and at most 8 blocks. Height is 2–48 blocks, with minimum height no greater than preferred height. Angle is 0–60 degrees from vertical; 0 means straight down. Count is 1–128, interval 1–100 ticks (0.05–5 seconds), and reveal/fade times 1–100 ticks (0.05–5 seconds).
+
+`RainCast(ammunition, count, radius, tuning)` shapes one cast. Its count, 1–128, and radius, greater than 0 and at most 8 blocks, replace the profile's; shots take the projectiles of `ammunition` in turn, or the rain's own when the list is empty, and the tuning compounds into the flight. The launch volume is sized for the widest of the rain's own projectile and its ammunition at the tuned scale. Register ammunition through `registerAmmunition` so a saved rain can restore it. A circle whose saved logic state is invalid, including unknown ammunition, is discarded with a warning when it loads.
+
+Placement tries half-block height steps. The whole launch volume must fit loaded space and the world border, the centre path must be clear, and the descent must fit the projectile's range. If no height down to the minimum works, the cast fails. Disk sampling uses square-root radius and uniform angle in constant time; the projectile margin stays inside the disk. Shots travel in parallel, preserving the footprint at the destination. A shot blocked by newly placed cover is skipped without a retry loop. Terrain still blocks flight.
+
+Catalog projectiles use swept entity collision rather than a point sample. Wider Wind Blade, Aqua Cutter and Shooting Star entities are 0.8 blocks wide; Thunder Lance and Spirit Arrow are 0.6; the other catalog projectiles are 0.45. Terrain collision retains the existing block ray. `MagicProjectileAPI.ImpactProfile.splashRadius` is 0 for direct damage or greater than 0 and at most 8 blocks for impact-only area damage; splash requires a single-hit profile. The applied radius is the profile's radius times the projectile's scale, capped at 8 blocks. Shooting Star and its summon, volley and rain variants use radius 1.75. An entity or terrain contact emits one astral burst with relation and cover checks, without a second direct-hit damage call. Fireball, Fireball: Summon and Crimson Starfall use the same 1.75-block impact-only area policy through `FireballSpell.impacts`; each applies its own fire damage and Ignite payload once per eligible target.
+
+### Prepared elemental shots and circle beams
+
+Starlight Salvo (`isekaiexpansion:shooting_star_volley`) shares Arcane Volley's paid delivery pattern with Shooting Star's rift and projectile. Crimson Starfall (`isekaiexpansion:fireball_rain`) shares Meteor Rain's placement and timing with Fireball's existing intro, flight and surface impacts.
+
+Thunder Lance, Ice Needle and Flame Arrow each expose one `_attach` spell with two Styles: Sigil adds 1 shot and Trinity adds 3. Both Styles share an elemental `_arsenal` set with capacity 3, `APPEND` merge and `SWING` release. Different elements coexist. `AttachmentAPI.available` includes the owner's total budget, so a cast fails before delivery unless every shot of its Style fits. Spawn failure rolls back the new batch. Prepared shots last 600 ticks (30 seconds); a swing queues the first after 3 ticks (0.15 seconds), then the others 2 ticks (0.1 seconds) apart. Prepared, foxfire and spectral-sword payloads bypass hurt cooldown per hit, so simultaneous impacts retain each projectile's damage.
+
+Every other spell hit carries its strike from `SpellStrikes`: a projectile entity is one strike for its whole flight, and a ray or a synchronous cast opens a fresh one. A hit whose caster last landed a spell hit on the target with a different strike passes the target's hurt cooldown, so a mass cast lands in full. The same strike hitting again, damage dealt outside any strike and non-spell damage still respect the cooldown.
+
+`CircleBeamAPI.Profile` combines a beam profile, circle presentation, bounded placement, reveal, pulse interval, fade and `Sweep(arcDegrees, degreesPerTick)`. Arc is 0–120 degrees and speed is 0.05–30 degrees per tick. Sweep duration is `max(1, ceil(arcDegrees / degreesPerTick))`; active duration adds beam warmup, extension and 1 final tick. Reveal is 0–200 ticks (0–10 seconds), fade 0–100 ticks (0–5 seconds), and computed active duration must fit the beam maximum lifetime. Pulse interval is at least 1 tick and no greater than the beam heartbeat. Invalid profiles throw. Register each profile once before casting.
+
+`CircleBeamAPI.Pattern(profile, circles, arc, pace, stage, modulation)` shapes one cast. It plants 1–4 circles (`MAX_CIRCLES`) of the profile. Arc, 0–120 degrees, replaces each circle's sweep. Pace, ×0.25–×4, divides the authored sweep ticks, rounded and at least 1 tick, at no less than 0.05 degrees per tick, so the pass keeps its arc and only its length changes. Circles stand in the stage's row behind the caster, `2 × 0.72 × scale + 0.5` blocks apart with the middle ones raised up to 0.5 blocks; a lone cast keeps its authored placement. Circles on the caster's left keep the authored left-to-right pass and the others mirror it, so the beams converge on the aim. One active cast of the family is allowed per owner within 64 blocks, but circles of the same formula cast share its group and stand together. A circle that finds no placement is skipped, and the cast succeeds when at least one spawns. `ChannelBeamAPI.Modulation(scale, potency)` multiplies collision radius and presentation by ×0.25–×3 and damage by a potency greater than 0 and at most ×8; channel pulses accept the same modulation.
+
+Astral Requiem (`isekaiexpansion:astral_sweep`) pays once to plant a `BEAM_FOCUS` circle. It reveals for 20 ticks (1 second), runs for 97 ticks (4.85 seconds), and fades for 15 ticks (0.75 seconds). Its beam charges for 12 ticks (0.6 seconds), extends for 4 ticks (0.2 seconds), then receives damage pulses every 5 ticks (0.25 seconds). Each pulse uses `4 + 0.7P`, where `P` is astral spell power before shared damage modifiers. It tracks during charge, commits its aim as the sweep starts, then traverses 48 degrees at 0.6 degrees per tick over 80 ticks (4 seconds). Pitch stays fixed throughout the pass, including when aimed at the ground; there is no downward pullback or return pass. Range is 40 blocks and collision radius is 2.1 blocks. Placement starts 0.8 blocks behind, 1.8 sideways and 1.4 above the caster's eye origin. One active cast of the circle-beam family is allowed per owner nearby, however many circles it planted. Leaving its 64-block owner range or losing the owner ends it.
+
+`ChannelBeamAPI.Source` can attach the muzzle to an entity, track a target entity, or resolve a custom `Aim` each server tick. The callback returns a world-space aim point. `CircleBeams` samples its selected target during charge, retains the last point after target loss, and saves the committed aim for the sweep. Each circle has its own beam slot. Shared beam tracing hits all eligible entities before terrain and clips only against terrain; synchronised direction and length drive all native emitters. Terrain presentation refreshes each tick, while entity overlap and cover checks run on actual damage deliveries; no unpaid display tick scans damage candidates. Astral Comet uses collision radius 1.4 with authored radius 1.5 when translating width into native input 1, so both collision and visual thickness double. Entity tracking raises the aim point enough to clear the target footing with the whole beam; cursor ground aim remains exact.
+
+Evelina's `NpcBeamActions.channel` uses the same beam profile with a live entity target. `NpcAction.onExecuteTick` owns repeated deliveries; returning false interrupts the action. Her Astral Comet has a 24-tick (1.2-second) cast and 120-tick (6-second) execute window, a 5-tick (0.25-second) pulse interval, 360-tick (18-second) cooldown and a minimum starting distance of 6 blocks. Existing charge animations are reused. Bounded body turning follows movement; stopping, target invalidation or interruption releases the beam. NPC actions use their cooldown and execute lifecycle, not the player's energy account.
+
+Evelina's base power is 22 in all 14 supported spell schools, including Healing, Light, Dark, Blood and the spell-scaled Physical Melee school. `NpcCombatAttributes.addSpellPower` supplies the full school list from the internal `IsekaiSpellSchools.all`; ordinary melee attack damage remains 5 and maximum health remains 400. Her load hook reapplies this fixed base profile to saved entities while preserving equipment and status modifiers.
+
+## Extending it
+
+Supply a direct profile and an attachment profile with the same impact ID to reuse native art, damage and the flight intro. This helper returns the number successfully attached:
+
+```java
+static int attachSpell(LivingEntity caster,
+                       MagicProjectileAPI.DirectProfile projectile,
+                       AttachmentAPI.Profile attachment) {
+    return MagicProjectileAPI.attach(caster, projectile, attachment).size();
+}
+```
+
+Register impacts and rain logic once during common initialization. Use `AttachmentAPI.members`, `category` and `launch` for set-specific gameplay. The count/timing overload `launch(owner, set, target, count, delayTicks, intervalTicks)` reserves up to `count` shots; interval 0 requests simultaneous release. The result counts accepted reservations, and launch callbacks run when those reservations are accepted. Members stay attached until their scheduled tick. Register cast-circle presentation through `SpellClientData.registerCircle` on the client; no registration means no attached casting circle.
+
+## Verifying
+
+Run `gradlew.bat compileJava test assembleLanguageFiles`. Regression tests cover launch reservations, staggered and simultaneous timing, saved aim and queues, merge arithmetic, seeded rear placement, disk sampling, damage decay, bounded steering and constant-pitch sweep geometry. Pose tests cover frame-rate-independent sampling, yaw wrapping, native body rotation and world-space flight frames. These checks do not run a Minecraft world.
+
+In game, let foxfires orbit for more than 8 seconds, then test zero, one, two and many enemies, allies and protected NPCs. Confirm idle attachments never fire. Swing empty-handed, with an ordinary item and with a Better Combat weapon at an enemy, terrain and empty sky. Verify each queued shot stays attached until release, unrelated shots keep their slots, and every simultaneous impact deals damage. Save and reload a queued batch. Check foxfire skill activation costs separately from cursor swings. Release each barrage early to verify proportional cooldown, rear radial placement and only previously emitted shots continuing.
+
+Turn rapidly in first and third person at low and high frame rates with mixed elemental attachments and Spectral Swords. Check vertical aim, yaw wrapping and the transition into flight. Test Fireball rain at 0 and 45 degrees, under ceilings, beside walls and across chunk boundaries; verify trail direction and intro separately from the studio preview. Test Shooting Star and Fireball bursts on both entities and terrain, including nearby protected targets and cover, with no duplicate direct damage. Verify one Astral Requiem pass at different configured speeds, then a 4-circle pass and two Astral Requiems cast together. Cast a Fireball at the smallest and largest magnitude, and save and reload a rain with mixed ammunition. Test Evelina against a stationary target dummy and an approaching enemy: she holds inside her 16-block combat range and approaches only outside it. Test repeated incoming attacks, a 4-block danger band, safe ground sidesteps, blocked routes, fixed guard windows, quick counters, intense escape below 5.6 blocks, uninterrupted tactical volley commitment and underwater casting. Verify ground spells never deliver while airborne. Reload her entity to confirm all school base powers remain 22.
+
+The studio tracks pending, WIP, completed and discarded projects independently of these checks. Fireball remains a baseline project. Browser pattern previews illustrate choreography with native effects; server targeting and Minecraft collision require the game checks above.
+
+## Related
+
+- [Spell integration](/en/dev/spell-integration/)
+- [Magic circles](/en/dev/magic-circles/)
+- [Spell data](/en/wiki/spell-data/)
+
+- [Spell catalog and combat roles](/en/wiki/spell-catalog/)

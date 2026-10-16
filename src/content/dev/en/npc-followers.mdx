@@ -3,7 +3,7 @@ title: "NPC followers"
 description: "Session-bound squads, formation, commands, ladder queues, parkour and safe follower transfers."
 category: systems
 order: 62
-updated: 2026-09-25
+updated: 2026-10-14
 ---
 
 Followers belong to a connected player's current session, with at most `4` members. Persistent entity references and scoreboard lists support loading within that session; they do not keep a follower assignment active across disconnect and reconnect.
@@ -11,6 +11,8 @@ Followers belong to a connected player's current session, with at most `4` membe
 ## What it does
 
 The internal `NpcFollowerSquadComponent` stores membership on the scoreboard. `NpcFollowerSquadLogic` resolves formation targets, `NpcFollowerCommandController` owns commands, and `NpcFollowerTraversalController` coordinates ladders and parkour. `NpcFollowerSync` manages player sessions and transfers. These are internal implementation entry points, not public API facades.
+
+The travel and command half of this stack is written against `CompanionMobEntity`, the base class that both `BaseNpcEntity` and the summoned `SimpleCloneEntity` extend. A player's companion summons therefore take formation slots, climb, parkour, swim and obey move orders through the same code as squad members; only squad membership, sessions and transfers below are NPC-specific. Summon lifecycle is covered in [Summons](/en/dev/summons/).
 
 Use `BaseNpcEntity.beginFollowing(ServerPlayerEntity)` to start an assignment and `releaseFollowerOwnership()` to release it and restore the captured non-follower mode. The low-level start method checks server/session/capacity, but does not itself enforce favour, trust, marriage or interaction permissions. A player-facing integration must apply its own admission rules first.
 
@@ -20,7 +22,7 @@ Use `BaseNpcEntity.beginFollowing(ServerPlayerEntity)` to start an assignment an
 
 Joining opens a new positive session epoch and clears that player's old membership. Disconnect closes the session, clears the scoreboard membership and releases loaded followers across worlds. Unloaded NPCs carrying an old session fail reconciliation when loaded. Respawn preserves the connected session, reconciles loaded followers and requests transfer to the new player.
 
-Membership is keyed by entity UUID, not stable NPC identity. The component keeps both owner-to-followers and follower-to-owner indexes. Capacity checks can prune known loaded dead/removed/invalid followers; unknown unloaded UUIDs still occupy membership until explicitly removed. Tactical ordering uses only loaded, alive, active followers in the owner's world, sorted by role, membership slot and UUID.
+Membership is keyed by entity UUID, not stable NPC identity. The component keeps both owner-to-followers and follower-to-owner indexes. Capacity checks can prune known loaded dead/removed/invalid followers; unknown unloaded UUIDs still occupy membership until explicitly removed. Tactical ordering covers the owner's whole escort in their world: loaded, alive, active squad members plus the owner's companion summons. It sorts by role, then squad slot, then UUID; a summon has no squad slot and lines up after every possible one, in calling order.
 
 `beginFollowing` captures the previous non-follow mode, sets `FOLLOW`, stores owner/session, then admits membership. If final admission fails, it restores the previous state. Directly setting a mode or editing the tracked owner is not equivalent to this transaction.
 
@@ -39,6 +41,8 @@ release = max(base + 1.25, entry + 0.25)
 Airborne followers keep pursuing while sampled owner motion is active, instead of repeatedly entering cohesion during travel. Stationary holding resumes after the owner settles; sampling and distant-owner flight rescue are described in [NPC locomotion](/en/dev/npc-locomotion/).
 
 Entering sets a transient latch; leaving the wider release range or changing floor clears it. A cohesive target is the NPC's current position. This deliberately skips corridor and slot probes while close enough.
+
+Swimming releases walking navigation and traversal to the water controller. While both participants are in water, formation candidates require aquatic body clearance instead of ground support, and a moving owner suppresses cohesion just as during flight. Stationary water cohesion uses the flight height tolerances. Water follow keeps the formation target horizontally but tracks the wet player's feet height, so cohesion cannot suppress a dive. Depth arrival, steering and shore handoff are described in [NPC locomotion](/en/dev/npc-locomotion/).
 
 The formation heading is sampled once per player per world tick. Initial heading uses yaw; movement of at least `0.02` blocks updates it with blend `0.42`. A stationary player normally retains the previous valid heading, rather than continuously rotating the formation with look yaw.
 
@@ -72,9 +76,9 @@ Stationary owner-facing requires horizontal distance `0.4–6.0` blocks and turn
 
 ### Move and attack commands
 
-`tryStartMoveCommand(target, markerId)` is server-only and requires `FOLLOW`. It tests the requested block and the block above. Water destinations take precedence; otherwise a currently airborne flyer prefers an air destination, then ground/swim and air fallbacks apply. Acceptance needs a complete path whose reported target is within Manhattan distance `1`, or a validated ladder route for ground travel. A pure parkour possibility alone does not make initial command admission succeed.
+`tryStartMoveCommand(target, markerId)` is server-only, requires an escorting companion and returns a `MoveOrderResult`: `ACCEPTED`, `APPROACH` or `REJECTED`. It tests the requested block and the block above. Water destinations take precedence; otherwise a currently airborne flyer prefers an air destination, then ground/swim and air fallbacks apply. A candidate needs a complete path whose reported target is within Manhattan distance `1`, or a validated ladder route for ground travel. When neither candidate qualifies, admission ranks every standable spot within `4` blocks horizontally and `2` vertically of the request by its distance to the request and path-checks at most `6` of them; the first complete ground path is accepted as `APPROACH`. Only when that search also fails is the order `REJECTED`. A pure parkour possibility alone does not make admission succeed.
 
-On acceptance, the controller interrupts combat, stores the exact bottom-centre arrival position and travel mode, creates `NPC_FOLLOW_COMMAND_POS`, starts movement and records marker ownership. Ground commands can subsequently use shared ladder/parkour traversal and obstacle flight. They retain the original final anchor while using intermediate traversal paths.
+On acceptance, the controller calls the companion's `onCommandMoveStarted` hook (an NPC interrupts its combat action and forgets its target; a summon drops its fight), stores the exact bottom-centre arrival position and travel mode, creates `NPC_FOLLOW_COMMAND_POS`, starts movement and records marker ownership. Ground orders can subsequently use shared ladder/parkour traversal and obstacle flight. They retain their final anchor while using intermediate traversal paths.
 
 | Constant / rule | Value | Unit | Behaviour |
 | --- | --- | --- | --- |
@@ -82,24 +86,28 @@ On acceptance, the controller interrupts combat, stores the exact bottom-centre 
 | `COMMAND_COMPLETE_DIST` | `1.6` | blocks | Ground/air arrival radius; swim uses separate horizontal rules. |
 | `COMMAND_MIN_HOLD_TICKS` | `100` | ticks | Arrived hold, 5 seconds; measured against entity age. |
 | `COMMAND_STUCK_REPATH_TICKS` | `20` | ticks | Stuck/no-watermark-progress permits forced refresh. |
-| `COMMAND_STUCK_TELEPORT_TICKS` | `160` | ticks | Physical stall or accumulated failed refreshes invokes recovery. |
-| `COMMAND_NO_PROGRESS_TICKS` | `600` | ticks | No new closest-distance watermark invokes recovery. |
+| `COMMAND_STALL_TICKS` | `100` | ticks | Physical stall or accumulated failed refreshes resolves the order. |
+| `COMMAND_NO_PROGRESS_TICKS` | `200` | ticks | No new closest-distance watermark resolves the order. |
 | `COMMAND_WATERMARK_EPS_SQ` | `0.25` | blocks squared | Requires currentDistanceSquared + 0.25 < bestDistanceSquared; not a fixed linear-distance improvement. |
 | `COMMAND_MOTION_PROGRESS_EPS_SQ` | `0.01` | blocks squared | Physical motion resets fast stall counters. |
-| `COMMAND_BUDGET_TICKS_PER_BLOCK` | `30.0` | ticks per planned unit | Budget is ceil(plannedDistance × 30.0) + 100. |
-| `COMMAND_MIN_BUDGET_TICKS / COMMAND_MAX_BUDGET_TICKS` | `400 / 2400` | ticks | Bounds on the command budget. |
+| `COMMAND_BUDGET_TICKS_PER_BLOCK` | `20.0` | ticks per planned unit | Budget is ceil(plannedDistance × 20.0) + 100. |
+| `COMMAND_MIN_BUDGET_TICKS / COMMAND_MAX_BUDGET_TICKS` | `300 / 1800` | ticks | Bounds on the order budget. |
 | `COMMAND_MARKER_TICKS_PER_BLOCK` | `12.0` | ticks per planned unit | Marker estimate uses ceil(plannedDistance × 12.0) + 100 + 8. |
-| `COMMAND_MARKER_DURATION_TICKS / COMMAND_MARKER_MAX_DURATION_TICKS` | `140 / 2400` | ticks | Marker estimate clamp; release packet may end it earlier. |
+| `COMMAND_MARKER_DURATION_TICKS / COMMAND_MARKER_MAX_DURATION_TICKS` | `140 / 1800` | ticks | Marker estimate clamp; release packet may end it earlier. |
+| `SETTLE_HORIZONTAL_DIST / SETTLE_VERTICAL_DIST` | `3.0 / 2.0` | blocks | A stalled companion this close to its arrival settles where it stands. |
+| `APPROACH_SEARCH_RADIUS / APPROACH_VERTICAL_RADIUS` | `4 / 2` | blocks | Stand-in search box around the request. |
+| `APPROACH_MAX_PATH_PROBES` | `6` | path searches | Path checks spent on one stand-in search. |
+| `APPROACH_MIN_GAIN` | `1.0` | blocks | A re-route must end this much nearer the request than the companion already is. |
 
-The planned-distance estimate is the maximum of straight distance, accepted path node count and estimated ladder route length. A path's node count is not a measured geometric length. Fast stall counters reset on meaningful motion or traversal ownership; closest-approach and command-tick accounting run before traversal and are not reset by repathing. A successful one-shot recovery teleport explicitly resets command ticks and enters arrived hold.
+The planned-distance estimate is the maximum of straight distance, accepted path node count and estimated ladder route length. A path's node count is not a measured geometric length. Fast stall counters reset on meaningful motion or traversal ownership; closest-approach and order-tick accounting run before traversal and are not reset by repathing.
 
-At expiry, recovery loads the target chunk and revalidates the accepted travel mode: ground needs standability, swim needs water and clearance, air needs body clearance and must not resolve as a swimmable target. It attempts the accepted arrival position. Successful recovery clears velocity/fall distance and starts the `100`-tick hold. A command can use this successful teleport only once; later terminal failure releases the command and sends `message.isekaiexpansion.npc_command.move.abandoned`.
+When the budget, the watermark or the stall counter runs out, the order resolves instead of retrying. A companion within `3.0` blocks horizontally and `2.0` vertically of its arrival, on the ground or in water, settles: its current position becomes the arrival, the `100`-tick hold starts and the owner hears `message.isekaiexpansion.npc_command.move.settled`. Otherwise, once per order, the stand-in search runs again around the original request, limited to spots at least `1.0` block nearer the request than the companion already is; a reachable spot restarts travel with a fresh budget and `message.isekaiexpansion.npc_command.move.rerouted`. If that fails too, the order is released with `message.isekaiexpansion.npc_command.move.abandoned` and the companion resumes following. Nothing teleports a companion onto an anchor it could not walk to.
 
-Ground/air arrival uses the `1.6` radius. Aquatic arrival uses `2.0` horizontal blocks; if touching water with an aquatic target column, no vertical test follows, otherwise the vertical tolerance is `3.0`. After the hold, an NPC still at its destination releases the command; displacement resumes travel. Marker release is sent for a positive marker ID and an online recorded owner.
+Ground/air arrival uses the `1.6` radius. Aquatic arrival uses `2.0` horizontal blocks; if touching water with an aquatic target column, no vertical test follows, otherwise the vertical tolerance is `3.0`. After the hold, a companion still at its destination releases the order; displacement resumes travel. Marker release names the originally requested block and is sent for a positive marker ID and an online recorded owner.
 
-Dialogue pause prevents command-task ticks, so travel counters pause. Arrived hold uses entity age, so its elapsed age is not frozen by the same mechanism. A command-anchor memory without an active command is cleared by the server reconciliation tick. Leaving `FOLLOW` or clearing the owner clears commands and suppressed targets.
+Dialogue pause prevents command-task ticks, so travel counters pause. Arrived hold uses entity age, so its elapsed age is not frozen by the same mechanism. A command-anchor memory without an active order is cleared by the server reconciliation tick. Leaving `FOLLOW`, losing the escorted owner or a summon's dismissal clears orders and suppressed targets.
 
-`tryStartAttackCommand` rejects missing/dead targets, disabled NPC combat, creative/spectator players, forbidden command intent and untargetable entities. It clears the target's suppression, interrupts the previous action, clears movement and sets command intent plus last-known target position. `stopCurrentTargetAndSuppress()` interrupts combat and remembers up to `12` target UUIDs, evicting oldest entries. Every `20` ticks, absent/dead/removed targets are pruned; a newly observed owner attack on a suppressed target removes that suppression.
+`tryStartAttackCommand` rejects missing targets and companions whose `supportsCommandCombat` is false, then asks the companion's `canAcceptCommandAttack`: an NPC rejects dead targets, creative/spectator players, forbidden command intent and untargetable entities; a clone rejects its summoner, the summoner's other summons and squad, and creative/spectator players. Acceptance clears the target's suppression, clears movement and hands the target to `onCommandAttackStarted`. `stopCurrentTargetAndSuppress()` releases the target `getCommandStopTarget` reports and remembers up to `12` target UUIDs, evicting oldest entries. Every `20` ticks, absent/dead/removed targets are pruned; a newly observed owner attack on a suppressed target removes that suppression.
 
 ### Traversal coordination
 
@@ -173,15 +181,15 @@ Execution drives a grounded run-up directly, then applies the solved launch impu
 
 ### Teleport rescue and world transfer
 
-An eligible distant-owner flight rescue receives `40` ticks (`2` seconds) before this teleport task may intervene. Returning within follow range resets that window; ongoing motion still prevents the idle-gated teleport.
+An eligible distant-owner flight rescue receives `40` ticks (`2` seconds) before this teleport task may intervene. Returning within follow range resets that window.
 
-Ordinary same-world follow rescue is a separate task, configured with `100` idle ticks, distance `32` and search radius `6`. It excludes sleep, riding, commands/anchors and combat. After the initial idle gate, a hovered follower more than `7` blocks away qualifies; ordinary long-distance rescue uses `32`. A nearer recovery needs distance over `5`, `160` idle ticks or equally old unreachable memory, and a failed ground reachability probe. The initial `100` idle gate still applies even to that memory case.
+Ordinary same-world follow rescue is a separate task; NPCs configure it with a `100`-tick stall requirement and distance `32`, clones with `100` and `28`. It excludes sleep, riding, orders/anchors, a held target and engaged combat. The task tracks the closest the companion has come to its follow slot, and a new closest approach must beat the previous one by `1.0` block to count as headway. Rescue first requires a stall: `100` idle ticks or `100` ticks without headway, so a companion pacing against a fence qualifies even though it never stands still. After that gate, a hovering companion more than `7` blocks away qualifies, and so does any companion beyond the configured distance. A nearer recovery needs distance over `5`, then `160` ticks without headway, `160` idle ticks or equally old unreachable memory, and a failed ground reachability probe.
 
-This task tries `24` random columns using the motion-blocking-no-leaves heightmap and standability. Cooldown is `100` ticks after its accepted attempt, `20` after no candidate. Its helper does not inspect the boolean result from `TeleportUtil.tryTeleport`; the accepted-attempt result should not be treated as independent confirmation of relocation.
+The landing spot comes from `CompanionPlacement.findNearPlayer`, the shared collision-safe resolver described below, using the companion's tactical index as its preferred slot. Cooldown is `100` ticks after a successful teleport and `20` when no spot was found or the teleport failed; the headway record resets after every attempt.
 
 `NpcFollowerSync.transferFollowersToPlayer` handles immediate transfers and respawn recovery. It collects loaded active followers across worlds, sorts them by tactical order, and transfers those in another world or more than `7` blocks from their resolved target. Unloaded membership is retained but is not force-loaded by this collection.
 
-The destination resolver searches ±`6` horizontal blocks and offsets `0, 1, -1, 2, -2, 3, -3` vertically, excluding the player's own column. Preferred slots are behind/beside the player. It loads candidate chunks, delegates floor placement to the dismount/respawn resolver, then checks standing body clearance with `0.05` horizontal padding, world border, no feet lava and an unobstructed collider ray from the player. Sequential arrivals reserve occupied space through the clearance checks.
+`CompanionPlacement` searches ±`6` horizontal blocks and offsets `0, 1, -1, 2, -2, 3, -3` vertically, excluding the player's own column. Preferred slots are behind/beside the player. It loads candidate chunks, delegates floor placement to the dismount/respawn resolver, then checks standing body clearance with `0.05` horizontal padding, world border, no feet lava and an unobstructed collider ray from the player. A candidate is scored before its floor is resolved, so one that cannot beat the best spot found so far is skipped. Sequential arrivals reserve occupied space through the clearance checks. Summon arrivals and summon dimension changes use the same resolver.
 
 No valid position means no transfer; there is no unchecked player-position fallback. Before and after relocation, transient riding/sleep, commands, combat, movement and flight/swim state are normalised, and the moved entity is reconciled with the session. A failed transfer schedules retry every `5` ticks for up to `60` ticks in the recorded destination dimension, using overworld time. Disconnect, death, dimension change or server replacement clears/invalidate pending retries.
 
@@ -227,7 +235,7 @@ For a new destination-driven traversal, provide a `TraversalGoal`, publish and r
 
 Check admission at capacity, an unloaded member, an invalid loaded member, disconnect/reconnect, respawn, death and revival. Confirm stale saved sessions release ownership and client packets expose only the recipient's list.
 
-Exercise cohesion with player yaw changes, approach, different floors, narrow doors, walls and multiple same-role followers. For commands, test rejected destinations, grounded/swim/air acceptance, displacement during arrived hold, dialogue pause, stalled repathing, a failed ladder, a successful recovery teleport and a later failure.
+Exercise cohesion with player yaw changes, approach, different floors, narrow doors, walls and multiple same-role followers. For commands, test rejected destinations, grounded/swim/air acceptance, displacement during arrived hold, dialogue pause, stalled repathing, a failed ladder, an unreachable request accepted as an approach, a stall that settles near the arrival, a stall that re-routes and a second stall that abandons. Order a summon and a squad member together and confirm they share formation slots.
 
 Test ladder ascent/descent from different approach sides, connected vines, competing predecessors, owner exit in midair and broken exits. For parkour, test a walkable route veto, run-up near a ledge, ceilings, hazardous landings, unloaded terrain and interrupted arcs. Check transfer into a narrow occupied entrance, no valid destination, retry expiry and disconnect during retry.
 

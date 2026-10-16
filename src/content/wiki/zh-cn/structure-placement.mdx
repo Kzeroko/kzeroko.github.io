@@ -1,0 +1,293 @@
+---
+title: "结构放置数据"
+description: "本模组地表结构的起点选址、可接受的地面、结构之间如何保持距离，以及地形如何为它们平整。"
+category: data
+order: 95
+updated: 2026-10-16
+tags: []
+---
+
+世界之门遗迹、冒险者公会、复苏神殿和三座地下城入口由 `isekaiexpansion:ex_random_spread` 放置规则选址，由 `isekaiexpansion:surface` 结构类型建造。每个间距区域最多尝试 16 个候选区块才放弃，所以不接受水域或山地的结构会在本区域内另找位置，而不是整片区域都没有。遗迹、公会与神殿还会预留一块平整地基：地形生成时把建筑下方的地面整平，再向四周平缓过渡回原有地貌，使建筑落在平整地面上。
+
+## 文件放在哪里
+
+两者都是世界生成注册表文件。结构集位于 `data/<namespace>/worldgen/structure_set/<name>.json`，列出其中的结构和一条放置规则；每个结构位于 `data/<namespace>/worldgen/structure/<name>.json`。文件路径就是注册表 ID，数据包提供同一路径即可替换随模组提供的文件，加载顺序靠后的数据包优先。
+
+| 随模组提供的结构集 | 结构 | 间距 / 隔离 | 出生点距离 | 选址尝试 | 避开 | 保持距离 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:world_portal_ruins` | `isekaiexpansion:world_portal_ruins` | 144 / 127 区块 | 32 区块 | 16 次，半径 28 | `ocean`、`river`、`lake`、`wetland`、`coast`、`mountain` | 村庄 7 区块，公会 8 区块，复苏神殿 24 区块，敌对据点 10 区块，敌对营地 6 区块 |
+| `isekaiexpansion:adventurers_guild_structure_set` | `isekaiexpansion:adventurers_guild` | 32 / 12 区块 | 19 区块 | 16 次，半径 48 | `ocean`、`river`、`lake`、`wetland`、`coast`、`mountain` | 村庄 7 区块，复苏神殿 24 区块，敌对据点 10 区块，敌对营地 6 区块 |
+| `isekaiexpansion:respawn_temple_structure_set` | `isekaiexpansion:respawn_temple` | 60 / 30 区块 | 31 区块 | 4 次 | `mountain` | 村庄 7 区块 |
+| `isekaiexpansion:dark_delves_entrance` | `isekaiexpansion:dark_delves_entrance` | 128 / 96 区块 | 50 区块 | 6 次，半径 24 | `ocean`、`river`、`lake`、`wetland`、`mountain` | 村庄 10 区块 |
+| `isekaiexpansion:sunken_sanctum_entrance` | `isekaiexpansion:sunken_sanctum_entrance` | 160 / 112 区块 | 75 区块 | 6 次，半径 24 | `ocean`、`river`、`lake`、`wetland`、`mountain` | 村庄 10 区块 |
+| `isekaiexpansion:verdant_temple_entrance` | `isekaiexpansion:verdant_temple_entrance` | 192 / 128 区块 | 112 区块 | 6 次，半径 24 | `ocean`、`river`、`lake`、`wetland`、`mountain` | 村庄 10 区块 |
+
+| 随模组提供的平整地基 | 平整核心 | 过渡带 | 过渡带最大坡度 | 核心最大起伏 | 高出水线 |
+| --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:world_portal_ruins` | 24 方块 | 16–64 方块 | 0.5 | 24 方块 | 至少 2 方块 |
+| `isekaiexpansion:adventurers_guild_structure_set` | 40 方块 | 16–96 方块 | 0.5 | 32 方块 | 至少 2 方块 |
+| `isekaiexpansion:respawn_temple_structure_set` | 36 方块 | 16–96 方块 | 0.5 | 32 方块 | 不要求；位于水下的地点保持原样 |
+
+世界之门遗迹的标称间距为2304格。127区块的隔离值保证起点中心至少相距2048格，重新选址和负坐标也遵守此下限；当前模板旋转后，锚点之间仍超过2000格。不适合的地形或避让规则可能使区域没有遗迹，因此这不是最大旅行距离。
+
+复苏神殿是唯一允许建在开阔水面上的内置结构。它的模板池运行 `isekaiexpansion:exterior_fluid_processor`，所以在水线那一层，海水会贴着墙体，而不是在墙外留下一圈干燥的空隙。
+
+## 最小示例
+
+这个放置规则可接受的最小结构集，保存为 `data/example/worldgen/structure_set/temples.json`。没有 `site`、`exclusions` 和 `earthwork` 时，它的放置结果与原版随机分布完全相同。
+
+```json
+{
+  "structures": [
+    {
+      "structure": "isekaiexpansion:respawn_temple",
+      "weight": 1
+    }
+  ],
+  "placement": {
+    "type": "isekaiexpansion:ex_random_spread",
+    "salt": 1234567,
+    "spacing": 40,
+    "separation": 20
+  }
+}
+```
+
+## 字段
+
+### 结构集
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `structures` | `array<object>` | required | 原版结构集条目；起点确定后按权重选出结构。 |
+| `structures[].structure` | `identifier` | required | 结构注册表 ID。 |
+| `structures[].weight` | `integer` | required | 相对权重，至少为 1。 |
+| `placement` | `object` | required | 起点放在哪里；`type` 为 `isekaiexpansion:ex_random_spread` 时适用下面各行。 |
+| `placement.type` | `identifier` | required | `isekaiexpansion:ex_random_spread`。 |
+| `placement.salt` | `integer` | required | 种子盐值，至少为 0。盐值与间距都相同的两个结构集抽到相同的候选。 |
+| `placement.spacing` | `integer` | required | 区域边长，单位区块，范围 `1–4096`。 |
+| `placement.separation` | `integer` | required | 每个区域远端保留的空白区块数，范围 `0–4096`，必须小于 `spacing`。候选在每个轴向上都落在区域的前 `spacing − separation` 个区块内。 |
+| `placement.spread_type` | `enum(linear, triangular)` | `linear` | 候选偏移在上述范围内的分布；`triangular` 更集中在中间。 |
+| `placement.frequency` | `number` | `1.0` | 区域有起点的概率，范围 `0–1`。每个区域只在第一个候选上抽一次。 |
+| `placement.frequency_reduction_method` | `enum(default, legacy_type_1, legacy_type_2, legacy_type_3)` | `default` | `frequency` 使用的原版随机源。 |
+| `placement.locate_offset` | `array<integer>` | `[0, 0, 0]` | 每项范围 `−16–16` 的方块偏移，加在起点区块的角上，供 `/locate` 与寻路使用。 |
+| `placement.spawn_distance` | `object` | 无限制 | 起点与世界原点须保持的距离，见 [出生点距离](#出生点距离)。 |
+| `placement.site` | `object` | 尝试 1 次，不避开任何地形 | 区域如何寻找可用的地面，见 [选址](#选址)。 |
+| `placement.exclusions` | `array<object>` | `[]` | 需要保持距离的其他结构集，见 [排斥](#排斥)。空列表表示不回避任何结构集。 |
+| `placement.earthwork` | `object` | 无 | 为每个起点平整的地面，见 [平整地基](#平整地基)。缺省时地面保持原样。 |
+
+### 出生点距离
+
+以区块为单位，从区块 0, 0 到候选区块取直线距离。世界出生点在原点附近选定，这项设置让起点离开出生区域。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement.spawn_distance.min` | `integer` | `0` | 允许的最近距离，范围 `0–1000000` 区块。 |
+| `placement.spawn_distance.max` | `integer` | 无上限 | 允许的最远距离，范围 `1–1000000` 区块，必须大于 `min`。 |
+
+### 选址
+
+区域从自己的种子序列中依次抽取候选，选用第一个按下列顺序通过全部检查的候选。第一次抽取的就是原版随机分布会选的区块。所有尝试都被拒绝时，这个区域没有起点。
+
+1. 位于出生点距离之内。
+2. 中心所在群系被该结构集中某个结构接受，因此不会在结构随后拒绝生成的地方许下起点。
+3. 地面通过 `site` 检查。
+4. 在 ReTerraForged 世界中，世界的结构规则接受该中心。否则 ReTerraForged 会在放置之后拒绝这个结构；其默认预设拒绝山地地形与河岸。
+5. 与所有排斥目标保持距离。
+6. 设有 `earthwork` 时，地面能在其限制内整平。
+
+每项检查读取的都是平整之前的原始地面，所以一个决定既不受其他决定的平整地基影响，也不受区块生成先后顺序影响。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement.site.attempts` | `integer` | `1` | 区域可尝试的候选数，范围 `1–16`。 |
+| `placement.site.radius` | `integer` | `0` | 从候选区块中心到另外四个地面采样点（北、南、东、西）的方块距离，范围 `0–128`。为 `0` 时只采样中心。 |
+| `placement.site.avoid` | `array<enum>` | `[]` | 候选在任一采样点都不能站在其上的地形类别，取值见下表。空列表不做采样。 |
+
+| 地形类别 | ReTerraForged 世界 | 其他世界 |
+| --- | --- | --- |
+| `ocean` | 浅海或深海地形 | 群系属于 `#minecraft:is_ocean` 或 `#minecraft:is_deep_ocean` |
+| `river` | 河流地形 | 群系属于 `#minecraft:is_river` |
+| `lake` | 湖泊地形，或位于水线及以下、又不是海洋或河流的地面 | 不会匹配 |
+| `wetland` | 湿地地形 | 群系属于 `#c:swamp` |
+| `coast` | 海岸地形 | 群系属于 `#minecraft:is_beach` |
+| `mountain` | 山地地形 | 群系属于 `#minecraft:is_mountain` |
+| `volcano` | 火山地形 | 不会匹配 |
+| `landform` | KTM2 地形区域塑造的地面，或世界树的地面 | 不会匹配 |
+
+ReTerraForged 直接判断地面本身，与覆盖在上面的群系无关：平原群系下面也可能是湖泊或海湾。在 ReTerraForged 世界中，群系检查读取中心地面高度处的群系；其他世界无法得知高度，因此在 Y 256 处采样群系，高于任何地表，这样返回的是地表群系，而不是下方的洞穴群系。结构规则只在中心检测；避开 `mountain` 还会检查外围四个采样点。
+
+### 排斥
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement.exclusions[].structure_sets` | `identifier` | required | 要回避的结构集：一个 ID、ID 列表或 `#tag`。 |
+| `placement.exclusions[].distance` | `integer` | required | 候选与它们起点的最近允许直线距离，范围 `1–256` 区块。 |
+
+距离按其他结构集的起点计算，包括它们在自身区域内迁移后的起点，并且只检查距离够得着的区域。当前维度从不放置的结构集会被忽略，所以主世界的放置规则即使写上下界或末地的结构集也没有效果。由 `isekaiexpansion:ex_random_spread` 放置的结构集按它实际落定的起点计算，因为它已经检查过自己的生物群系。其他随机分布结构集（无论来自原版还是其他模组）每个区域只抽一个候选区块，而它的结构要等该区块生成时才检查生物群系；因此只有当该结构集中某个结构接受候选区块中心，或沿对角线向外 24 方块的四个点之一的生物群系时，这个候选才算数，所有采样都取中心处的地面高度。多出的四个点宁可把生物群系边缘附近的起点算进来，也不漏掉它，因为结构检查的是起始部件落定处的生物群系，那里可能偏离中心。以其他方式放置的结构集（例如按环分布的要塞）会被忽略，结构集也不会排斥自身。`/locate` 与寻路读取的是同一个决定，所以会指向区域实际落定的区块，并跳过没有起点的区域。
+
+如果要回避另一个模组添加的结构集、又不想把那个模组设为必需，可以在 `data/<namespace>/tags/worldgen/structure_set/<name>.json` 写一个结构集标签，并把该结构集写成 `{"id": "<结构集 ID>", "required": false}`。缺失的可选条目会被移出标签；而直接写在 `structure_sets` 里的 ID 一旦不存在，注册表就会加载失败。
+
+### 平整地基
+
+平整地基是放置规则为每个起点预留的地面：以起点区块中心为圆心的平整核心，加上一圈让地面平缓回到原有高度的过渡带。地形生成在 ReTerraForged 自身的地形中、侵蚀运行之前塑造它，所以过渡带像周围土地一样受侵蚀、排水，而核心保持平整且不受侵蚀。最终密度为两者提供唯一确定的地表，ReTerraForged 的洞穴在原始地面与平整地面中较低者下方 8 格内逐渐消失。两块平整地基覆盖同一列时，由影响更强的一块塑造。
+
+候选被接受之前，先在原始地面上勘测：
+
+1. 核心内共采样 25 点：中心一点、半径一半处 8 点、半径处 16 点。其中任一点位于 `landform` 地面时拒绝该候选。这些高度的中位数取整到方块后作为平整高度，使挖方与填方大致相抵。
+2. 设有 `min_above_water` 时，平整高度至少抬到水线以上该高度。未设置时，平整高度位于水线及以下的地点直接接受并保持原样，因为结构在那里立于水面。
+3. 核心起伏，即最高采样减最低采样，不得超过 `max_relief`。
+4. 在 `radius + min_blend` 处采样 16 点，取与平整高度的最大高差。过渡带宽度为该高差除以 `max_slope`，并限制在 `min_blend–max_blend` 方块之间。
+5. 上述 16 点，或 `radius + max_blend` 处另外 16 点中，任一点位于 `landform` 地面时拒绝该候选，所以平整地基不会改动已塑造的地形区域或世界树。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `placement.earthwork.radius` | `integer` | required | 从起点区块中心起保持平整的方块距离，范围 `1–128`。 |
+| `placement.earthwork.min_blend` | `integer` | `16` | 最窄的过渡带，范围 `1–256` 方块。 |
+| `placement.earthwork.max_blend` | `integer` | `96` | 最宽的过渡带，范围 `1–256` 方块，不得小于 `min_blend`。 |
+| `placement.earthwork.max_slope` | `number` | `0.5` | 过渡带最大平均坡度，范围 `0.05–4.0`，即升降方块数与水平方块数之比。周围越陡，过渡带越宽，最宽到 `max_blend`。 |
+| `placement.earthwork.max_relief` | `integer` | 无限制 | 核心下方原始地面的最大起伏，范围 `0–256` 方块。超出时拒绝该候选，区域改试下一个。 |
+| `placement.earthwork.min_above_water` | `integer` | 无 | 平整高度至少高出水线的方块数，范围 `0–64`。缺省时，平整高度位于水线及以下的地点保持原样。 |
+
+只有 KTM2 地形引擎会平整地面。其他 ReTerraForged 世界仍按这些限制勘测候选，但不平整任何地面；没有 ReTerraForged 地形的世界无法读取高度，候选直接接受且没有平整地基，仅由结构自身的选址勘测决定。结构的 `site.radius` 应位于平整地基的 `radius` 之内，这样它勘测的是已平整的核心，而不是过渡带。ReTerraForged 按高度判断哪些海岸地面属于沙滩，所以平整海岸地点可能改变那里的沙滩范围；群系不接受沙滩的结构应像公会一样避开 `coast`。
+
+### 地表结构
+
+`isekaiexpansion:surface` 在选址勘测接受地面后建造拼图结构。勘测直接从生成器的高度图读取九列：起点一列，外加周围一个圆上的八列。它能发现放置阶段粗略地形判断发现不了的问题，例如良好地块中间的一个池塘或一道崖边。
+
+```json
+{
+  "type": "isekaiexpansion:surface",
+  "biomes": "#c:is_plains",
+  "step": "surface_structures",
+  "spawn_overrides": {},
+  "terrain_adaptation": "none",
+  "start_pool": "isekaiexpansion:adventurers_guild/start_pool",
+  "size": 30,
+  "start_height": {
+    "absolute": 0
+  },
+  "project_start_to_heightmap": "WORLD_SURFACE_WG",
+  "max_distance_from_center": 80,
+  "site": {
+    "radius": 36,
+    "max_height_variation": 10,
+    "max_water_depth": 0
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `identifier` | required | `isekaiexpansion:surface`。 |
+| `biomes` | `tag id` | required | 原版结构字段：起点可位于的群系，可写 `#tag`、单个群系 ID 或列表。 |
+| `step` | `string` | required | 原版生成阶段，例如 `surface_structures`。 |
+| `spawn_overrides` | `object` | required | 原版生物生成覆盖；没有时写 `{}`。 |
+| `terrain_adaptation` | `enum(none, beard_thin, beard_box, bury)` | `none` | 原版结构部件周围的地形适配。 |
+| `start_pool` | `identifier` | required | 拼图起始模板池。 |
+| `start_jigsaw_name` | `identifier` | 无 | 起始拼图方块名称；缺省时从模板池元素自身的原点开始。 |
+| `size` | `integer` | required | 拼图深度，范围 `1–30`。没有连接块的独立模板使用 `1`。`0` 会被拒绝，因为 Minecraft 1.20.1 在该深度连起始模板也不会加入结构。 |
+| `start_height` | `object` | required | 原版高度提供器，决定起点 Y。 |
+| `project_start_to_heightmap` | `enum(WORLD_SURFACE_WG, WORLD_SURFACE, OCEAN_FLOOR_WG, OCEAN_FLOOR, MOTION_BLOCKING, MOTION_BLOCKING_NO_LEAVES)` | 无 | 把该高度图在起点区块中心处的高度加到起点 Y 上。`WORLD_SURFACE_WG` 停在水面。 |
+| `max_distance_from_center` | `integer` | required | 部件离起点的最远距离，范围 `1–128` 方块。 |
+| `site.radius` | `integer` | required | 起点到八个采样点所在圆的方块距离，范围 `1–256`。 |
+| `site.max_height_variation` | `integer` | required | 最高与最低表面的最大高差，范围 `0–256` 方块。 |
+| `site.max_water_depth` | `integer` | 允许开阔水面 | 任一采样点可站立的最深水深，范围 `0–256` 方块；`0` 要求地面干燥。 |
+
+每一列的表面是该处最高的方块，水也算在内；水深是表面减去水下地面的高度。平整度按表面判断，因为结构就建在表面上。起点是放置规则所选区块的中心，也就是平整地基的圆心。无论结构如何旋转，都以这一列为中心：先摆放起始部件，再整体移动所有部件，使起始部件的占地中心落在这一列上。
+
+### 外部流体处理器
+
+`{"processor_type": "isekaiexpansion:exterior_fluid_processor"}` 没有字段。它在部件的每一水平层里，从该层边缘出发，穿过建筑没有占据的格子向内填充；这样能到达的模板空气位于结构之外，只要世界中该处已有流体，模板就保留原有流体。建筑围住的空气（例如水线以下的房间）照常放置，因此内部保持干燥。放在干燥陆地上的部件不受影响。
+
+## 完整示例
+
+随模组提供的冒险者公会结构集。每个区域在离原点至少 19 区块的范围内最多尝试 16 个区块，在中心及四个方向 48 方块处拒绝水域、湿地、海岸和山地，并与村庄保持 7 区块、与复苏神殿保持 24 区块、与敌对据点保持 10 区块、与敌对营地保持 6 区块的距离。它的起点平整出半径 40 方块、至少高出水线 2 方块的核心，核心起伏超过 32 方块的地面会被拒绝，并在 16–96 方块内过渡回原有地貌。
+
+```json
+{
+  "structures": [
+    {
+      "structure": "isekaiexpansion:adventurers_guild",
+      "weight": 1
+    }
+  ],
+  "placement": {
+    "type": "isekaiexpansion:ex_random_spread",
+    "salt": 180392143,
+    "spacing": 32,
+    "separation": 12,
+    "spawn_distance": {
+      "min": 19
+    },
+    "site": {
+      "attempts": 16,
+      "radius": 48,
+      "avoid": [
+        "ocean",
+        "river",
+        "lake",
+        "wetland",
+        "coast",
+        "mountain"
+      ]
+    },
+    "exclusions": [
+      {
+        "structure_sets": "minecraft:villages",
+        "distance": 7
+      },
+      {
+        "structure_sets": "isekaiexpansion:respawn_temple_structure_set",
+        "distance": 24
+      },
+      {
+        "structure_sets": "#isekaiexpansion:overworld_hostile_strongholds",
+        "distance": 10
+      },
+      {
+        "structure_sets": "#isekaiexpansion:overworld_hostile_camps",
+        "distance": 6
+      }
+    ],
+    "earthwork": {
+      "radius": 40,
+      "min_blend": 16,
+      "max_blend": 96,
+      "max_slope": 0.5,
+      "max_relief": 32,
+      "min_above_water": 2
+    }
+  }
+}
+```
+
+两个敌对标签都随模组提供。除 `minecraft` 外的条目都是可选的，整合包里没有对应模组时，列表只是短一些。
+
+| 标签 | 距离 | 结构集 |
+| --- | --- | --- |
+| `#isekaiexpansion:overworld_hostile_strongholds` | 10 区块 | `minecraft:pillager_outposts`、`minecraft:woodland_mansions`、`takesapillage:pillager_structure`、`illagerinvasion:illager_fort`、`illagerinvasion:illusioner_tower`、`illagerinvasion:labyrinth`、`saintsdragons:igni_roost_set`、`saintsdragons:varasuchus_roost` |
+| `#isekaiexpansion:overworld_hostile_camps` | 6 区块 | `minecraft:swamp_huts`、`illagerinvasion:firecaller_hut`、`illagerinvasion:sorcerer_hut` |
+
+积雪候选位置上方必须没有方块遮挡。装饰性屋顶也算遮挡，初次生成时同样检查，因此有屋顶覆盖的公会地板不会再生成积雪。这条规则不会移除区块中已经保存的雪。
+
+## 校验
+
+- **缺少必填键、数值超出范围或枚举值未知**：世界生成注册表加载失败，世界无法打开。Minecraft 会给出出错的文件与键名。
+- **`separation` 等于或大于 `spacing`**：失败并提示 "spacing has to be larger than separation"。
+- **`spawn_distance.max` 不大于 `min`**：失败并提示 "spawn_distance max must be greater than min"。
+- **`earthwork.max_blend` 小于 `min_blend`**：失败并提示 "earthwork max_blend must not be less than min_blend"。
+- **未知键**：被忽略，其中包括已退役的 `flat_check_distance`、`flat_check_threshold`、`min_distance_from_spawn`、`exclusion_zone` 和 `exclusion_zone_entries`。
+- **排斥项引用了不存在的结构集**：注册表加载失败；没有成员的 `#tag` 表示不回避任何结构集。
+- **排斥关系形成环**（两个结构集直接或经由其他结构集互相回避）：每个放置规则只记录一次警告。环会在闭合处断开，因此由哪一方让步取决于哪个区域先生成。
+- **结构的 `site.radius` 超出平整核心**：不会报错，但勘测会读到过渡带，可能拒绝一个地面已经整平的起点。
+
+## 重载
+
+世界生成注册表在打开世界时加载，`/reload` 不会改变它们。每个区域只决定一次，并在本次会话中记住结果，所以修改这些文件只对下次加载世界后生成的区块生效。已经生成的区块保留原有结构与地面。
+
+## 相关页面
+
+- [地形](/zh-cn/wiki/terrain/)：选址地形类别所读取、平整地基所改造的 ReTerraForged 地形。
+- [世界出生点](/zh-cn/wiki/world-spawn/)：原点附近的出生点如何选定。
+- [地下城数据](/zh-cn/wiki/dungeon-data/)：三座地下城入口通往的内容。

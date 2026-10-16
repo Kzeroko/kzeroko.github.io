@@ -3,14 +3,14 @@ title: "Blockbench humanoid creator"
 description: "The bundled part workshop: declarations, template bones, previews, export controls and limitations."
 category: assets
 order: 110
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
-Use the bundled Blockbench plugin to export humanoid parts and NPC starter assets. This guide covers local installation, declarations and the limits of its export pipeline.
+Use the bundled Blockbench plugin to export humanoid parts and NPC bodies. This guide covers local installation, declarations and the limits of its export pipeline.
 
 ## What you are making
 
-The bundled IsekaiExpansion Humanoid Creator, version `2.2.0`, exports declared parts from a Blockbench document. It can also export an NPC body and a starter preset. It writes geometry, textures, optional mask templates, catalogue entries and filtered secondary animation.
+The bundled IsekaiExpansion Humanoid Creator, version `2.2.0`, exports declared parts from a Blockbench document. It can also export an NPC's own body part. It writes geometry, textures, optional mask templates, catalogue entries and filtered secondary animation.
 
 ## Requirements
 
@@ -32,10 +32,10 @@ Without a valid configured root, the plugin searches ancestors of the document's
 | `isekaiexpansion_humanoid_creator_namespace` | `string` | `isekaiexpansion` | Persistent namespace, sanitised like a part ID. |
 | `style` | `string` | `default` | PNG style name; invalid characters removed and blank falls back to `default`. |
 | `gender` | `enum` | `none` | `none`, `male`, `female`; writes the declared part model as the gendered mesh `<part>.male.geo.json` or `<part>.female.geo.json`. Textures, catalogue entry and part ID are unchanged. |
-| `npcMode` | `boolean` | `false` | Export an NPC body and, with catalogue generation enabled, a preset. |
+| `npcMode` | `boolean` | `false` | Export the unmarked geometry as the NPC's own body part. |
 | `npcId` | `string` | `""` | Required nonempty sanitised ID in NPC mode. |
 | `generateMasks` | `boolean` | `true` | Generate mask templates for textured exports with a bound channel. |
-| `generateCatalog` | `boolean` | `true` | Generate part JSON and the NPC preset in NPC mode. |
+| `generateCatalog` | `boolean` | `true` | Generate part JSON, including the NPC body's entry in NPC mode. |
 | `generateAnimations` | `boolean` | `true` | Compile and filter part animation clips. |
 | `overwrite` | `boolean` | `false` | Replace existing output files; otherwise skip them independently. |
 
@@ -61,7 +61,7 @@ Selecting a part isolates its elements in Part Preview using render layer 10; it
 
 The Check tab and Tools → Validate Humanoid Contract report blocking problems and nonblocking notes. Problems include no bones, duplicate case-insensitive names, a missing or extra root, missing animated anchors, uppercase rig names and nonzero anchor rotation above tolerance `0.0001`. Optional feature/attachment bones and animations that drive rig bones produce notes. The check does not validate every pivot, parent, texture or output resource.
 
-Use Preview Paths to run export planning without writing. Export All writes declared parts and any requested NPC outputs. A row export writes just that part and never the NPC body/preset. Existing files are skipped independently unless Overwrite is enabled; changing the style does not merge a new style into an existing catalogue file.
+Use Preview Paths to run export planning without writing. Export All writes declared parts and any requested NPC outputs. A row export writes just that part and never the NPC body. Existing files are skipped independently unless Overwrite is enabled; changing the style does not merge a new style into an existing catalogue file.
 
 Model export works on compiled copies, keeps owned geometry and empty rig anchors, removes template/proxy geometry and reattaches surviving bones to their nearest surviving ancestor. Animation export keeps only owned, non-rig bones and discards empty clips. Runtime clip selection remains `idle`/`run`; see [part authoring](/en/dev/humanoid-parts/).
 
@@ -83,12 +83,11 @@ NPC mode additionally produces:
 assets/<namespace>/geo/entity/humanoid/body/<npc>.geo.json
 assets/<namespace>/textures/entity/humanoid/body/<npc>/<style>.png
 data/<namespace>/humanoid_parts/body/<npc>.json
-data/<namespace>/npc_presets/<npc>.json
 ```
 
-The body catalogue has `unlock.type: locked` and `sort: 900`. The starter preset uses `gender: female`, `fixed_gender: true`, the generated body reference, a `default` outfit with `default: true` and `sort: 0`, root `sort: 1000`, and tag `unique`. Review these choices; they are fixed export defaults, not inferred character facts. Full fields are in [preset data](/en/wiki/humanoid-presets/).
+The body catalogue declares `audience: npc` and `sort: 900`, so the body is reserved for NPCs and no player is offered it. The plugin writes no NPC preset: a preset is Java in the NPC class. Build the NPC's look under `/ise humanoid design` and export it with `/ise humanoid export npc`, as described in [NPC assets](/en/dev/npc-assets/).
 
-The gender-variant switch does not qualify the NPC-mode body. If several declared parts occupy the same slot, the starter outfit keeps the last part encountered in the sorted export selection. It does not create multiple outfits automatically.
+The gender-variant switch does not qualify the NPC-mode body.
 
 **Current NPC-body limitation:** base export filters each bone by whether its own name declares a part. A freely named child bone inside a declared wearable can therefore also enter the body model, even though detection correctly assigns it to the wearable. Inspect body geometry for such duplicates before copying the output into a pack. Template geometry remains excluded. The body texture can also fall back to a whole source sheet if footprint separation fails.
 

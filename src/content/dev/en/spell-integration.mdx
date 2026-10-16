@@ -3,48 +3,54 @@ title: "Spell integration"
 description: "Registration, delivery contracts, energy payment, item data and dependency bridges."
 category: systems
 order: 30
-updated: 2026-09-25
+updated: 2026-10-16
 ---
 
 Spell integration uses Spell Engine's world registry and custom-delivery handlers. IsekaiExpansion's types under `spell` and `internal.spell` are internal integration points, not public API facades; [Spell data](/en/wiki/spell-data/) is the pack-author reference.
 
 ## What it does
 
-The build pins Minecraft 1.20.1, Spell Engine 1.10.7+1.20.1, Spell Power 1.6.0+1.20.1, Ranged Weapon API 2.3.4+1.20.1 and Tiny Config 3.1.0+1.20.1. Fabric Loader is 0.19.5. These are this checkout's build inputs, not a claim that other versions are compatible.
+The build pins Minecraft 1.20.1, Spell Engine 1.10.10+1.20.1, Spell Power 1.6.0+1.20.1, Ranged Weapon API 2.3.4+1.20.1 and Tiny Config 3.1.0+1.20.1. Fabric Loader is 0.19.5. These are this checkout's build inputs, not a claim that other versions are compatible.
 
-`IIsekaiSpell` owns ID, fresh definition, delivery callbacks and optional tooltip tokens. `IsekaiSpellRegistry.registerSpell` registers a custom handler, stores the instance and installs its definition supplier. `registerDefinition` registers only a definition. Duplicate local map IDs replace earlier entries; register during initialisation, before world registries are populated.
+`IIsekaiSpell` owns ID, fresh definition, delivery callbacks, optional tooltip tokens and its formula schema; `formula()` is sealed by default, and [Spell formula runtime](/en/dev/spell-formula-runtime/) covers the rest. `IsekaiSpellRegistry.registerSpell` registers a custom handler, stores the instance and installs its definition supplier. `registerDefinition` registers only a definition. Duplicate local map IDs replace earlier entries; register during initialisation, before world registries are populated.
+
+Configured projectile spells live under `spell.instance.catalog`: `SpellCatalog` registers the family and `ConfiguredSpell` supplies shared metadata. Summoning and Trinity are formula Styles on the registered spell, selected through `SpellShape`. Reusable attachment sets, Arcane Volley and Meteor Rain are covered in [Projectile attachments and patterns](/en/dev/projectile-attachments/).
 
 ## Runtime model
 
 `DynamicRegistrySetupCallback` creates fresh definitions in each spell registry. Resolve entries through `SpellRegistry.from(world)` for the current world; do not retain world registry entries in static state. Code-defined spells need no parallel JSON file.
 
-`IsekaiSpellDefinition` validates a sample immediately and every later factory result. Null spell, school, active/cast, target, delivery or cost fails registration. CUSTOM delivery also requires its custom object; the wrapper assigns the spell ID as its handler ID. The sampled school is cached, so factories must keep school identity consistent.
+`IsekaiSpellDefinition` validates a sample immediately and every later factory result. Null spell, school, active/cast, target, delivery, cost or learning data fails registration; local spell tier must be within `SpellTiers.MIN/MAX` (1–13). CUSTOM delivery also requires its custom object; the wrapper assigns the spell ID as its handler ID. The sampled school is cached, so factories must keep school identity consistent.
+
+Initialise static dependencies before constructing spell singletons whose instance fields use them. `FireballSpell.INSTANCE` is declared after its identifier and delivery data, so its `SpellPayload` receives a valid ID when `SpellCatalog` loads.
 
 | Callback | Trigger | Contract |
 | --- | --- | --- |
 | `onCast(IsekaiSpellContext)` | Non-channel custom delivery | Return true only for successful delivery; default false. |
 | `onChannelTick(IsekaiSpellContext)` | Channel custom delivery | Same success contract; default false. |
 | `onChannelRelease(IsekaiSpellContext)` | Successful RELEASE event for a channel | Cleanup/finalisation callback, default no-op. |
-| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, Map<String,String>)` | Tooltip token expansion | Add replacements for raw language tokens. |
+| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, SpellTuning, Map<String,String>)` | Tooltip token expansion | Add replacements for raw language tokens, computed with the tuning given: the inscribed formula's first link, or `SpellTuning.BASE`. |
 
-The adapter rejects client-world and non-player casters. Its context copies the target list and keeps the impact context supplied by Spell Engine. Channel release constructs a fresh impact context from current spell power; it is not the final delivery's context.
+The adapter rejects client worlds. Non-player casters use `IEntitySpell`, or `IChannelBeamSpell` for channel beams; unsupported non-player deliveries return false. Its context copies the target list and keeps the impact context supplied by Spell Engine. Channel release constructs a fresh impact context from current spell power; it is not the final delivery's context.
+
+Player deliveries look up the spell's formula through `FormulaCasting.active`. The context carries the first link's `SpellTuning` with a per-cast seed, or `SpellTuning.BASE` with that seed when the spell is plain or its formula is invalid. After a successful non-channel cast of a woven chain, `FormulaChain.unfold` schedules the followers. Non-player casters always cast at base tuning.
 
 ### Casting and payment
 
-The pre-attempt gate bypasses creative players. Otherwise it rejects class-restricted magic unless the item is a scroll, rejects Stagger, checks talent eligibility and checks astral energy. A matching ongoing channel skips the extra admission energy check so it can finish without paying for another delivery.
+The pre-attempt gate bypasses creative players. Otherwise it rejects class-restricted magic, rejects Stagger, checks talent eligibility and checks astral energy. A woven formula replaces the talent check with its guard verdict and formula affinity. A matching ongoing channel skips the extra admission energy check so it can finish without paying for another delivery.
 
-Energy cost is the nonnegative rounded product of the energy-map value, scroll multiplier, talent multiplier, every applicable origin cost power and airborne modifier. Missing map entries cost 0. Admission, consumption and tooltip code use the same cost function.
+Energy cost is the nonnegative rounded product of the energy-map value, or a woven formula's rated energy, talent multiplier, every applicable origin cost power and airborne modifier. Missing entries use `SpellEnergyBudget`: tier 1–6 whole-cast budgets are 5, 10, 18, 28, 40 and 60. Channel budgets divide by total deliveries, round up and retain a minimum of 1 per delivery; tiers above 6 use the 60-energy fallback budget. This fallback does not limit the supported spell tier. Admission, consumption and tooltip code use the same cost function.
 
 | Event | Local cost behaviour |
 | --- | --- |
 | Successful channel delivery | Server delivery-return hook emits CHANNEL, which spends that delivery's energy. |
 | Channel cannot afford next delivery | The HEAD hook invokes normal RELEASE for the matching cast process and rejects delivery. |
-| RELEASE with progress above 0.30 | Non-channel spells pay energy; scroll count decreases by 1; spell and astral proficiency are awarded. Channels do not pay a release energy cost. |
+| RELEASE with progress above 0.30 | Non-channel spells pay a positive energy cost; magic spells award spell and astral proficiency. Channels do not pay a release energy cost. |
 | Creative player | Admission and local consumption bypass costs. |
 
 The release threshold is strict: progress equal to 0.30 does not enter that payment/proficiency branch. Successful engine events are the inputs to this logic; do not manually emit a second local event after custom delivery.
 
-`SpellParametersMixin` multiplies positive non-channel cast duration by talent, origin haste powers and scroll cast multiplier. Instant and channel durations retain the upstream result. Builder `channel(duration, deliveryCount)` takes seconds and total deliveries, clamping delivery count to at least 1.
+`SpellParametersMixin` wraps `getCastTimeDetails`, which times the actual cast process, and `getCastDuration`, which tooltips and the HUD read. Both take one multiplier from `SpellCastTiming`: for a player casting a non-channel spell with a positive duration, talent × origin haste powers × the woven formula's incantation multiplier. The process keeps a length of at least 1 tick and slows its animation speed by the same factor. `getCooldownDuration` applies the formula's cooldown multiplier. Instant and channel durations retain the upstream result. Builder `channel(duration, deliveryCount)` takes seconds and total deliveries, clamping delivery count to at least 1.
 
 ### Casting movement
 
@@ -58,9 +64,29 @@ Release, cancellation or replacement removes the cast constraint as soon as the 
 
 `SpellHudMixin` suppresses the upstream slot and cast-bar drawing while retaining target and error feedback. The cast view fades and scales on entry and exit, interpolates placement changes and refreshes images after resource reload. Progress extrapolation is limited to one game tick; it does not continue across a paused client. Screens, hidden HUD state and disconnect clear the readout. The window takes no input and participates in `HudAPI` visibility suppression.
 
+### Learning and the binding desk
+
+`SpellScrollAPI.create(entry)` creates a single-spell manuscript using `SpellContainers.forScroll`. Its `NONE` access does not resolve main-hand casting, but its bound spell participates when the manuscript is equipped through Trinkets. `SpellScrollAPI.rarity(tier)` delegates to `SpellTiers.grade`, mapping tiers 1–4, 5–8 and 9–13 to grades 1, 2 and 3, clamping outside tiers. `ScrollItemMixin` styles native Spell Engine scrolls too. Thirteen school designs, including the neutral fallback, each load all three existing artwork grades. Unknown schools select the neutral design. `SpellItemData` owns the per-stack model, translated name, rarity and immutable container.
+
+The mergeable item tag includes `isekaiexpansion:spell_scroll`. Additive `trinkets:spell/book` and `trinkets:spell/scroll` item tags admit that same item to the upstream slots. Other Spell Engine vessels preserve upstream pool, library, capacity, same-tier and material checks. The binding hook removes experience cost and level requirements; before adding a spell, `FormulaBinding.mayInscribe` checks school talent through `SpellTalentUtil.shouldSpellPass` for a plain manuscript, or the guard and formula affinity for a woven one, while an already bound spell may still be removed. Successful binding writes the manuscript's formula onto the vessel from Spell Engine's synthetic `lambda$onButtonClick$4`, and unbinding erases it from `lambda$onButtonClick$2`; both are unmapped targets of Spell Engine 1.10.10, so recheck them on a dependency bump. Creative players and schools without a talent mapping follow the shared bypass policy.
+
+Miku's assignment uses pool `isekaiexpansion:all_spells`, 8 slots, `extra_tier_binding` 7 and an empty initial list. This pool marks a universal vessel: offers contain its bound spells plus valid spells on the inserted mergeable scroll, regardless of namespace. It does not offer the whole registry for free. The current server material and native handler remain authoritative; a successful bind consumes one manuscript. Unbinding follows the upstream setting and does not refund material. Installed Wizards and other Spell Engine spells use this same contract without a namespace allowlist.
+
+`SpellScrollLoot` adds independent, built-in chest pools referencing `spell_scrolls/grade_1` through `grade_3`. Those loot tables emit the native scroll item with `spell_engine:spell_bind_randomly`, the local all-spells tag and the grade's range: 1–4, 5–8 or 9–13. Native scroll styling runs after that function binds the spell. The creative group instead builds manuscripts from world-registry learnable entries, including other mods.
+
+`SpellBindingScreenRegistrationMixin` substitutes the ModernUI `MenuScreenFactory` during Spell Engine's original binding-screen registration. It forwards every registration exactly once and changes only the binding handler's factory; no client-start callback registers that handler again. The Adventurer desk has vessel/manuscript dropdowns, a filtered spell catalog and a detail dossier. Choices use native slot insertion rules, are sorted by tier/name and have a 176-dp scrolling limit; opening one closes the other. Scroll labels include their spell name. `SpellSigilView` draws the spell or fused icons in a school-coloured ring, adding a tier numeral seal at 52 dp and larger. The dossier separates native effect prose, four combat metrics and affinity requirements; its action stays below the scroll viewport. `AdventurerViews` in `client.screen.adventurer`, shared with the Formula Weaver, clips each panel, content layout and scroll viewport, so cards cannot cross fixed headers or footers. Long choice/card labels wrap to two lines with ellipsis and retain a full tooltip. Entrance, selection, feedback, hover and press animations use `ModernUiMotion`; closing cancels owned animations.
+
+When the selected offer carries a woven manuscript or an inscribed formula, the dossier adds a formula section with its chain, tier, incantation, cooldown, energy and verdict. The action becomes **Re-inscribe formula** when the vessel already knows the lead spell and the manuscript would change its inscription. Actions use the dark secondary style, and only a ready main action is lit; unbinding uses the danger tone.
+
+Minecraft's thread captures detached `BindingSnapshot` data, including item copies, offers, talent eligibility and the shared energy cost. The UI thread owns views and animations. Commands return to Minecraft's thread, check the current handler, expected offer and item contents, then send standard slot/button packets, or `ReinscribeFormulaPacket` for re-inscription. The server repeats that check against its own handler, slots and formula verdict, and spends the manuscript. Item selection uses native pickup/swap transactions and returns the previous item or stack remainder to the source slot; an overlarge stack first returns the existing vessel using quick-move, failing safely when inventory space is unavailable. `SpellTooltipInvoker` reuses the native description parser and addon mutators without repeating the tooltip name/stat lines; `SpellParameters` supplies caster-aware metrics. No local widget mutates the inventory. Inventory and offer changes publish immediately; dynamic talent and cost text refresh at least once per second. Server-side checks remain mandatory even when a button is disabled on the client.
+
+`ScrollItemMixin.appendTooltip` inserts the first bound spell’s tier and grade immediately after the item name through `SpellScrolls.appendTier`, using the binding desk’s translation and grade mapping. Missing worlds, empty containers and unresolved spells add no line. The runtime dependency now requires Spell Engine `>=1.10.10`. Its resolved `1.10.10+1.20.1` beam helper uses `COLLIDER`; local `BeamBlocks` uses entity-context block collision shapes, while aim and visibility rays use `COLLIDER`. Outline-only plants do not obstruct beams.
+
+Local channel beams and spell rays stop terrain travel at the centre-line collision. The damage radius remains active for entity selection and each target still requires visibility; a slab touching only the beam's outer width does not shorten the beam. Client interpolation clips the same centre line against cached collision boxes, placing contact FX at the resulting endpoint with the hit-face normal.
+
 ### Items, cooldowns and resistance
 
-Scroll creation writes a CONTAINED `SpellContainer` using `SpellItemData.setSpellContainer`. Container values are immutable: replace them using copy/with methods. The full item lookup `SpellContainerHelper.containerFromItemStack` considers stack data, data-pack assignment, item default and fallback in that order; `SpellItemData.getSpellContainer` alone does not include assignments. These behaviours belong to Spell Engine's [pinned item implementation](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java).
+Manuscript creation writes a non-casting `NONE` container using `SpellItemData.setSpellContainer`; held casting vessels use `CONTAINED`. Container values are immutable: replace them using copy/with methods. The full item lookup `SpellContainerHelper.containerFromItemStack` considers stack data, data-pack assignment, item default and fallback in that order; `SpellItemData.getSpellContainer` alone does not include assignments. These behaviours belong to Spell Engine's [pinned item implementation](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java).
 
 On Minecraft 1.20.1 the container is stored inside the stack's `spell_engine` compound. The reader does not fall back to an old root-level container. Prefer the item-data API over constructing this NBT directly.
 
@@ -111,10 +137,16 @@ Builder `build()` returns the same mutable spell, not a defensive copy. Construc
 
 ## Verifying
 
-After Java changes, run `./gradlew.bat compileJava`, then load an actual world: compilation does not apply mixins or decode registry data. Exercise standard success/failure, channel exhaustion and release, scroll consumption, creative bypass, school eligibility, critical healing/damage, cooldown restoration and disconnect/rejoin.
+Use `/ise dev clearSpellCooldowns` (or `/isekaiexpansion dev clearSpellCooldowns`) as a player with permission level 2 to clear your spell cooldown entries, including shared groups. The command uses Spell Engine's `reset(null)` to synchronise the cleared state to your client and reports the number of entries removed. Cast spells with individual and shared cooldowns, run the command and confirm both become ready; run it again to check the zero-count feedback.
 
-Test spell registry JSON and network codec round trips, binding-table pool resolution and per-stack container persistence. Check client prediction, tooltip energy, hotbar and projectile visuals with matching dependency versions. These are verification procedures, not claims of an in-game test run.
+Run `./gradlew.bat test --tests net.kzeroko.isekaiexpansion.spell.IsekaiSpellDefinitionTest --tests net.kzeroko.isekaiexpansion.internal.spellformula.FormulaRatingTest` to verify all 13 supported tiers, rejection of invalid tiers and missing learning/custom-delivery data, fresh factory results, binding costs and formula progression.
+
+After Java changes, run `./gradlew.bat compileJava`, then load an actual world: compilation does not apply mixins or decode registry data. Exercise standard success/failure, channel exhaustion and release, binding manuscript consumption, creative bypass, school eligibility, critical healing/damage, cooldown restoration and disconnect/rejoin.
+
+Run `./gradlew.bat test --tests net.kzeroko.isekaiexpansion.internal.beam.BeamCollisionTest` for centre-line geometry and interpolation checks. In game, test Conquest 1/8 slabs on Arona smooth terrain, narrow openings, oblique wall hits and targets near the damage radius; check contact centring while steering and moving the caster.
+
+Check binding at narrow and wide window sizes, hover/press feedback, filtering, repeated clicks, talent changes, blocked pools, full vessels, same-tier limits, unbinding and Wizards scrolls, plus binding, re-inscribing and unbinding a woven manuscript. Test spell registry JSON and network codec round trips, binding-table pool resolution and per-stack container persistence. Check client prediction, tooltip energy, hotbar and projectile visuals with matching dependency versions. These are verification procedures, not claims of an in-game test run.
 
 ## Related
 
-[Spell data](/en/wiki/spell-data/) covers the pack format and loader limits. [Attributes and effects](/en/wiki/attributes-and-effects/) covers combat attributes.
+[Spell data](/en/wiki/spell-data/) covers the pack format and loader limits. [Attributes and effects](/en/wiki/attributes-and-effects/) covers combat attributes. [Spell formula runtime](/en/dev/spell-formula-runtime/) covers formula storage, rating, the guard and chained casts.

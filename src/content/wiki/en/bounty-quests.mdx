@@ -3,7 +3,7 @@ title: "Guild Bounties"
 description: "Take a notice, confirm with the guild receptionist, and report your work for payment."
 category: world
 order: 110
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 The guild board offers work; its receptionist records your signature and pays the reward. Stand within 2 blocks of the board's front and point at a paper to read it. Take the notice, then speak to a guild receptionist. Board interactions never settle commissions.
@@ -77,6 +77,22 @@ Nearby previews fade participating Isekai HUD panels, lingering for 350 millisec
 The receptionist's ledger supports search, status filters and a separate confirmation step. Each preview shows only fulfilled requirements and time remaining; an unsigned notice shows its registration window. Selecting a record gives a short spoken prompt. Full terms stay on the parchment and in the quest journal's **Bounties** category.
 
 Confirmations name the commission and explain signature costs, delivery, return or withdrawal. The ledger lists used signatures, outstanding slots, signing delay and time to the next guild day. Dialogue panels animate between catalogue and conversation views. Replacing a board never resets taking or signing limits. Data-pack commissions may specify additional prerequisites, conditions and repeat cooldowns; refusal messages distinguish these from already active work.
+
+Guild receptionists inside a protected area cannot be attacked, damaged, pushed or given harmful effects. They remain available for conversation. Their service behaviour does not flee or panic when nearby combat starts; a receptionist outside protection can still take damage.
+
+## Crystal recycling
+
+Choose the crystal-recycling branch at the guild desk to sell a carried stack. The guild sends these monster materials for astral energy refining, town workshops and civic work. A notice, nameplate or active commission is not required.
+
+| Material | Base bronze per item | Base bronze per stack of 64 |
+| --- | ---: | ---: |
+| Magi Crystal Shard · `isekaiexpansion:magi_crystal_shard` | 5 | 320 |
+| Magi Crystal Stone · `isekaiexpansion:magi_crystal_stone` | 40 | 2560 |
+| Magi Crystal Chunk · `isekaiexpansion:magi_crystal_chunk` | 300 | 19200 |
+
+The ordinary reputation payout adjustment of −20%…+5% applies once to the stack total, rounded in bronze. A shard stack therefore pays 256–336 bronze. Bargaining does not apply. Review the exact count and payment before confirming; a changed stack or valuation needs a new quote. If payment cannot fit after consuming the selected stack, nothing is exchanged. Recycling has no merchant stock limit and grants no Trade Rapport, courtesy renewal or guild standing.
+
+Only the selected main-inventory stack is sold. Return to the catalogue for another stack; leaving the receptionist or ending the conversation invalidates the pending exchange.
 
 ## Placing a guild receptionist
 

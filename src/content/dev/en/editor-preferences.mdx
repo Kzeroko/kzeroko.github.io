@@ -1,96 +1,191 @@
 ---
-title: "Developer Editor Preferences"
-description: "Shared editor themes, the client preference file and integration rules for the dense authoring controls."
+title: "Developer Editor Workspace"
+description: "The shared shell of every in-game developer editor: a free spectator viewport, picking, typed inspectors, shortcuts and the client preference file."
 category: client
 order: 71
-updated: 2026-09-19
+updated: 2026-10-04
 ---
 
-The in-game developer editors share a client-local theme selection with 3 palettes: Blender, Blockbench and Graphite. The implementation lives under `client.screen.editor`; it is an internal UI framework, not a public API or a server configuration system.
+Every in-game developer editor is one workspace laid over a free spectator camera: panels at the edges, the live world in between. You fly the camera with the mouse and movement keys while the player stays where it stands. Clicks in the world pick blocks, entities and editor gizmos, so positions are set by pointing instead of typing coordinates.
 
 ## What it does
 
-`EditorThemePreferences` stores the shared selection. The scene recorder, scene trigger and `DungeonEditorFragment` read it when their fragment is created; the dungeon base serves the script, gateway, unlock-controller and loot-chest editors.
+The workspace owns layout, theming, the viewport camera, picking, shortcuts and the status bar. Each editor supplies only its rail, inspector, toolbar tools and an optional dock. The implementation lives under `client.editor` and is internal: there is no public API facade, and server-side validation stays in each editor's packets.
 
-Choosing the next theme updates the shared preference immediately and rebuilds that editor's controls. Other existing fragments keep their own theme field; there is no broadcast that repaints every screen. Newly created fragments read the current shared selection.
+| Editor | Built on | Opened by |
+| --- | --- | --- |
+| Dungeon gateway, dungeon script trigger, dungeon unlock controller, loot chest | Block editor | Using the placed block |
+| Guild receptionist anchor, structure space, structure atelier | Block editor | Using the placed block |
+| Scene trigger | Block editor | Using the scene trigger block |
+| Scene recorder | Workspace with a timeline dock | `/ise dev scene editor` or the trigger editor's **Record** tool |
+| Shot planner | Workspace with a timeline dock | `/ise reel` or `key.isekaiexpansion.shot_planner` |
+
+The [scene editor](/en/dev/scene-editor/) and [shot planner](/en/dev/shot-planner/) pages cover their own panels and keys.
 
 ## Runtime model
 
-The singleton loads on first class use. Its file is `isekaiexpansion-deveditors.txt` in Fabric's game directory, not the world save or the configuration directory. Reading and writing use UTF-8.
+### Layout
+
+| Region | Size | Contents |
+| --- | --- | --- |
+| Toolbar | 26 dp high | Accent bar, title and subtitle, editor tools, then camera reset, hints, hide, theme and close |
+| Rail | 136 dp wide | Sections or an outliner |
+| Viewport | remaining space | The rendered world; input that no panel claims reaches the camera |
+| Inspector | 252 dp wide | Fields of the current selection |
+| Dock | editor-defined | Timeline in the scene recorder and shot planner |
+| Status bar | 16 dp high | Status message, navigation hint and a camera readout |
+
+The readout refreshes every 120 ms with position, yaw, pitch, roll, field of view and fly speed. **Hide** (`H`) removes every panel and leaves a **Show UI** button; the whole window is then viewport. Rebuilding a panel keeps its scroll position.
+
+### Viewport camera
+
+Opening an editor starts the viewport camera at your current view, with its focus point on the block or entity under the crosshair (2–48 blocks away) or 8 blocks ahead. A block editor then turns the camera toward its block, and the scene recorder toward its bound trigger, and makes that block the focus point; the camera moves along the line of sight only when it is outside 2–12 blocks of it. While any editor is open the perspective switches to third person, so your body renders where it stands unless the camera is inside it, and the HUD hides. Both return when the last camera holder lets go, unless you changed them meanwhile.
+
+| Input | Action |
+| --- | --- |
+| Left drag | Orbit around the focus point |
+| Left click | Pick: a gizmo, block or entity, depending on the editor |
+| Right drag | Look around in place; movement keys fly while held |
+| Middle drag, `Shift` + left drag | Pan across the view plane |
+| `Alt` + left drag, `Shift` + middle drag | Orbit |
+| Wheel | Dolly toward or away from the focus point |
+| `Shift` + wheel | Fine dolly, a quarter step |
+| `Alt` + wheel | Field of view, 2 degrees per step |
+| `Ctrl` + wheel | Roll, 2 degrees per step |
+| Wheel while right-dragging | Fly speed ×1.2 per step |
+
+A left press becomes an orbit once the cursor travels more than 4 pixels; released earlier, it is a click. During a drag the cursor is captured, so rotation never stops at the window edge, and it returns to where you pressed. Mouse travel counts from the moment of the press. While a drag runs, the wheel acts on the camera wherever the captured cursor is, and the panels ignore the pointer.
+
+| Fly input | Effect |
+| --- | --- |
+| Forward, back, left and right movement keys | Fly along the view direction and its sides |
+| Jump key or `E` | Up |
+| Sneak key or `Q` | Down |
+| Sprint key | ×3 speed |
+| `Alt` | ×0.25 speed |
+| `Z` / `X` | Roll left / right at 45 degrees per second |
+
+Flight eases in and out over about 0.09 seconds and wheel dollies over about 0.07 seconds. The focus distance stays within 0.35–512 blocks, the field of view within 10–130 degrees and pitch within ±89.9 degrees. The movement keys follow your key bindings; scancode bindings do not fly. Each editor opens at the `fly_speed` from the preferences file. The wheel changes the speed only until that editor closes, and the status bar shows each new value.
+
+### Picking
+
+A click casts a ray from the rendered camera through the cursor, up to 160 blocks. The nearest entity in front of the first block hit wins; otherwise the block. Entities whose box contains the camera are skipped. Editors that draw gizmos check them against the click first, using the projection of the frame that was clicked.
+
+A pick request from a field or button turns the next click into that pick. The status bar names what to click; `Esc` cancels. Pick buttons sit beside position fields as `⌖`.
+
+### Camera order
+
+Several systems can take the camera. Each frame, before the projection is built, every source is asked for a pose and the highest authority that answers wins:
+
+| Authority | Source |
+| --- | --- |
+| `SHOT_REEL` | Shot reel playback and the studio's shot camera |
+| `SCENE_PREVIEW` | The scene recorder's camera-track preview |
+| `SCENE` | Server cinematic scenes, camera animation scenes and dialogue framing |
+| `EDITOR_VIEWPORT` | The free viewport camera |
+
+The winning pose sets position, yaw, pitch, field of view and roll for the whole frame. Roll rotates the view matrix itself, so a rolled camera also rolls the picture. Poses from the shot reel, the scene preview and the viewport are steady: view bobbing and hurt tilt are skipped. While any pose wins, the block outline is hidden, and any player whose hitbox, grown by 0.1 blocks on every side, contains the camera is not drawn that frame. A camera at your eyes or passing through a body therefore shows the world rather than the inside of a model. Starting a viewport drag while a higher authority holds the camera adopts that pose first, so navigation continues from the frame you were looking at.
+
+Other mods read the director through `net.kzeroko.isekaiexpansion.api.client.camera.CameraDirectorAPI` on the render thread. `isDirecting()` reports whether a pose owns the frame being rendered, and `fov(double)` blends a base field of view toward that pose the way the director blends the game's own. The frame is resolved when world rendering starts, so both answer for the current frame from then on.
+
+### Preferences file
+
+The palette and navigation settings live in `isekaiexpansion-deveditors.txt` in the game directory, written as UTF-8.
 
 ```text
 # IsekaiExpansion developer editor preferences
 format 1
 theme blender
+look_sensitivity 0.220
+fly_speed 10.00
+navigation_hints true
 ```
 
-| Entry | Type | Default | Contract |
+| Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `format` | Exact text version | Required in an existing file | Must be `1`; other text, including inline comments, is invalid. |
-| `theme` | Theme name | `blender` in memory when no regular file exists | Existing files require `blender`, `blockbench` or `graphite`. Input is trimmed and case-insensitive; output is lowercase. |
-| Lines starting with `#` | Comment | Optional | Ignored after surrounding whitespace is stripped. |
-| Blank lines | Whitespace | Optional | Ignored. |
+| `format` | `integer` | required | Must be `1`. Any other value resets every entry to its default and rewrites the file. |
+| `theme` | `enum(blender, blockbench, graphite)` | `blender` | Editor palette, case-insensitive. An unknown name keeps the default and rewrites the file. |
+| `look_sensitivity` | `number` | `0.22` | Degrees of rotation per pixel of drag, clamped to 0.04–1.2. An unparsable value uses the default. |
+| `fly_speed` | `number` | `10.0` | Fly speed every editor opens with, in blocks per second, clamped to 0.5–128. The wheel never writes it. |
+| `navigation_hints` | `boolean` | `true` | Shows the navigation hint in the status bar. Anything other than `false`, in any case, reads as on. |
 
-Each non-comment line splits once on whitespace. Unknown keys and lines without a value are ignored. Later valid duplicate keys replace earlier values, but an unknown theme throws immediately rather than waiting for a later correction. A later invalid `format` leaves the final format invalid.
+Lines starting with `#`, blank lines, unknown keys and lines without a value are ignored. A missing file keeps the defaults without writing one. A read failure logs a warning and rewrites the file. Each write emits all six lines to a sibling `.tmp` file and moves it into place, atomically when the file system allows; comments and unknown keys do not survive it.
 
-| File condition | Result |
-| --- | --- |
-| Missing path or non-regular file | Keep Blender without attempting an initial write |
-| Missing required format/theme, invalid format or invalid theme | Reset to Blender and write the current format |
-| Read failure | Log a warning, reset to Blender and attempt the same rewrite |
-| Successful read | Keep the parsed theme in memory |
-| External edit after loading | No watcher or reload method; the current process keeps its in-memory selection |
-
-Writing emits only the header, format and theme lines, so custom comments and unknown fields do not survive a save. It writes a sibling `isekaiexpansion-deveditors.txt.tmp`, then moves it over the destination with atomic replacement. If atomic move is unsupported, it retries with ordinary replacement. Other I/O failures are logged; the in-memory selection is not rolled back and a temporary file may remain.
+**Theme** cycles Blender, Blockbench, Graphite and rebuilds the open editor. Other editors pick up the change when they are next opened.
 
 ## Contracts
 
-| Internal method | Behaviour |
-| --- | --- |
-| `EditorThemePreferences.current()` | Returns the singleton's current selection |
-| `EditorThemePreferences.select(EditorTheme)` | Null or the same selection returns the current theme without writing; another value updates memory, writes synchronously and returns that selection |
-| `EditorTheme.next()` | Cycles Blender → Blockbench → Graphite → Blender |
-| `EditorTheme.serializedName()` | Uses lowercase with `Locale.ROOT` |
-| `EditorTheme.fromSerializedName(String)` | Rejects null/blank; trims and parses case-insensitively |
-
-Use these methods on the client through the editor UI path. They do not marshal threads, synchronise concurrent access or queue disk writes. Do not load the preference class on a dedicated server or treat its file as synchronised player state.
-
-The palette provides colours for toolbars, normal/raised panels, borders, fields, normal/hover/active buttons, accents, primary/secondary/muted text and danger buttons. `SquareButton` prioritises danger fill, then active fill, then hover/press fill; an active button still uses the accent border.
+- **Threads.** Fragment and view code runs on the ModernUI thread. World, network and camera state belong to the client thread. The workspace's `onMain` and `onUi` hop between them. Pick results are posted back to the UI thread; the navigation takeover hook runs on the client thread.
+- **Shortcuts.** The workspace reads keys before any view only when no text field has focus and no viewport drag is running. `H` toggles the panels and `Shift+C` puts the camera back at your eyes.
+- **Escape.** Escape first cancels a pending pick, then gives the editor a chance to leave a mode such as a preview, and only then closes the screen. The inventory key no longer closes an editor.
+- **Edits.** Text and number fields report every valid value as you type and never rebuild the panel, so focus stays. Choices and toggles rebuild the inspector, because they usually change which fields exist.
+- **Camera release.** Closing an editor releases the viewport camera; the cursor is restored even if a drag was in progress. Disconnecting releases it as well.
+- **Input.** Drag travel and button changes come from the game's mouse callbacks, not from polling the cursor position. Ixeris 4.6.8, a third-party mod that polls input on its own thread, sends captured-mouse motion from its buffered raw input only to those callbacks and leaves the polled position frozen. The wheel during a drag comes from the scroll callback as well. A press released before the next frame still counts as a click.
 
 ## Extending it
 
-A new editor should initialise its theme from `EditorThemePreferences.current()`. Its theme-button callback can follow the existing fragments:
+A new block editor extends `BlockEditorFragment`, adds a `BlockEditorKind` constant naming the blocks whose world guides it shows, and opens through `BlockEditorController.open`:
 
 ```java
-theme = EditorThemePreferences.select(theme.next());
-statusColor = theme.textMuted();
-rebuild();
+public final class BeaconEditorFragment extends BlockEditorFragment {
+    private double radius;
+
+    public BeaconEditorFragment(BlockPos pos, double radius) {
+        super(BlockEditorKind.BEACON, "Beacon", pos);
+        this.radius = radius;
+    }
+
+    @Override
+    protected List<String> sections() {
+        return List.of("Range");
+    }
+
+    @Override
+    protected void buildSection(EditorForm form, int section) {
+        form.number("Radius", radius, NumberSpec.DISTANCE, value -> radius = value);
+    }
+
+    @Override
+    protected void save() {
+        var value = radius;
+        onMain(() -> ConfigureBeaconPacket.send(pos, value));
+        close();
+    }
+}
 ```
 
-Here `theme` and `statusColor` are the fragment's existing fields, and `rebuild()` recreates controls from that state. Keep editing data in the fragment's model so rebuilding its widgets does not become an implicit save or reset of authored content.
+Block editors list their sections in the rail, show the anchor position with a **Frame Block** button, and add `Ctrl+S` to save, `F` to frame the block and `1`–`9` to switch sections. `pickRelativeBlock` asks for a block click and hands back its offset from the editor's block. Any workspace can override `focusPoint()` to name the world point the camera turns to when it opens; block editors return their block's centre.
 
-| Shared helper | Behaviour to preserve |
+`EditorForm` builds the inspector rows:
+
+| Method | Row |
 | --- | --- |
-| `EditorWidgets.square` | Rectangular background, corner radius 0 and 1 dp border |
-| `EditorWidgets.editText` | Single-line input; initial value is set before the text watcher is attached |
-| `EditorWidgets.field` | Changes call the supplied consumer; an optional commit callback is posted when focus is lost |
-| `EditorWidgets.choice` | Cycles the supplied options then rebuilds; provide a non-empty list |
-| `EditorWidgets.toggle` | Inverts the value then rebuilds |
-| `EditorWidgets.actionRow` | Equal-width controls separated by the common gap |
+| `text` | Labelled single-line text field |
+| `number`, `integer` | Number field with a label you drag to change the value |
+| `vec3`, `blockPos` | Three axis fields under a caption, with an optional pick button |
+| `choice` | Up to three options inline; more open a dropdown |
+| `toggle` | On/off button |
+| `listItem` | Full-width outliner entry |
+| `button`, `primaryButton`, `dangerButton`, `actions` | Buttons and button rows |
+| `section`, `hint`, `readout` | Headings, muted notes and read-only values |
 
-The common toolbar height is 25 dp, control height 21 dp and gap 3 dp. These are layout constants, not restrictions on values edited by the widgets.
+`NumberSpec` gives a number field its range and drag rate: each pixel of drag adds `step`, ten times finer with `Shift` held when pressing and ten times coarser with `Ctrl`. Integral specs round every edit.
 
-`EditorI18n.option` lowercases an option, then checks translation prefixes in order: `screen.isekaiexpansion.developer_editor.option.`, `screen.isekaiexpansion.cinematic_scene.editor.option.`, `screen.isekaiexpansion.dungeon.editor.option.`. Null becomes `none`. If no translation exists, `EditorWidgets.humanize` replaces colons/underscores with spaces and capitalises words. Use the translation keys for display text while keeping the underlying serialized value unchanged.
+Option values show translations from the `option.` keys under `screen.isekaiexpansion.developer_editor.`, `screen.isekaiexpansion.shot_planner.`, `screen.isekaiexpansion.cinematic_scene.editor.` and `screen.isekaiexpansion.dungeon.editor.`, in that order, and fall back to the value with underscores replaced by spaces and words capitalised.
 
 ## Verifying
 
-- With the client closed, remove only a test copy of the preference file. Open an editor and confirm Blender is selected without creating the file merely by reading.
-- Cycle all themes, reopen a different editor and restart the client. Check the saved lowercase selection is reused.
-- Test a wrong format, missing theme, uppercase valid theme and invalid theme followed by a valid one. Check which inputs are accepted and which reset the file.
-- Make a test destination unwritable and select another theme. Confirm the warning and in-memory change; a returned selection does not prove the disk write succeeded.
-- Edit a field, lose focus and change theme. Confirm the model retains the edit and that rebuilding does not spuriously fire the initial text-change callback.
+- Open each editor and confirm block editors turn to their block, the scene recorder to its bound trigger and the shot planner keeps your view; your body is hidden while the camera is at your eyes and renders once you fly away; the HUD returns after closing.
+- With Ixeris installed, drag with each mouse button and confirm the camera follows the whole mouse travel.
+- Orbit, look, pan, dolly, roll and zoom; fly with every movement key and with sprint and `Alt`; check the cursor returns to the press point.
+- Pick a block, an entity and yourself; press `Esc` during a pick and during a drag.
+- Change the theme and sensitivity, restart the client and check the file holds them. Change the fly speed with the wheel, reopen the editor and confirm it starts at the file's `fly_speed`. Test a wrong `format`, an unknown theme and an unparsable number.
+- Open an editor while a server cinematic scene plays and while a shot reel preview runs, and confirm the higher authority keeps the camera until you drag.
 
 ## Related
 
-[Tutorial runtime](/en/dev/tutorials/) covers the separate tutorial UI and persistence. [Blockbench plugin](/en/dev/blockbench-plugin/) covers the external asset tool; the editor's Blockbench palette is only a theme name, not a dependency on that plugin.
+- [Shot planner](/en/dev/shot-planner/) — camera reels recorded by an external screen recorder.
+- [Scene recorder and visual editor](/en/dev/scene-editor/) — the server cinematic scene editor.
+- [Camera Scene API](/en/dev/camera-api/) — client camera animations, which take the camera at the `SCENE` authority.
 
+The block editors are described with their systems: [dungeon runtime](/en/dev/dungeons/), [structure spaces](/en/dev/structure-spaces/) and [atelier structures](/en/dev/atelier-structures/).

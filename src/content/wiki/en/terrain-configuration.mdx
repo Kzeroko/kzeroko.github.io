@@ -3,7 +3,7 @@ title: "Terrain configuration"
 description: "Every KTM2 terrain setting, palette field, default, valid range and reload boundary."
 category: data
 order: 178
-updated: 2026-09-26
+updated: 2026-10-07
 ---
 
 Terrain configuration controls placement, geometry, materials and local atmosphere for the KTM2 world generator. Generation takes a server-local snapshot, so editing a live object does not rebuild an existing world or move its saved World Tree.
@@ -358,7 +358,7 @@ The mod's validators do not report arbitrary unknown JSON keys. A misspelt setti
 
 Set generation options before creating/loading the world, then restart to obtain a fresh registry/generator snapshot. `/reload` is not a terrain regeneration command. Already generated chunks are not rewritten by these paths, and the saved World Tree reservation keeps its coordinates and geometry.
 
-IsekaiCore `0.4.0-build61` supplies login-time synchronisation of the `terrain` object. Generation deliberately reads server-local values; atmosphere reads the active server-synchronised view. This bridge does not live-push edits to connected clients. The separate shader toggle remains local, and shader overlays are prepared when Iris loads a pack; disabling it takes effect on a subsequent pack load.
+IsekaiCore `0.4.0-build65` supplies login-time synchronisation of the `terrain` object. Generation deliberately reads server-local values; atmosphere reads the active server-synchronised view. This bridge does not live-push edits to connected clients. The separate shader toggle remains local, and shader overlays are prepared when Iris loads a pack; disabling it takes effect on a subsequent pack load.
 
 ## Related
 

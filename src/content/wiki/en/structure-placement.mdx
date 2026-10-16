@@ -1,0 +1,293 @@
+---
+title: "Structure placement data"
+description: "Where the mod's surface structures start, what ground they accept, how they keep their distance from each other and how the land is levelled for them."
+category: data
+order: 95
+updated: 2026-10-16
+tags: []
+---
+
+World Portal Ruins, the Adventurers' Guild, the Respawn Temple and the three dungeon entrances are placed by the `isekaiexpansion:ex_random_spread` placement and built by the `isekaiexpansion:surface` structure type. Each spacing region tries up to 16 candidate chunks before giving up, so a structure that refuses water or mountains moves elsewhere inside its region instead of vanishing from it. The ruins, Guild and Temple also reserve an earthwork: terrain generation levels the ground under the building and eases it back into the land around it, so the buildings follow level ground.
+
+## Where the files live
+
+Both are world-generation registry files. A structure set lives at `data/<namespace>/worldgen/structure_set/<name>.json` and names its structures and one placement; each structure lives at `data/<namespace>/worldgen/structure/<name>.json`. The file path is the registry ID, so a data pack replaces a bundled file by shipping the same path, and a later pack in the load order wins.
+
+| Bundled structure set | Structure | Spacing / separation | Spawn distance | Site attempts | Avoids | Keeps away from |
+| --- | --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:world_portal_ruins` | `isekaiexpansion:world_portal_ruins` | 144 / 127 chunks | 32 chunks | 16, radius 28 | `ocean`, `river`, `lake`, `wetland`, `coast`, `mountain` | villages by 7 chunks, Guilds by 8 chunks, the Respawn Temple by 24 chunks, hostile strongholds by 10 chunks, hostile camps by 6 chunks |
+| `isekaiexpansion:adventurers_guild_structure_set` | `isekaiexpansion:adventurers_guild` | 32 / 12 chunks | 19 chunks | 16, radius 48 | `ocean`, `river`, `lake`, `wetland`, `coast`, `mountain` | villages by 7 chunks, the Respawn Temple by 24 chunks, hostile strongholds by 10 chunks, hostile camps by 6 chunks |
+| `isekaiexpansion:respawn_temple_structure_set` | `isekaiexpansion:respawn_temple` | 60 / 30 chunks | 31 chunks | 4 | `mountain` | villages by 7 chunks |
+| `isekaiexpansion:dark_delves_entrance` | `isekaiexpansion:dark_delves_entrance` | 128 / 96 chunks | 50 chunks | 6, radius 24 | `ocean`, `river`, `lake`, `wetland`, `mountain` | villages by 10 chunks |
+| `isekaiexpansion:sunken_sanctum_entrance` | `isekaiexpansion:sunken_sanctum_entrance` | 160 / 112 chunks | 75 chunks | 6, radius 24 | `ocean`, `river`, `lake`, `wetland`, `mountain` | villages by 10 chunks |
+| `isekaiexpansion:verdant_temple_entrance` | `isekaiexpansion:verdant_temple_entrance` | 192 / 128 chunks | 112 chunks | 6, radius 24 | `ocean`, `river`, `lake`, `wetland`, `mountain` | villages by 10 chunks |
+
+| Bundled earthwork | Level core | Apron | Steepest apron | Most core relief | Above the water line |
+| --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:world_portal_ruins` | 24 blocks | 16–64 blocks | 0.5 | 24 blocks | At least 2 blocks |
+| `isekaiexpansion:adventurers_guild_structure_set` | 40 blocks | 16–96 blocks | 0.5 | 32 blocks | at least 2 blocks |
+| `isekaiexpansion:respawn_temple_structure_set` | 36 blocks | 16–96 blocks | 0.5 | 32 blocks | not required; a site under water is left unlevelled |
+
+World Portal Ruins have a nominal spacing of 2304 blocks. A separation of 127 chunks guarantees at least 2048 blocks between start centres, including retries and negative coordinates; the current templates keep their anchors over 2000 blocks apart after rotation. Unsuitable terrain or exclusions can leave regions empty, so this is not a maximum travel distance.
+
+The Respawn Temple is the one bundled structure allowed on open water. Its template pool runs `isekaiexpansion:exterior_fluid_processor`, so the sea stays against its walls at the water line instead of standing beside a dry gap.
+
+## Minimal example
+
+The smallest structure set this placement accepts, saved as `data/example/worldgen/structure_set/temples.json`. With no `site`, no `exclusions` and no `earthwork` it places exactly like vanilla random spread.
+
+```json
+{
+  "structures": [
+    {
+      "structure": "isekaiexpansion:respawn_temple",
+      "weight": 1
+    }
+  ],
+  "placement": {
+    "type": "isekaiexpansion:ex_random_spread",
+    "salt": 1234567,
+    "spacing": 40,
+    "separation": 20
+  }
+}
+```
+
+## Fields
+
+### Structure set
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `structures` | `array<object>` | required | Vanilla structure set entries; the structure is picked by weight once a start is decided. |
+| `structures[].structure` | `identifier` | required | Structure registry ID. |
+| `structures[].weight` | `integer` | required | Relative weight, at least 1. |
+| `placement` | `object` | required | Where starts go; the rows below apply when its `type` is `isekaiexpansion:ex_random_spread`. |
+| `placement.type` | `identifier` | required | `isekaiexpansion:ex_random_spread`. |
+| `placement.salt` | `integer` | required | Seed salt, at least 0. Two sets with the same salt and spacing draw the same candidates. |
+| `placement.spacing` | `integer` | required | Region size in chunks, `1–4096`. |
+| `placement.separation` | `integer` | required | Chunks kept free at the far edge of every region, `0–4096`; must be less than `spacing`. Candidates fall within the first `spacing − separation` chunks of the region on each axis. |
+| `placement.spread_type` | `enum(linear, triangular)` | `linear` | Distribution of each candidate offset inside that box; `triangular` favours its centre. |
+| `placement.frequency` | `number` | `1.0` | Chance, `0–1`, that a region has a start at all. Drawn once per region on its first candidate. |
+| `placement.frequency_reduction_method` | `enum(default, legacy_type_1, legacy_type_2, legacy_type_3)` | `default` | Vanilla random source used for `frequency`. |
+| `placement.locate_offset` | `array<integer>` | `[0, 0, 0]` | Block offset, each `−16–16`, added to the start chunk's corner for `/locate` and wayfinding. |
+| `placement.spawn_distance` | `object` | no limit | Distance from the world origin a start must keep. See [Spawn distance](#spawn-distance). |
+| `placement.site` | `object` | 1 attempt, nothing avoided | How a region looks for acceptable ground. See [Site](#site). |
+| `placement.exclusions` | `array<object>` | `[]` | Other structure sets to keep away from. See [Exclusions](#exclusions). An empty list keeps away from nothing. |
+| `placement.earthwork` | `object` | none | Ground levelled for every start. See [Earthwork](#earthwork). Absent, the land is left as it lies. |
+
+### Spawn distance
+
+Measured in chunks, as a straight line from chunk 0, 0 to the candidate chunk. The world spawn point is chosen near the origin, so this keeps starts out of the spawn area.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement.spawn_distance.min` | `integer` | `0` | Nearest allowed distance, `0–1000000` chunks. |
+| `placement.spawn_distance.max` | `integer` | unbounded | Farthest allowed distance, `1–1000000` chunks; must be greater than `min`. |
+
+### Site
+
+A region draws its candidates one after another from its own seeded sequence and takes the first that passes every check below, in this order. The first draw is the chunk vanilla random spread would pick. When every attempt is refused, the region has no start.
+
+1. It lies within the spawn distance.
+2. Its centre lies in a biome that one of the set's structures accepts, so a start is never promised where the structure would then refuse to generate.
+3. Its ground passes `site`.
+4. On a ReTerraForged world, the world's structure rules accept its centre. ReTerraForged would otherwise refuse the structure after placement; its default preset refuses mountain terrain and river banks.
+5. It keeps every exclusion distance.
+6. With an `earthwork`, its ground can be levelled within the earthwork's limits.
+
+Every check reads the ground as it lies before any earthwork levels it, so a decision never depends on another decision's earthwork or on which chunks happened to generate first.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement.site.attempts` | `integer` | `1` | Candidates a region may try, `1–16`. |
+| `placement.site.radius` | `integer` | `0` | Blocks from the candidate chunk's centre to four more ground samples, north, south, east and west, `0–128`. At `0` only the centre is sampled. |
+| `placement.site.avoid` | `array<enum>` | `[]` | Terrain classes a candidate may not stand on at any sample; values in the table below. An empty list samples nothing. |
+
+| Terrain class | On a ReTerraForged world | On any other world |
+| --- | --- | --- |
+| `ocean` | Shallow or deep ocean terrain | Biome in `#minecraft:is_ocean` or `#minecraft:is_deep_ocean` |
+| `river` | River terrain | Biome in `#minecraft:is_river` |
+| `lake` | Lake terrain, or ground at or under the water line that is not ocean or river | Never matches |
+| `wetland` | Wetland terrain | Biome in `#c:swamp` |
+| `coast` | Coast terrain | Biome in `#minecraft:is_beach` |
+| `mountain` | Mountain terrain | Biome in `#minecraft:is_mountain` |
+| `volcano` | Volcano terrain | Never matches |
+| `landform` | Ground a KTM2 terrain district sculpts, or the World Tree's | Never matches |
+
+ReTerraForged classifies the ground itself, which the biome painted over it does not reflect: a plains biome can lie over a lake or a sea inlet. The biome check reads the biome at the centre's ground height on a ReTerraForged world; elsewhere heights are unknown, so biomes are sampled at Y 256, above any surface, where a cave biome underneath does not answer instead of the surface one. The structure rules are tested at the centre only; avoiding `mountain` also checks the four outer samples.
+
+### Exclusions
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement.exclusions[].structure_sets` | `identifier` | required | Structure sets to avoid: one ID, a list of IDs or a `#tag`. |
+| `placement.exclusions[].distance` | `integer` | required | Closest a candidate may come to their starts, `1–256` chunks, as a straight line. |
+
+Distances are measured against where the other sets start, including a start that set moved inside its own region, and only the regions within reach are checked. A set the dimension never places is ignored, so an Overworld placement may name a Nether or End set without effect. A set placed by `isekaiexpansion:ex_random_spread` is measured where it settled, since it has already checked its own biomes. Any other random-spread set, vanilla's or another mod's, draws one candidate chunk per region and its structure checks the biome only when that chunk generates, so a candidate counts only where one of the set's structures accepts the biome at the candidate chunk's centre or at any of four points 24 blocks out along the diagonals, all read at the centre's ground height. The extra points count a start near a biome edge rather than miss it, because a structure tests the biome where its start piece settles, which may be off the centre. Sets placed any other way, such as strongholds on rings, are ignored, and a set never excludes itself. `/locate` and wayfinding read the same decision, so they point at the chunk a region settled on and skip a region with no start.
+
+To keep away from a set another mod adds without making that mod required, name a structure set tag, at `data/<namespace>/tags/worldgen/structure_set/<name>.json`, and list the set as `{"id": "<set id>", "required": false}`. A missing optional entry is left out of the tag, while a missing ID named directly in `structure_sets` fails the registry load.
+
+### Earthwork
+
+An earthwork is the ground a placement reserves at every start it decides: a level core centred on the start chunk's centre, and an apron that eases the ground back to its natural height around it. Terrain generation shapes it inside ReTerraForged's own terrain, before erosion runs, so the apron erodes and drains like the land around it while the core stays level and out of erosion. Final density gives both a single exact surface, and ReTerraForged's caves fade out over the 8 blocks beneath the lower of the natural and the levelled ground. Where two earthworks reach the same column, the one holding it more strongly shapes it.
+
+A candidate is surveyed on its natural ground before it is accepted:
+
+1. 25 samples cover the core: the centre, 8 at half the radius and 16 at the radius. Any of them on `landform` ground refuses the candidate. Their median, rounded to a block, becomes the level, so what is cut and what is filled balance.
+2. With `min_above_water`, the level is raised to at least that height above the water line. Without it, a site whose level lies at or under the water line is accepted and left unlevelled, as a structure there stands on the water.
+3. The core's relief, its highest sample less its lowest, may not exceed `max_relief`.
+4. 16 samples at `radius + min_blend` find the largest height difference from the level. The apron is that difference divided by `max_slope`, kept within `min_blend–max_blend` blocks.
+5. Any of those 16 samples, or of 16 more at `radius + max_blend`, on `landform` ground refuses the candidate, so an earthwork never reshapes a sculpted district or the World Tree.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `placement.earthwork.radius` | `integer` | required | Blocks from the start chunk's centre held level, `1–128`. |
+| `placement.earthwork.min_blend` | `integer` | `16` | Narrowest apron, `1–256` blocks. |
+| `placement.earthwork.max_blend` | `integer` | `96` | Widest apron, `1–256` blocks; must not be less than `min_blend`. |
+| `placement.earthwork.max_slope` | `number` | `0.5` | Steepest average apron rise, `0.05–4.0` blocks per block of run. A steeper surround widens the apron up to `max_blend`. |
+| `placement.earthwork.max_relief` | `integer` | no limit | Most the natural ground under the core may rise and fall, `0–256` blocks. A candidate beyond it is refused and the region tries its next candidate. |
+| `placement.earthwork.min_above_water` | `integer` | none | Least height above the water line the level keeps, `0–64` blocks. Absent, a site whose level lies at or under the water line is left unlevelled. |
+
+Only the KTM2 terrain engine levels ground. Other ReTerraForged worlds still survey candidates against these limits but level nothing; worlds without ReTerraForged terrain cannot read heights, so candidates are accepted without an earthwork and the structure's own site survey decides alone. Keep the structure's `site.radius` inside the earthwork's `radius`, so its survey reads the levelled core rather than the apron. ReTerraForged decides which coast ground is beach by its height, so levelling a coastal site can change what is beach there; a structure whose biomes exclude beaches should avoid `coast`, as the Guild does.
+
+### Surface structure
+
+`isekaiexpansion:surface` builds a jigsaw structure once its site survey accepts the ground. The survey reads nine columns, the start and eight around it on a circle, straight from the generator's heightmaps, so it catches what the placement's coarse terrain check cannot, such as a pond or a cliff edge inside good land.
+
+```json
+{
+  "type": "isekaiexpansion:surface",
+  "biomes": "#c:is_plains",
+  "step": "surface_structures",
+  "spawn_overrides": {},
+  "terrain_adaptation": "none",
+  "start_pool": "isekaiexpansion:adventurers_guild/start_pool",
+  "size": 30,
+  "start_height": {
+    "absolute": 0
+  },
+  "project_start_to_heightmap": "WORLD_SURFACE_WG",
+  "max_distance_from_center": 80,
+  "site": {
+    "radius": 36,
+    "max_height_variation": 10,
+    "max_water_depth": 0
+  }
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | required | `isekaiexpansion:surface`. |
+| `biomes` | `tag id` | required | Vanilla structure field: biomes the start may lie in, as a `#tag`, one biome ID or a list. |
+| `step` | `string` | required | Vanilla generation step, for example `surface_structures`. |
+| `spawn_overrides` | `object` | required | Vanilla mob spawn overrides; `{}` for none. |
+| `terrain_adaptation` | `enum(none, beard_thin, beard_box, bury)` | `none` | Vanilla terrain adaptation around the pieces. |
+| `start_pool` | `identifier` | required | Template pool the jigsaw starts from. |
+| `start_jigsaw_name` | `identifier` | none | Jigsaw block name to start from; absent starts from the pool element's own origin. |
+| `size` | `integer` | required | Jigsaw depth, `1–30`. Use `1` for a standalone template without connectors. `0` is rejected because Minecraft 1.20.1 omits the starting piece at that depth. |
+| `start_height` | `object` | required | Vanilla height provider for the start Y. |
+| `project_start_to_heightmap` | `enum(WORLD_SURFACE_WG, WORLD_SURFACE, OCEAN_FLOOR_WG, OCEAN_FLOOR, MOTION_BLOCKING, MOTION_BLOCKING_NO_LEAVES)` | none | Adds that heightmap's height at the start chunk's centre to the start Y. `WORLD_SURFACE_WG` stops at the water surface. |
+| `max_distance_from_center` | `integer` | required | Furthest a piece may reach from the start, `1–128` blocks. |
+| `site.radius` | `integer` | required | Blocks from the start to the circle of eight samples, `1–256`. |
+| `site.max_height_variation` | `integer` | required | Most the highest and lowest surface may differ, `0–256` blocks. |
+| `site.max_water_depth` | `integer` | open water allowed | Deepest water any sample may stand in, `0–256` blocks; `0` requires dry ground. |
+
+Each column's surface is the top of whatever stands there, water counted, and its water depth is that surface less the ground under the water. Flatness is judged on the surface, which is what the structure is built onto. The start is the centre of the chunk the placement chose, the column an earthwork levels around. Whatever its rotation, the structure is centred there: the start piece is laid out first, then every piece is moved so the start piece's footprint centres on that column.
+
+### Exterior fluid processor
+
+`{"processor_type": "isekaiexpansion:exterior_fluid_processor"}` takes no fields. In each horizontal layer of a piece it floods outwards from the layer's edges through the cells the build does not fill; template air reached that way is outside the structure, and wherever the world already holds a fluid there, the template leaves it in place. Air the build encloses, such as a room below the water line, is still placed, so the interior stays dry. A piece placed on dry land is left untouched.
+
+## Full example
+
+The bundled Adventurers' Guild set. A region tries up to 16 chunks at least 19 chunks from the origin, refuses water, wetland, coast and mountain at the centre and 48 blocks out in each direction, and keeps 7 chunks from villages, 24 from the Respawn Temple, 10 from hostile strongholds and 6 from hostile camps. Its start levels a 40-block core at least 2 blocks above the water line, refuses ground whose relief there exceeds 32 blocks, and blends back over 16–96 blocks.
+
+```json
+{
+  "structures": [
+    {
+      "structure": "isekaiexpansion:adventurers_guild",
+      "weight": 1
+    }
+  ],
+  "placement": {
+    "type": "isekaiexpansion:ex_random_spread",
+    "salt": 180392143,
+    "spacing": 32,
+    "separation": 12,
+    "spawn_distance": {
+      "min": 19
+    },
+    "site": {
+      "attempts": 16,
+      "radius": 48,
+      "avoid": [
+        "ocean",
+        "river",
+        "lake",
+        "wetland",
+        "coast",
+        "mountain"
+      ]
+    },
+    "exclusions": [
+      {
+        "structure_sets": "minecraft:villages",
+        "distance": 7
+      },
+      {
+        "structure_sets": "isekaiexpansion:respawn_temple_structure_set",
+        "distance": 24
+      },
+      {
+        "structure_sets": "#isekaiexpansion:overworld_hostile_strongholds",
+        "distance": 10
+      },
+      {
+        "structure_sets": "#isekaiexpansion:overworld_hostile_camps",
+        "distance": 6
+      }
+    ],
+    "earthwork": {
+      "radius": 40,
+      "min_blend": 16,
+      "max_blend": 96,
+      "max_slope": 0.5,
+      "max_relief": 32,
+      "min_above_water": 2
+    }
+  }
+}
+```
+
+Both hostile tags ship with the mod. Every entry outside `minecraft` is optional, so a pack without that mod simply has a shorter list.
+
+| Tag | Distance | Structure sets |
+| --- | --- | --- |
+| `#isekaiexpansion:overworld_hostile_strongholds` | 10 chunks | `minecraft:pillager_outposts`, `minecraft:woodland_mansions`, `takesapillage:pillager_structure`, `illagerinvasion:illager_fort`, `illagerinvasion:illusioner_tower`, `illagerinvasion:labyrinth`, `saintsdragons:igni_roost_set`, `saintsdragons:varasuchus_roost` |
+| `#isekaiexpansion:overworld_hostile_camps` | 6 chunks | `minecraft:swamp_huts`, `illagerinvasion:firecaller_hut`, `illagerinvasion:sorcerer_hut` |
+
+Snow can form only in a column exposed above the candidate position. Decorative roofs count as cover, including during initial generation, so a covered guild floor does not receive new snow. This rule does not remove snow already stored in a chunk.
+
+## Validation
+
+- **A missing required key, a value out of range or an unknown enum value** fails the world-generation registry load, and the world does not open. Minecraft names the file and the key.
+- **`separation` equal to or greater than `spacing`** fails with "spacing has to be larger than separation".
+- **`spawn_distance.max` at or below `min`** fails with "spawn_distance max must be greater than min".
+- **`earthwork.max_blend` below `min_blend`** fails with "earthwork max_blend must not be less than min_blend".
+- **An unknown key** is ignored, including the retired `flat_check_distance`, `flat_check_threshold`, `min_distance_from_spawn`, `exclusion_zone` and `exclusion_zone_entries`.
+- **An exclusion naming a structure set that does not exist** fails the registry load; a `#tag` with no members keeps away from nothing.
+- **Exclusions that form a loop**, where two sets keep away from each other directly or through others, log one warning per placement. The loop is broken where it closes, so which set yields depends on which region generates first.
+- **A structure `site.radius` reaching past the earthwork core** is not an error, but its survey then reads the apron and may refuse a start whose ground was already levelled.
+
+## Reloading
+
+World-generation registries load when the world opens; `/reload` does not change them. Each region is decided once and remembered for the session, so a change to these files applies to chunks generated after the next world load. Chunks already generated keep their structures and their ground.
+
+## Related
+
+- [Terrain](/en/wiki/terrain/) — the ReTerraForged terrain the site classes read and earthworks reshape.
+- [World spawn](/en/wiki/world-spawn/) — how the spawn point near the origin is chosen.
+- [Dungeon data](/en/wiki/dungeon-data/) — what the three dungeon entrances lead to.

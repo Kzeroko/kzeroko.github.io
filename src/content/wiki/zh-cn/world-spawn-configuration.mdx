@@ -3,7 +3,7 @@ title: "世界出生点配置"
 description: "服务端配置中 spawn 部分的全部选项，包括默认值、范围和填错时的行为。"
 category: data
 order: 179
-updated: 2026-09-30
+updated: 2026-10-14
 tags: ["出生点", "配置"]
 ---
 
@@ -32,12 +32,28 @@ tags: ["出生点", "配置"]
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `spawn` | `object` | 见下方默认值 | 出生点选择与抵达设置。缺失或为 null 时，加载时恢复为默认值。 |
-| `spawn.enabled` | `boolean` | `true` | 按这些规则选择世界出生点，并把抵达的玩家放在安全地面上。`false` 时两者都交给原版。 |
+| `spawn.enabled` | `boolean` | `true` | 按这些规则选择世界出生点，并把抵达的玩家放在安全地面上。`false`时新世界使用原版选择，并禁用新枢纽准备。已有标记出生点继续生效。 |
 | `spawn.search` | `object` | 见下方默认值 | 在哪里找。见 [搜索](#搜索)。 |
 | `spawn.ground` | `object` | 见下方默认值 | 什么样的地面可以接受。见 [地面](#地面)。 |
 | `spawn.preferences` | `object` | 见下方默认值 | 群系与地形权重。见 [偏好](#偏好)。 |
 | `spawn.settlements` | `object` | 见下方默认值 | 要靠近的村庄和要避开的结构。见 [聚落](#聚落)。 |
 | `spawn.arrival` | `object` | 见下方默认值 | 抵达的玩家怎么安置。见 [抵达](#抵达)。 |
+
+### 庭院与世界高度
+
+枢纽选项在准备新预留位置时生效。已完成的枢纽保留原位置和标记半径。建筑高度在注册表加载时读取，与地形噪声高度独立。露台高度使用绝对Y；下方地面模式的高度选项仍相对海平面。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `spawn.skyGarden` | `object` | 见下方默认值 | 启动时准备的地标选项。 |
+| `spawn.skyGarden.enabled` | `boolean` | `true` | 玩家进入前准备一次；false不会删除已有庭院。 |
+| `spawn.skyGarden.minimumAltitude` | `integer` | `576` | 抵达平面最低Y，384–1800；需要时升高以避开已有物体。 |
+| `spawn.skyGarden.terrainClearance` | `integer` | `64` | 最低岩尖下方的垂直净空，16–256格。 |
+| `spawn.skyGarden.offshore` | `boolean` | `true` | 要求完整占地下方为水面，不覆盖光影包阴影。 |
+| `spawn.skyGarden.oceanBuffer` | `integer` | `128` | 粗略海面勘察余量，0–512格，采样间隔32格。 |
+| `spawn.skyGarden.searchRadius` | `integer` | `8192` | 地面候选周围的搜索范围，512–16384格；512格网格，抖动最多128格。最多进行4次完整生成占地检查。 |
+| `worldHeight` | `object` | 见下方默认值 | 独立的世界高度（服务端）配置分类。 |
+| `worldHeight.overworldTopY` | `integer` | `1024` | 主世界最低上限，不包含该Y层；512–2032，须为16的倍数。不削减地形预设高度。 |
 
 ### 搜索
 
@@ -83,7 +99,7 @@ tags: ["出生点", "配置"]
 | `spawn.settlements.minDistance` | `integer` | `64` | 比这更近的聚落只给部分加成，贴着候选点时降到一半。`0–4096`。 |
 | `spawn.settlements.maxDistance` | `integer` | `512` | 这个距离以内的聚落给完整加成，到两倍距离时降为零。从 `minDistance`（至少 `1`）到 `4096`。 |
 | `spawn.settlements.structures` | `array<string>` | `["#minecraft:village"]` | 视为聚落的结构。列表为空时关闭聚落比对。 |
-| `spawn.settlements.avoidStructures` | `array<string>` | 18 个结构 | 出生点要远离的结构：远古城市，以及原版和整合包模组里的掠夺者、灾厄村民、女巫、龙类和首领结构。范围内预测到其中之一的候选只保留 `10%` 的评分。列表为空时关闭这项检查。 |
+| `spawn.settlements.avoidStructures` | `array<string>` | 18 个结构 | 出生点要远离的结构：远古城市，以及原版和整合包模组里的掠夺者、灾厄村民、女巫、龙类和首领结构。范围内预测到其中之一的候选会在进入候选名单前排除。列表为空时关闭这项检查。 |
 | `spawn.settlements.avoidRadius` | `integer` | `160` | 敌对结构的影响距离，`0–1024`。`0` 关闭这项检查。 |
 
 ### 抵达
@@ -104,7 +120,7 @@ tags: ["出生点", "配置"]
 - **缺失的键和 null 部分**。缺失的键使用默认值。为 null 的部分在加载文件时恢复为默认值。为 null 的列表属于错误。
 - **未知的键**。直接忽略。拼错的选项会悄悄保持默认值。
 
-`spawn.arrival` 不经过完整检查：抵达安置只读取 `enabled`、`safeArrival` 和 `searchRadius`，并把后者限制在 `0–64`，所以其他选项无效时它仍然能工作。
+地面抵达会校验完整配置快照，无效时交回原版。标记抵达使用保存的平面和半径，不受`spawn.arrival`及`spawnRadius`控制。高度或已启用枢纽选项无效、资源缺失、保存的资源摘要变化、找不到有效地点时，停止世界加载并报告原因。
 
 ## 重载
 
@@ -117,3 +133,5 @@ tags: ["出生点", "配置"]
 - [世界出生点](/zh-cn/wiki/world-spawn/)——规则如何选出出生点，以及两条命令。
 - [地形配置](/zh-cn/wiki/terrain-configuration/)——这些权重引用的地形系列。
 - [地形与地标](/zh-cn/wiki/terrain/)——每个地形系列的样子。
+
+枢纽及名录只读取当前原型格式，不迁移旧原型存档。`/ise spawn relocate`只选择新的地面出生点，不移动庭院。枢纽位置与标记半径在首次准备后固定保存。

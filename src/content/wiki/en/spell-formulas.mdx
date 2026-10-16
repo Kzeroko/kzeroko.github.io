@@ -1,0 +1,215 @@
+---
+title: "Spell formulas"
+description: "Tune, chain and infuse spells on their manuscripts, within each formula's tier, stability and your school affinities."
+category: combat
+order: 26
+updated: 2026-10-16
+tags: ["Spells", "Formula Weaver", "Manuscripts"]
+---
+
+A spell formula is what a manuscript casts: its own spell, tuned through a few notched arguments, optionally infused with one spell of the same form and followed by up to 4 chained spells. Every formula is rated on the same thirteen tiers as spells, must stay under a stability limit of 100 and must sit within your school affinities to be cast.
+
+<Stats items={[{ value: '6', label: 'Spells per formula' }, { value: '4', label: 'Chained followers' }, { value: '60 ticks', label: 'Wait per follower', hint: '3 seconds' }, { value: '100', label: 'Stability limit' }]} />
+
+## What a formula can hold
+
+The manuscript's own spell always leads. You change everything around it, but the lead stays the spell the manuscript teaches.
+
+| Limit | Value | What happens past it |
+| --- | --- | --- |
+| Spells in one formula | 6 | Counts the lead, every chained spell and every infused spell. The edit is refused. |
+| Chained followers | 4 | Further followers are refused. |
+| Follower delay | 0–60 ticks (0–3 seconds) | Each follower waits after the previous spell. Values outside this range are refused. |
+| Delay precision | 1 tick (0.05 seconds) | 0 casts together; any whole tick within the range is allowed. |
+| Spells fused into one | 2 | A spell holds itself and one infused spell of its own form. |
+| Direct shots | 1 | A second direct shot is refused, whether chained or infused. |
+| Stability (strain) | 100 | The world load of one cast. A heavier weave is refused. |
+| Tier | 1–13 | Past tier 13 the weave overloads and is refused. |
+| Name | 32 characters | Longer names are cut. |
+
+Held channels can lead a formula and take an infusion, but cannot lead a chain or follow one. An instant spell cannot lead a chain. Sealed spells — Search Magic, Summon Clone, Portal, Global Portal and spells from other mods — cast as written and cannot join a formula.
+
+The selected Style determines a spell’s form, arguments and formation. Summonable shots switch between direct and summoned Styles; Sigils switch between a single shot and Trinity. Summon Spectral Swords offers formation, halo and crown stances. These choices keep the same spell and manuscript.
+
+| Form | Spells | Infusion |
+| --- | --- | --- |
+| Direct shot | The 8 baseline shots, Fireball | Never |
+| Summoning | The circle summons, Fireball: Summon, Icicle Lance | With another summoning |
+| Volley | Arcane Volley, Starlight Salvo | With the other volley |
+| Rain | Meteor Rain, Crimson Starfall | With the other rain |
+| Channel | Astral Comet, the damaging Aeterna beams, Astral Art: Sylvaris Aeterna | With another damaging channel |
+| Sweep | Astral Requiem | Never |
+| Ray, prepared shots, area | Holy Ray; the Sigils and Trinities; every other spell | Never |
+
+## The Formula Weaver
+
+Hold an IsekaiExpansion manuscript in either hand and press the Formula Weaver key, N by default, to open the Formula Weaver; the key is listed under Isekai Expansion in Controls. Without a manuscript in hand, the key says so above the hotbar. Escape closes the Weaver. The left column is your satchel, the centre column is the chain and selected spell's arguments, and the right column appraises the formula.
+
+Every action shows what it would do before you take it, using the server's own rules; the server checks every edit again.
+
+- **Satchel.** Each manuscript in your satchel has a Weave and an Infuse action. An action lights up when it is possible; hovering it tells you the tier and stability the formula would reach, or why it cannot be done. The All, Weave and Infuse filters narrow the list to what fits.
+- **Weave.** Spends the manuscript and adds its spell as the last follower, cast together with the previous spell. Only a single-spell manuscript can be woven in; its own arguments and infusion come with it.
+- **Infuse.** Spends an untouched manuscript of the selected spell's form and fuses it into that spell.
+- **Chain.** Drag the delay dial between cards to set the follower’s wait. Double-click it to cast together. The wheel and arrow keys adjust by 1 tick, or 5 ticks with Shift. Dragging settles near quarter-second marks; hold Shift when pressing to place freely. Followers can move earlier or later, or unravel back into the satchel with their arguments and infusion.
+- **Extract.** An infused spell appears under the spell it was fused into; Extract returns it as an untouched manuscript.
+- **Arguments.** Each argument is a crystal channel beside its painted icon. The gold tick under the channel marks the authored notch, an orb rides at the chosen one, and light fills the channel ice-blue when the spell is eased and gold when it is boosted. Notches that would break the formula are dark rose sockets and cannot be chosen. Click a notch to send the orb gliding there, or drag the orb and release it: the ringed notch shows where it will land. Clicking a slider also selects it, so the mouse wheel and arrow keys turn it; otherwise the wheel scrolls the column. Hovering a notch explains its value, how it changes weight and strain, and the tier and stability it would leave.
+- **Appraisal.** The tier crest lights one arc per tier and fills the next arc with the progress toward it. Below it are whether the formula can be cast (hover for the reason when it cannot), the stability gauge with its limit, the energy, incantation, cooldown and weight, any harmony or reaction, and every spell's share of the weight.
+
+Formulas never create or destroy manuscripts: everything woven or infused can be taken out again. A manuscript whose formula changes nothing about its spell stores no formula at all.
+
+## Tuning arguments
+
+Each spell offers a few arguments with fixed notches. The value is what the spell reads; the weight is what that notch multiplies the spell's arcane weight by. Every top notch is meant to be felt: a count's top notch at least doubles it and the top Potency hits two and a half times as hard. Raising a spell costs more weight than it gives, and easing one down is close to neutral.
+
+| Argument | Notches | Weight per notch | Strain per notch |
+| --- | --- | --- | --- |
+| Potency | ×0.5, ×0.75, ×1, ×1.5, ×2, ×2.5 | ×0.5, ×0.72, ×1, ×1.75, ×2.6, ×3.6 | ×1 at every notch |
+| Magnitude | ×0.6, ×1, ×1.5, ×2 | ×0.78, ×1, ×1.45, ×1.95 | ×0.75, ×1, ×1.4, ×1.85 |
+| Velocity | ×0.6, ×1, ×1.5, ×2.2 | ×0.85, ×1, ×1.2, ×1.45 | ×1, ×1, ×1, ×1.1 |
+| Incantation (cast time) | ×1.5, ×1, ×0.7, ×0.45 | ×0.8, ×1, ×1.25, ×1.6 | ×1, ×1, ×1, ×1.1 |
+| Persistence (duration) | ×0.6, ×1, ×1.6, ×2.4 | ×0.8, ×1, ×1.4, ×1.9 | ×0.65, ×1, ×1.55, ×2.3 |
+| Multiplicity, Chain | a spell's own counts | (count ÷ base)^0.9 | count ÷ base |
+| Sweep Arc | 24°, 48°, 80°, 120° | ×0.85, ×1, ×1.2, ×1.4 | ×0.7, ×1, ×1.4, ×1.9 |
+| Sweep Velocity | ×0.6, ×1, ×1.5, ×2.2 | ×1.4, ×1, ×0.82, ×0.7 | ×1.45, ×1, ×0.8, ×0.7 |
+| Seeking | 0°, 6°, 14°, 24° | ×0.9, ×1, ×1.15, ×1.3 | ×1 at every notch |
+
+Magnitude grows the whole spell together. A projectile's body, its collision, its native effect size, its impact effect and any blast radius scale by the same factor; circles, beams and rays widen their art and their hit area with it. Astral Requiem's Sweep Velocity sets how fast its beams turn: a slower pass lasts longer and lands more pulses, so it weighs more.
+
+### Arguments by spell
+
+| Spells | Arguments | Base strain | Formula role |
+| --- | --- | --- | --- |
+| Flame Arrow, Ice Needle, Wind Blade, Magic Missile, Shooting Star, Spirit Arrow, Thunder Lance, Aqua Cutter | Potency, Magnitude, Velocity, Multiplicity 1, 3 or 5 shots in a 9° fan, Incantation; Magic Missile also Seeking | 2 | Chainable direct shot |
+| Their summoned Style, except Shooting Star | Potency, Magnitude, Velocity, Multiplicity 1–4 circles, Incantation | 4 | Chainable summoning |
+| Thunder, Frost and Ember Sigils and Trinities | Potency, Velocity, Incantation | 2 per shot | Chainable prepared shots |
+| Arcane Volley, Starlight Salvo | Potency, Magnitude, Multiplicity 6, 12, 24 or 36 shots | 24 | Held volley |
+| Meteor Rain, Crimson Starfall | Potency, Magnitude, Multiplicity 6, 12, 24 or 36 shots, Incantation | 28 | Chainable rain |
+| Astral Requiem | Potency, Magnitude, Multiplicity 1–4 circles, Sweep Arc, Sweep Velocity, Incantation | 24 per circle | Chainable sweep |
+| Astral Comet, the eleven Aeterna beams, Astral Art: Sylvaris Aeterna | Potency, Magnitude | 20 | Held channel; Vita Aeterna cannot be infused |
+| Fireball | Potency, Magnitude, Velocity, Multiplicity 1, 3 or 5 in a 10° fan, Incantation | 3 | Chainable direct shot |
+| Fireball: Summon | Potency, Magnitude, Velocity, Multiplicity 1–4 circles, Incantation | 3 | Chainable summoning |
+| Holy Ray | Potency, Magnitude, Multiplicity 1, 3 or 5 rays in a 7° fan, Incantation | 3 | Chainable ray |
+| Chain Lightning | Potency, Chain 2, 3, 5 or 8 targets, Magnitude (hop reach), Incantation | 6 | Chainable |
+| Shadow Bind | Potency, Persistence (slowness), Incantation | 2 | Chainable |
+| Icicle Lance | Potency, Magnitude, Velocity, Multiplicity 1–4 circles, Incantation | 4 | Chainable summoning |
+| Ice Burst | Potency, Magnitude (trail and burst), Incantation | 10 | Chainable |
+| Flame Eruption | Potency, Multiplicity 3, 5, 9 or 13 pulses, Magnitude, Incantation | 15 | Chainable |
+| Summon Soulfire | Potency, Multiplicity 2, 3, 6 or 9 flames, Incantation | 6 | Chainable |
+| Summon Spectral Swords | Style, Potency, Multiplicity 3, 5, 9 or 14 swords, Incantation | 10 | Chainable |
+| Lightning Strike | Potency, Magnitude, Incantation | 2 | Chainable |
+| Summon Lightning | Potency, Magnitude (strike radius), Incantation | 6 | Chainable |
+| Gravity Well | Potency, Magnitude (pull radius), Persistence, Incantation | 15 | Chainable |
+| Spectral Judgment | Potency, Multiplicity 8, 15, 25 or 35 strikes, Magnitude, Incantation | 30 | Chainable |
+| Fallen Down | Potency, Incantation | 40 | Chainable |
+| Healing | Potency, Incantation | 1 | Chainable |
+| Clarity | Incantation | 1 | Chainable |
+
+Every argument's base notch is the spell's authored behaviour: an untouched spell casts exactly as the [spell catalog](/en/wiki/spell-catalog/) lists it. A spell's description follows its formula, so a woven volley's tooltip names the shots it will actually fire.
+
+## Chaining spells
+
+When the lead releases, its followers cast in order, each after its own delay from the previous one. Followers that share the lead's tick fire at once. Followers spend no energy and set no cooldown of their own; the formula already paid for them.
+
+- **Aim.** A follower aims at the lead's target while it is alive, hostile, within the follower's range and visible. Otherwise it aims at whatever is under your aim when its turn comes.
+- **Support spells.** A chained Healing or Clarity aimed at an enemy mends or cleanses you instead.
+- **Dispelling.** Death, leaving the world or Stagger dispels every follower that has not fired yet.
+
+## Infusing spells of one form
+
+Infusion fuses two spells of the same form into one. The fused spell runs its own sequence once, and the two take turns inside it: you get one volley, one rain, one circle or one beam carrying both, never two casts stacked on each other.
+
+| Form | How the two take turns |
+| --- | --- |
+| Volley | Shots alternate between the two projectiles through the same formation, timing and damage falloff. |
+| Rain | One disk, wearing both circle designs, drops the two projectiles in turn. |
+| Summoning | Each circle charges and launches its own projectile, then the partner's; with several circles, every second circle runs the pair in reverse. |
+| Channel | The partner's beam runs as a narrower core inside the host's beam, and damaging pulses alternate between their payloads. |
+
+The infused spell takes the host's arguments. Its circle shows both designs at once, the host's outer ring around the partner's inner glyph, and its icon is the two spell icons cut along the diagonal: on the spell rail, the cast bar, the binding desk and in the Weaver.
+
+| Form | Share of the partner counted |
+| --- | --- |
+| Summoning | 0.75 |
+| Volley | 0.4 |
+| Rain | 0.4 |
+| Channel | 0.45 |
+
+The share applies to the partner's weight at the host's notches, to its energy and strain, and to the cooldown it adds. A summoning counts the most because each circle really launches both projectiles; a volley or rain keeps its shot count, so its partner adds element, not volume.
+
+## Casting together in formation
+
+Spells that fire on the same tick never share one anchor. Every summoning, sweep and rain cast together takes its place in a symmetric formation:
+
+- **Summoning circles** stand on an arc before you, at least 1.9 blocks out and up to 150° wide, with the centre circles a little higher. Two circles flank your view 40° to either side.
+- **Sweep circles** stand in a row behind your shoulders. Circles on your left sweep rightward and circles on your right sweep leftward, so their beams converge on the target from opposite sides. A single circle keeps its usual place beside your shoulder.
+- **Rain disks** open side by side above the target, across your line of sight, each 1.5 blocks clear of its neighbour.
+
+Spacing grows with the circles' size, so neighbours never overlap however large Magnitude makes them. A circle's own Multiplicity fills consecutive places in the same row, so Astral Requiem with 2 circles and a second Astral Requiem cast together stand as one row of 3.
+
+Every projectile, ray and spell of a cast is its own strike, so 8 summoned circles each land their shot on the same target. A hit from a different strike of the same caster passes the target's brief hurt immunity; the same strike hitting again, lingering damage and non-spell attacks still wait it out.
+
+## Tier, weight and affinity
+
+A spell of tier *t* weighs 2^((*t*−1) ÷ 2): tier 1 weighs 1, tier 11 weighs 32 and tier 13 weighs 64. Every two tiers double the weight. The selected Style and notches multiply that weight; the formula sums in weight space and recovers its tier as 1 plus the whole-number part of 2 × log₂(weight).
+
+| Rule | Factor |
+| --- | --- |
+| Follower cast together with the previous spell | ×1.15 on that follower's weight |
+| Follower with a delay | ×1 |
+| Weave strain | ×1.1 for each chained spell after the lead, compounding |
+| Harmony — every spell shares one school | ×0.9 on the whole formula |
+| Reaction — one spell's mark reacts with another's school | ×1.12 per major and ×1.06 per minor reaction, capped at ×1.3 |
+| Infused spell | Its form's share of its matching Style weight at the host's notches |
+
+Reactions follow the elemental marks: Ignite reacts with wind, Iced with water, Electrified with frost, Wet with earth, Luminous with dark and Shadowed with light as major reactions; the [status effects](/en/wiki/status-effects/) page lists the minor ones.
+
+| Formula | Weight | Tier |
+| --- | --- | --- |
+| Fireball at Potency ×2 | 5.2 | 5 |
+| Fireball at Potency ×0.5 | 1 | 1 |
+| Flame Arrow with 5 shots | 4.26 | 5 |
+| Two Meteor Rains cast together | 17.03 | 9 |
+| Arcane Volley infused with Starlight Salvo | 5.6 | 5 |
+| Wind Blade: Summon infused with Magic Missile: Summon | 1.75 | 2 |
+| The same two summonings chained together instead | 2.37 | 3 |
+| Astral Requiem with 4 circles | 55.72 | 12 |
+| Fallen Down at Potency ×0.5 | 16 | 9 |
+
+Each spell needs the school affinity rank for its tuned tier: 1–2 require E, 3–4 D, 5–6 C, 7–8 B, 9–10 A, 11–12 S and 13 S+. The strongest affinity among the formula’s schools must also meet its overall tier. Schools without an affinity talent impose no restriction, and creative mode waives both checks. Easing arguments can lower the required tier.
+
+## Stability
+
+Strain is the load one cast puts on the world: projectiles, circles, beams and area checks. Each spell starts from its selected Style’s strain in the table above and multiplies it by its notches; an infused spell adds its form's share of its own strain. The formula sums every spell's strain and must stay at or under 100.
+
+4 Astral Requiem circles at their 48° arc reach 96 strain on their own. Widening those 4 sweeps to 80° reaches 134.4, and slowing them to Sweep Velocity ×0.6 reaches 139.2; both are refused. 2 circles at 80° and the slowest sweep reach 97.44 and hold. Arcane Volley at 36 shots reaches 72, and infusing Starlight Salvo adds 9.6.
+
+## What a woven cast costs
+
+| Cost | How it is computed |
+| --- | --- |
+| Energy | Each spell's authored energy × its Style energy multiplier × its notch weight, summed, × (1 + 0.1 per chained spell after the lead). An infused spell adds its form's share of its matching Style’s energy at the host's notches. Your school and origin cost modifiers then apply. |
+| Incantation | The lead's cast time × its Style cast multiplier × its Incantation notch, plus each follower's cast time × its Style cast multiplier × its notch × 0.35 when cast together or × 0.25 when delayed. Capped at ×2.5 of the lead's tuned cast. Haste and school talent then apply. |
+| Cooldown | Each spell's cooldown × its Style cooldown multiplier × the square root of its notch weight. The formula takes the longest, plus 0.35 of every other spell's; an infused spell's cooldown joins the others at its form's share. |
+
+Held channels keep their authored hold time; their energy is paid per delivery as before.
+
+## Carrying a formula
+
+A manuscript equipped in the Spell Book slot, or the Spell Scroll slot when it is enabled, casts its formula directly.
+
+At the binding desk, inscribing a woven manuscript writes its formula onto the vessel under the lead spell. Each spell in the codex carries a status — Ready, Bound, Re-inscribe, Locked, Full and the like — and woven spells show their fused icon and a ✧ before their name. The dossier lists the formula's chain with each spell's arguments, its cast time, cooldown, energy and tier, and whether your affinities can hold it. If the vessel already knows that spell, **Re-inscribe formula** rewrites the inscription and spends the manuscript as a first binding does; a plain manuscript of the same spell restores the authored spell. The Bound filter lists every spell bound to the vessel, woven or plain; one the altar is not offering right now can be read but is unbound only after the manuscript socket is cleared. Unbinding a spell removes its formula with it.
+
+A vessel holds one formula per spell. The spell rail marks woven spells with ✧ and shows the formula's name when you gave it one. Hovering a woven manuscript or an inscribed vessel shows each formula as a card: its spells joined by threads of light, each follower's wait beside its name with an hourglass, the arguments the formula changed, any infused spell, and the stability bar with the formula's costs.
+
+## Interactions
+
+| System | Effect on formulas |
+| --- | --- |
+| [Talents](/en/wiki/talents/) | School affinity ranks gate each spell's tier and the formula's tier. School talent also scales cast time and energy. |
+| [Spell catalog](/en/wiki/spell-catalog/) | The authored values every notch multiplies. |
+| [Status effects](/en/wiki/status-effects/) | Elemental marks decide which spell pairs react and raise the formula's weight. |
+| Stagger | Blocks casting, and dispels followers still waiting to fire. |
+
+## Where the data lives
+
+Formulas live on the manuscript or vessel item, not in a data pack. Authored energy comes from `data/isekaiexpansion/spell_energy/`; [Spell data](/en/wiki/spell-data/) documents that file.

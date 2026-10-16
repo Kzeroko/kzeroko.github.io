@@ -1,0 +1,101 @@
+---
+title: "Tanning recipe data"
+description: "Which hides the tanning vat accepts, how many make a piece, their grade limit, difficulty and tone."
+category: data
+order: 183
+updated: 2026-10-06
+---
+
+A tanning recipe names one kind of hide the vat accepts. It does not name an output: a batch yields the leather grade its workmanship earns, capped by the recipe's `max_grade` and the tanner's tools.
+
+## Where the files live
+
+Use `data/<namespace>/recipes/<path>.json` with type `isekaiexpansion:tanning`. The path sets the recipe ID; the bundled hides live under `recipes/tanning/hides/`, which is a convention, not a requirement. A higher-priority data pack with the same recipe ID replaces the lower one.
+
+When two recipes accept the same item, the vat uses the one whose recipe ID sorts first as text. Give each hide one recipe.
+
+| Recipe | Hide | Hides per piece | Max grade | Difficulty | Tone |
+| --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:tanning/hides/rabbit_hide` | `minecraft:rabbit_hide` | 4 | `rare` | 1 | `fawn` |
+| `isekaiexpansion:tanning/hides/cowhide` | `minecraft:leather` | 1 | `noble` | 2 | `amber` |
+| `isekaiexpansion:tanning/hides/infernal_wing_membrane` | `isekaiexpansion:infernal_wing_membrane` | 1 | `legendary` | 4 | `russet` |
+| `isekaiexpansion:tanning/hides/wyvern_skin` | `uselessreptile:wyvern_skin` | 1 | `legendary` | 4 | `honey` |
+| `isekaiexpansion:tanning/hides/raevyx_wing_hide` | `saintsdragons:raevyx_wing_hide` | 1 | `legendary` | 5 | `amber` |
+| `isekaiexpansion:tanning/hides/ignivorus_wing_hide` | `saintsdragons:ignivorus_wing_hide` | 1 | `legendary` | 5 | `russet` |
+
+The last three load only when Useless Reptile or Saint's Dragons is installed.
+
+### Tags the vat reads
+
+| Tag | What it does |
+| --- | --- |
+| `#isekaiexpansion:tanning_agents` | Items that steep tanning liquor. One is taken per 4 pieces; items outside `#minecraft:logs` are taken first. Bundled: `farmersdelight:tree_bark` when present, `#minecraft:oak_logs`, `#minecraft:spruce_logs`, `#minecraft:dark_oak_logs` and `#minecraft:mangrove_logs`. |
+| `#isekaiexpansion:tanned_leathers` | All six grades of tanned leather, for recipes that accept any grade. The vat itself does not read it. |
+
+## Minimal example
+
+```json
+{
+  "type": "isekaiexpansion:tanning",
+  "hide": { "item": "minecraft:leather" }
+}
+```
+
+Saved as `data/example/recipes/plain_hide.json`, this hide makes one piece per hide, can reach Legendary, has difficulty 2 and tans to amber.
+
+## Fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `identifier` | required | Exactly `isekaiexpansion:tanning`. |
+| `hide` | `ingredient` | required | The hide: an item, a tag or an array of either. An ingredient that matches nothing rejects the recipe. |
+| `hides_per_piece` | `integer` | `1` | Hides one finished piece takes, `1–16`. A batch of up to 16 pieces is sized from the held stack divided by this. |
+| `max_grade` | `enum(common, uncommon, rare, epic, noble, legendary)` | `legendary` | Best grade this hide can become, whatever the workmanship. |
+| `difficulty` | `integer` | `2` | How demanding the hide is, `1–5`. Higher levels move faster, narrow the timing windows and need more clean fleshing strokes. |
+| `tone` | `enum(fawn, honey, amber, russet)` | `amber` | Colour the hide is tanned towards. It sets the target swatch and the colour of the progress cells; the timing is the same for every tone. |
+| `fabric:load_conditions` | `array<object>` | absent | Fabric resource conditions. When present and false, the recipe does not load. The bundled hides from other mods use `fabric:all_mods_loaded`. |
+
+### Difficulty
+
+| Level | Strike window | Lift window | Clean strokes | Motion |
+| --- | --- | --- | --- | --- |
+| 1 | ±2.6 ticks | ±3.2 ticks | 5 | ×0.85 |
+| 2 | ±2.2 ticks | ±2.7 ticks | 6 | ×1.00 |
+| 3 | ±1.9 ticks | ±2.3 ticks | 6 | ×1.10 |
+| 4 | ±1.65 ticks | ±2.0 ticks | 7 | ×1.20 |
+| 5 | ±1.4 ticks | ±1.7 ticks | 8 | ×1.30 |
+
+## Full example
+
+This rough pelt takes two hides per piece, stops at Epic and is a little harder than cowhide.
+
+```json
+{
+  "type": "isekaiexpansion:tanning",
+  "hide": { "tag": "c:pelts" },
+  "hides_per_piece": 2,
+  "max_grade": "epic",
+  "difficulty": 3,
+  "tone": "honey"
+}
+```
+
+## Validation
+
+Every field is checked as the file is read, and any failure rejects the whole recipe; Minecraft logs the parsing error and the other recipes still load.
+
+- **Missing `hide`**: rejected.
+- **Unknown item or an empty ingredient** in `hide`: rejected. A tag is resolved when it is matched, so an empty tag loads but accepts nothing.
+- **`hides_per_piece` outside `1–16`**: rejected.
+- **`difficulty` outside `1–5`**: rejected.
+- **Unknown `max_grade`** or a **`tone` that is not one of the four targets**: rejected. Values are case-insensitive; `rawhide`, `umber` and `bisque` are colours a hide passes through, not targets.
+- **Unknown keys**: ignored.
+- **Duplicate hide** across two recipe IDs: both load; the vat uses the ID that sorts first.
+
+## Reloading
+
+Tanning recipes reload with the server's other recipes and are sent to clients with them. Clients read them to preview a vat; the server decides every batch. A batch keeps the recipe it began with until it finishes, so a reload never changes a batch in progress.
+
+## Related
+
+[Leather tanning](/en/wiki/tanning/) covers the stages, grades and tools. [Tanning runtime](/en/dev/tanning-runtime/) covers sessions and events for developers. Finished batches count towards `recipe_crafted` [quest objectives](/en/wiki/quest-objectives/) with source `isekaiexpansion:tanning`.

@@ -3,7 +3,7 @@ title: "命运天平 API"
 description: "注册选项与效果、评估草稿，并提交服务器权威命运天平档案。"
 category: api
 order: 145
-updated: 2026-09-27
+updated: 2026-10-07
 ---
 
 `FateBalanceAPI` 是命运天平注册、查询和服务器验证提交的公共门面。定义属于公共端内容，供预览与验证共用；效果单独注册，由运行时统一协调。
@@ -150,7 +150,7 @@ static FateBalanceCommitResult applyProfile(
 
 ### 图标合成
 
-`iconItem`解析物品GUI模型。`FateBalanceItemIcons`在Minecraft渲染线程通过`ModernUiCapture`生成64 × 64像素静态图，使用独立颜色与深度目标并恢复渲染状态。ModernUI在UI线程上传位图，作为普通图像合成；滚动、祖先裁剪、透明度与模态层级都由Canvas处理。模型图标不是实时动画预览。
+`iconItem`解析物品GUI模型。共享的`ModernUiItemIcons`缓存在Minecraft渲染线程通过`ModernUiCapture`生成128 × 128像素静态图，使用独立颜色与深度目标并恢复渲染状态，并按物品与NBT区分每张图。ModernUI在UI线程上传位图，作为普通图像合成；滚动、祖先裁剪、透明度与模态层级都由Canvas处理。模型图标不是实时动画预览。
 
 缓存最多128项。视图持有图像副本，脱离窗口时释放。资源重载会清空缓存并刷新已挂载视图，捕获失败时使用默认纹理。验证床、平面物品与自定义模型在滚动和确认浮层中的显示。
 

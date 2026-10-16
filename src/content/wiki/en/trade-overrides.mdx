@@ -3,7 +3,7 @@ title: "Trade overrides"
 description: "Profession catalogues, offer selection, stacks and transactional reload validation."
 category: data
 order: 20
-updated: 2026-09-30
+updated: 2026-10-14
 ---
 
 A trade override owns a merchant profession's complete catalogue. Every tier contributes its selected stock on the first visit. The same definition can serve villagers and NPCs; personal Trade Rapport controls courtesies separately.
@@ -12,7 +12,7 @@ A trade override owns a merchant profession's complete catalogue. Every tier con
 
 Use `data/<namespace>/trade_overrides/<path>.json`. One file targets one profession. For different resource IDs targeting the same profession, the `isekaiexpansion` namespace wins over every other namespace, then higher `priority` wins, then the lexicographically greater resource-ID string wins. Selection is for the whole definition, not a tier-by-tier merge. To replace bundled content, override its exact resource path or use an `isekaiexpansion` resource with suitable priority.
 
-Bundled files are organised into `vanilla/`, `compat/<provider>_<profession>.json`, `npc/unique/` and `npc/common/`. An NPC preset selects a catalogue with `trade_profession`. A unique character such as Evelina uses `isekaiexpansion:mahoutsukai_evelina`; a common NPC may use `minecraft:farmer` or another existing catalogue. A per-entity `TradeProfession` assignment overrides the preset for common NPCs and survives saving. Unique NPCs always use the preset binding.
+Bundled files are organised into `vanilla/`, `compat/<provider>_<profession>.json`, `npc/unique/` and `npc/common/`. Each NPC declares the catalogue it sells from as its trade profession, alongside the rest of the NPC. A unique character such as Evelina uses `isekaiexpansion:mahoutsukai_evelina`; a common NPC may use `minecraft:farmer` or another existing catalogue. A per-entity `TradeProfession` assignment overrides the declared profession for common NPCs and survives saving. Unique NPCs always use their declared binding.
 
 ## Minimal example
 
@@ -174,7 +174,9 @@ A villager restock grants one stored refresh chance, capped at one. NPCs repleni
 
 REI previews read the bundled catalogue, not the server's reloaded overrides. They show available candidates after mod conditions, using minimum counts for ranged stacks; they do not represent a particular villager's weighted selection, type or dimension. Verify data-pack edits with a live merchant.
 
-The bundled catalogue generator and validator exclude Donner, Schlag, bounty contracts and bounty boards, as well as developer tools, test items, internal icons and world-authoring anchors or structure blocks. These items must not become shop stock. The checks cover every item candidate, including NPC catalogues.
+The bundled catalogue generator and validator exclude Donner, Schlag, bounty contracts and bounty boards, as well as developer tools, test items, internal icons and world-authoring anchors or structure blocks. These items must not become shop stock. The checks cover costs and results, every item-array candidate and NPC catalogues. Creative, debug, placeholder and testing tokens are excluded in every mod namespace, as are spawn eggs and internal projectile items. This excludes the SaintsDragons creative gender wand, tame meal and variant brush without excluding ordinary dragon brushes, meals or collectible dragon eggs. Registry-dump membership alone does not make an item eligible for trade.
+
+Command blocks, command-block minecarts and all music discs are forbidden in costs and results. Runtime availability, construction and REI previews reject the entire stack definition if any item-array candidate is forbidden. The check covers command-block and music-disc IDs, registered music-disc items and the music-disc item tag. The generator and validator also exclude all IsekaiExpansion `disc_*` items; music discs have no collector-turn-in exception.
 
 ## Related
 

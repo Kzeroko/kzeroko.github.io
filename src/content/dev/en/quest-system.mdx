@@ -3,7 +3,7 @@ title: "Quest runtime"
 description: "Team profiles, objective dispatch, persistence, synchronisation and internal quest extension points."
 category: systems
 order: 170
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 The quest runtime keeps authoritative progress in server profiles, dispatches gameplay events to active objectives and sends a filtered view to clients. This page covers the internal implementation and its failure boundaries; data-pack authors should start with [quest data](/en/wiki/quest-data/).
@@ -38,6 +38,7 @@ Activation records the picker UUID and start time, dispatches `ON_QUEST_PICKED`,
 | Automatic NPC delivery | Checks every `5` ticks per player, staggered by entity ID; delivery predicates run before consumption. |
 | Player damage | Successful player damage return; payload carries the supplied damage amount. |
 | Recipe craft | Recipe hook emits one craft event by default, not the number of output items. |
+| Purchase | `QuestTradePurchaseTrigger.completed` emits `TRADE_PURCHASE` after successful authoritative payment, delivery and stock bookkeeping. |
 | Advancement | A successful criterion grant emits one event carrying the criterion and whether the advancement is now complete. |
 | NPC talk | Matching bound dialogue starts the event; finishing the conversation is not required. |
 | Photograph | Exposure bridge supplies frame and photographer metadata; the dependency owns exposure capture. |
@@ -51,6 +52,10 @@ Failure rules run before objective progress and do not inherit the objective's e
 Completion removes active progress and records completion before rewards execute. Rewards run in declaration order with per-entry exception handling; later rewards still run after an earlier failure. `ON_QUEST_COMPLETED` receives the results, then the changed quest IDs are synchronised. There is no transaction, automatic retry or rollback across progress, item consumption, spawned entities and rewards. See [quest objectives](/en/wiki/quest-objectives/) and [quest rewards](/en/wiki/quest-rewards/) for the individual contracts.
 
 Manual dispatch executes matching content on unfinished objectives; it does not increment the objective merely because the trigger ID matched. Content actions report profile changes separately from world effects. For example, the spawn action can create entities while returning no profile change.
+
+`TradePurchaseObjectiveLogic` consumes an `item` stack snapshot and a `profession` catalogue ID from the completed transaction. It reuses `QuestItemPredicate` and lifecycle content triggers. `QuestTradePurchaseTrigger` checks the active trigger index before allocating NBT; only positive currency payments for noncurrency output from an owned catalogue emit. The buyer is the credited player and the merchant is the target. No tick listener, advancement proxy or historical inventory scan is installed.
+
+The receptionist’s `GuildCrystalDialogue` is a separate parent-menu branch. `GuildCrystalExchange` validates the captured `BountyReception.Session`, exact stack and current reputation quote before calling shared `InventorySale`. It creates no stock, rapport or standing entry. Dialogue strings live in the bilingual dialogue assembly category.
 
 ### Guild bounty lifecycle
 
@@ -87,7 +92,7 @@ Confirmation resolves the record again, names the commission and distinguishes r
 
 `GuildReceptionistEntity` uses the shared default humanoid profile, renderer and stationary mode. `GuildReceptionistAnchorBlockEntity` stores the deployed UUID and does not respawn merely because an entity is unloaded. Copying its marker to a different position or dimension clears the deployment identity. Destroyed bound entities clear their link; an enabled marker checks every `40` ticks. The marker editor reuses the developer inspector and its theme preferences. The configuration packet requires creative permission level `2`, a loaded/protected position within `8` blocks, a valid pool and finite yaw. Commands and editor setup are documented in [Bounty data](/en/wiki/bounty-data/).
 
-Verify a lost writ by deleting the paper, reopening the ledger and testing reissue, report and withdrawal separately. Also test party changes, full inventory, a stale confirmation after `/reload`, duplicate report answers, partial supplies, server restart, marker unload/reload and a copied guild structure. Automated persistence, quota and submission-scope checks run through `tools/bounty/verify.gradle`.
+Verify a lost writ by deleting the paper, reopening the ledger and testing reissue, report and withdrawal separately. Also test party changes, full inventory, a stale confirmation after `/reload`, duplicate report answers, partial supplies, server restart, marker unload/reload and a copied guild structure.
 
 `BountyHudOverlay` sends immutable localised presentations through a coalesced mailbox to ModernUI. `BountyAssets` owns atlas regions; `BountyTypeface` prepends MedievalSharp and LongCang to the fallback chain. The item-only tooltip component and vanilla draw hooks reuse this overlay. Body overflow pages every `10` seconds; all four sheets share bounded layout space. Acceptance can use the normal tracked quest HUD; using an active writ in the air toggles tracking.
 

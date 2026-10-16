@@ -3,7 +3,7 @@ title: "结构空间运行时"
 description: "房产标识、取得流程、访问检查、家具评估、持久化与客户端快照。"
 category: systems
 order: 82
-updated: 2026-09-27
+updated: 2026-10-08
 ---
 
 `net.kzeroko.isekaiexpansion.api.structurespace.StructureSpaceAPI` 是服务器家园系统的公开入口，委托给 `internal.structurespace.StructureSpaceService`。存储实现保持包级可见；`SpaceShape`、`SpaceEntry` 和 `HomePermission` 则是当前公开签名中暴露的内部类型。
@@ -80,7 +80,7 @@ updated: 2026-09-27
 | `getSpacesForPlayerStructure(player)` | 在玩家当前位置进行同类查询。 |
 | `allows(world, player, pos, permission)` | 检查指定权限，家园外返回 true。 |
 | `canPlayerUseInSpace(world, player, pos)` | USE，家园外返回 true。 |
-| `canPlayerModifyInSpace(world, player, pos)` | 受保护结构的 BREAK 例外检查，家园外返回 false。 |
+| `canPlayerModifyInSpace(world, player, pos)` | BREAK 检查，家园外返回 false。 |
 | `canPlayerBedSetSpawn(player, bedPos)` | SLEEP 例外检查，家园外返回 false。 |
 | `hasSpaceAccess(world, player, pos)` | 仅住户资格，访客不算；家园外返回 false。 |
 | `tryRent(world, key, uuid, durationTicks)`、`tryBuy(world, key, uuid)` | 受信任的免费取得操作，仍检查允许标志与名额，并触发取得事件。 |
@@ -174,7 +174,7 @@ updated: 2026-09-27
 
 世界存在后，在服务器线程调用状态方法。映射与存储未同步，公开入口不检查或调度线程归属。不要直接从生成工作线程调用；处理器明确将注册提交至服务器。即使缺少世界、上下文或 NBT，它也会移除锚点，并且只在稍后的注册调用周围捕获错误。
 
-家园钩子覆盖服务器方块使用与破坏、放置、桶的放置与收集、点火、直接实体交互与攻击，以及睡眠。创造模式权限等级 2 的管理员可绕过这些家园检查。地下城限制、挖掘疲劳及不可破坏标签仍可能拒绝操作。它不是对投射物、自动化或环境变化的通用领地保护系统。集成代码应通过 `allows` 检查具体动作权限，不能用 `hasSpaceAccess` 替代。
+家园授权由共用的[保护层](/zh-cn/dev/protected-zones/)执行：方块使用与破坏、放置、受限工具、桶的放置与收集、告示牌编辑、踩踏耕地，以及直接实体交互与攻击。睡眠检查仍留在 `HomeSystem`。创造模式权限等级 2 的管理员可绕过这些检查。地下城限制、挖掘疲劳及不可破坏标签仍可能拒绝操作。生物、爆炸、火、流体、活塞和发射器造成的环境破坏只在保护区域内被拒绝，所以所有区域之外的家园只有玩家规则。集成代码应通过 `allows` 检查具体动作权限，不能用 `hasSpaceAccess` 替代。
 
 ## 扩展方式
 

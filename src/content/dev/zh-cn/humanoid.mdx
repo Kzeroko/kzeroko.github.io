@@ -3,7 +3,7 @@ title: "人形架构与扩展点"
 description: "外观归属、权威修改、共享显示，以及人形系统的扩展约定。"
 category: systems
 order: 100
-updated: 2026-09-26
+updated: 2026-10-14
 ---
 
 玩家与 NPC 共用人形外观模型和渲染流程。本参考说明这些状态由哪些内部组件管理，以及如何通过现有入口修改。
@@ -12,7 +12,7 @@ updated: 2026-09-26
 
 人形系统为玩家和 NPC 提供统一外观模型：身份、体型、面部、配色、已选部件及可选种族 ID。`HumanoidProfile` 是带版本的值对象，当前版本为 1。JSON 制作分别见[预设数据](/zh-cn/wiki/humanoid-presets/)与[部件制作](/zh-cn/dev/humanoid-parts/)。
 
-本文 Java 类型位于 `internal.humanoid` 或客户端实现包，属于内部接入点，并不存在 `HumanoidAPI` 门面。
+本文大多数 Java 类型位于 `internal.humanoid` 或客户端实现包，属于内部接入点。唯一的公开门面是客户端的 `HumanoidRenderAPI`，供其他模组在人形身体上绘制自己的种族特征，详见“扩展方式”。
 
 ## 运行时模型
 
@@ -20,9 +20,9 @@ updated: 2026-09-26
 | --- | --- |
 | `HumanoidAppearanceComponent` | 玩家外观、创建阶段、保存外观和修订号；组件 ID 为 `isekaiexpansion:humanoid_appearance`，重生采用 `ALWAYS_COPY`。 |
 | `HumanoidSubject` | 非玩家约定：读取和设置外观，并提供修订号。 |
-| `BaseNpcEntity` | 分开保存基础角色与叠加换装后的显示外观。 |
+| `BaseNpcEntity` | 分开保存基础角色与叠加换装后的显示外观，两者都经过目录清理。 |
 | `HumanoidAppearanceAccess` | 统一读取玩家或主体外观，并提供内部直接赋值。 |
-| `HumanoidAppearanceService` | 服务端玩家外观清理、种族解析、解锁和绘制验证，以及创建阶段提交。 |
+| `HumanoidAppearanceService` | 按会话权限执行服务端玩家外观清理、种族解析、受众/解锁/绘制验证，以及创建阶段提交。 |
 | `HumanoidPartCatalogRegistry` | 服务端编写的部件定义、兼容性清理和目录修订号。 |
 | `HumanoidPartAssetRegistry` | 客户端资源发现，与服务端目录成员关系分开。 |
 | `HumanoidRenderResolver` | 将身体、可见层、样式、染色与绘制纹理、护甲和特征隐藏规则解析为快照。 |
@@ -30,9 +30,13 @@ updated: 2026-09-26
 
 玩家当前外观、修订号与创建阶段同步给接收者，个人保存槽只发送给所属玩家。组件设置器跳过相同替换值，在需要时重新计算尺寸，并在接受变更后增加修订号。修订号用于缓存失效，不是授权令牌。
 
-NPC 预设解析出手工指定或生成的基础外观，再由当前换装覆盖显示。编辑或导出角色时读取 `getBaseHumanoidProfile()`，渲染时读取 `getHumanoidProfile()`。市民生成与 NPC 预设钩子见 [NPC 资源](/zh-cn/dev/npc-assets/)。
+NPC 的预设在其类中声明，解析出手工指定或生成的基础外观，再由当前换装覆盖显示。编辑或导出角色时读取 `getBaseHumanoidProfile()`，渲染时读取 `getHumanoidProfile()`。市民生成、预设声明与导出见 [NPC 资源](/zh-cn/dev/npc-assets/)。
+
+NPC 没有 Origins 组件，其种族就是自身外观中的种族 ID。目录按与玩家完全相同的规则授予该种族的特征：龙人族招募者与龙人族玩家拥有同样的角、耳朵和尾巴。粘液族 NPC 同样以半透明方式绘制，并按肤色染色，与粘液族玩家一致，详见下文“NPC 的种族染色”。
 
 客户端创建编辑持有独立工作外观，最多保留 48 个撤销条目，不直接修改真实玩家组件。提交后先执行服务端范围合并，再清理验证；界面是否显示本身并不是权威边界。
+
+章节只为其通道中至少被一个已穿戴部件绑定的那些提供颜色控件。绑定从目录读取，范围是全部已穿戴槽位而不限于本章节：嘴唇和腮红位于身体遮罩上，却在面部章节编辑。若章节的通道都没有被已穿戴部件绑定，就不显示颜色区域；例如精灵的特征只有绑定 `skin` 的耳朵，特征章节因此没有颜色控件。更换已穿戴部件会重建章节并重新计算列表。
 
 ## 约定
 
@@ -46,17 +50,29 @@ NPC 预设解析出手工指定或生成的基础外观，再由当前换装覆�
 
 ### 在服务端验证
 
-`sanitizeForPlayer` 先解析实际 Origins 种族，再清理目录兼容性、移除锁定部件、移除未知绘制引用，最后在角色尚未创建完成时补充声明的起始部件。目录为空时按数据尚不可用处理，保留已有部件。
+`sanitizeForPlayer` 先解析实际 Origins 种族，再清理目录兼容性、移除玩家 `HumanoidAccess` 不允许的部件、移除未知绘制引用，最后在角色尚未创建完成时补充声明的起始部件。目录为空时按数据尚不可用处理，保留已有部件。
+
+权限来自 `HumanoidSession.access(player)`。`PLAYER` 移除受众为 `npc` 的部件和解锁规则不成立的部件；`DESIGNER` 只能由 `/ise humanoid design` 授予，两者都保留。该权限一直持续到登出，或被授予玩家权限界面为止，届时角色按玩家规则重新验证。无论哪种权限，性别锁定、种族筛选、部件链与依赖条件都照常生效。
 
 目录清理检查槽位、性别和种族兼容性，修复样式，补充必需身体与种族特征，再反复移除不满足配套条件的部件。以上检查不证明客户端模型或纹理存在；解锁检查和资源解析仍是独立阶段。
+
+NPC 只执行目录清理，入口为 `HumanoidPartCatalogRegistry.sanitizeNpc`。`BaseNpcEntity.setHumanoidProfile` 按外观声明的种族清理每份基础外观，无论它来自生成、手写预设、NBT 读取、性别变更，还是数据包重载后对生成角色的重新验证。`NpcOutfitManager.resolveAppearance` 也会清理叠加服装后的结果。因此服装无法去掉种族特征：被清空的特征槽会按种族重新补上，NPC 的性别或种族不能穿戴的部件会被移除。受众、解锁门槛与涂绘验证属于玩家规则，不作用于 NPC。
+
+`sanitizeNpc` 与玩家规则只有一处不同：它不会补全空缺或不可用的身体。没有身体的 NPC 以裸骨架绘制，即白色人台。隶属契约经纪人的预设只声明了商店，公会接待员没有声明预设，因此这个人台就是它们的占位外观。玩家的空身体则会补上目录默认身体。
+
+### NPC 的种族染色
+
+玩家的粘液身体来自 `isekaiorigins:trait_slime` 能力。NPC 没有能力，因此 `GeoHumanNpcRenderer` 改为读取其种族：种族为 `isekaiorigins:slime` 的外观以实体半透明图层绘制身体，按 `skin` 通道染色，透明度为 `0.9`。`HumanoidPartGeoLayer` 把同一染色传给全部穿戴层，头发、服装和特征也一并染色。其他种族按原样绘制。`HumanoidProfileGenerator` 为粘液族 NPC 从 6 种浅色粘液肤色中选取，而不是 8 种人类肤色，因为透过染色看到的人类肤色只会显得像普通人。
 
 创建阶段通常只向前推进，显式重置另行处理。`HumanoidCreationFlow.owedScope` 决定待完成步骤，`OpenHumanoidCreationPacket.send` 先发放范围会话，再请求客户端显示。完整范围矩阵和当前请求处理器限制见运行时参考。
 
 ### 让体型尺寸有统一来源
 
-`HumanoidBodyScale.of(player)` 仅在玩家组件含身体引用且没有活动变形实体时使用 `height / 1.8`，否则返回 1。玩家碰撞箱、视线高度与外层玩家渲染缩放共用此策略。
+`HumanoidBodyScale.of(profile)` 仅在外观含身体引用时使用 `height / 1.8`，否则返回 1。`HumanoidBodyScale.of(player)` 在没有活动变形实体时把它应用于玩家自己的外观。玩家碰撞箱、视线高度与外层玩家渲染缩放共用此策略。
 
 玩家特征层设置 `HumanoidRigRenderState.setBodyScaleApplied(true)`，骨架渲染器据此跳过重复体型缩放。独立预览和 NPC 渲染有各自的显示上下文。不要同时在玩家外层变换和骨架上乘以玩家身高比。
+
+分身是玩家的副本，按其携带的外观以同样方式确定尺寸：碰撞箱与视线高度按 `HumanoidBodyScale.of(profile)` 缩放，并在同步的外观变化时重新计算；其渲染器把原版 `0.9375` 渲染缩放乘以同一数值。因此 `HumanoidGhostRenderer.live()` 标记缩放已应用，盔甲、手持物品与骨架共用同一尺寸。残影使用的 `HumanoidGhostRenderer.still()` 由骨架自行缩放，因为其空间中不绘制其他内容。
 
 客户端身体渲染还要求共享骨架资源存在，并让位于活动变形显示。服务端尺寸策略不依赖客户端资源可用性，因此缺失资源可能影响显示，却不移除服务端身体引用。
 
@@ -70,7 +86,7 @@ NPC 预设解析出手工指定或生成的基础外观，再由当前换装覆�
 | 部件槽位 | 在 `HumanoidSlot` 添加 ID、类别、绘制顺序和护甲默认规则；开放对应章节，按需更新 `showsOnArm` 与特征映射，同时更新插件的显式槽位列表。 |
 | 界面章节 | 在 `CreationChapter` 定义槽位、配色通道与镜头焦点，加入允许范围；通用槽位构建器不足时增加专用控件。 |
 | 非玩家主体 | 实现 `HumanoidSubject`，负责持久化与同步，并在显示变更时增加修订号。 |
-| NPC 专用生成 | 重写 `resolveInitialHumanoidProfile`；通过 `getNpcPresetId` 让多个实体类型共用预设。 |
+| NPC 外观 | 重写 `getNpcPreset`，返回用 `NpcPreset.builder()` 构建的常量；生成外观时重写 `resolveInitialHumanoidProfile`；只有多个实体类型需要共用服装名称与奖励记录时才重写 `getNpcPresetId`。 |
 
 配色 NBT 按通道枚举序号保存数组，网络格式按序号位保存配色、按序号保存槽位。扩展时保留既有枚举顺序并检查兼容性；绘制顺序取自槽位显式数值，并非枚举序号。配色网络编码使用整数位掩码，增加通道时也要检查掩码容量。
 
@@ -90,15 +106,40 @@ Blockbench 插件有显式槽位和通道表，增加枚举常量不会自动更
 
 渲染快照缓存包含外观及修订号、目录和资源版本、绘制修订号、护甲及特征掩码、合成纹理代次。增加视觉输入时也需增加对应失效输入。不要另建能无版本控制地跨目录或资源重载存活的缓存。
 
+### 由其他模组绘制种族特征
+
+`net.kzeroko.isekaiexpansion.api.client.HumanoidRenderAPI` 是仅限客户端的门面，供自身特征层会取代部分人形身体的模组使用，共有两个方法。
+
+| 方法 | 端 | 作用 |
+| --- | --- | --- |
+| `registerLegReplacement(Predicate<? super LivingEntity> rule)` | client | 添加一条规则。某一帧中只要有规则对正在绘制的人形返回 `true`，`HumanoidBoneShaper` 就隐藏 `left_leg` 与 `right_leg` 骨骼及其子骨骼。穿戴部件按骨骼名称复制可见性，裤腿、袜子和鞋子随之隐藏。传入 `null` 会抛出 `NullPointerException`。规则无法移除。 |
+| `traitColor(LivingEntity entity)` | client | 以 `0xRRGGBB` 返回 `trait_primary` 配色；实体没有人形外观时返回空值。 |
+
+只有实时绘制流程会询问这些规则：玩家由 `HumanoidPlayerFeature` 询问，NPC 在完成姿态时询问。第一人称手臂、界面预览和残影复制骨架时并不带有对方模组的图层，因此保留双腿。规则在渲染线程上对每个被绘制的人形执行；请在客户端初始化时注册，并保持开销低、无副作用。
+
+整合包在 IsekaiTweaks 中的 Mermod 联动使用此 API。Mermod 是第三方模组，核对版本为 3.0.2；它依据原版身体姿势绘制尾巴，只隐藏原版双腿，而原版双腿早已由骨架接管。联动规则与 Mermod 隐藏原版双腿的规则一致：
+
+```java
+HumanoidRenderAPI.registerLegReplacement(
+        subject -> subject instanceof PlayerEntity player && MermodClient.shouldRenderTail(player));
+```
+
+其尾巴配色钩子使用 `traitColor`，使尾巴与本模组绘制的角、耳朵和尾巴颜色一致。Mermod 胸衣对应的胸部隐藏不在此 API 范围内。
+
 ## 验证
 
 - 在玩家本人、另一客户端、NPC 和独立预览上对比同一外观。
 - 向各授权范围提交越界字段，检查实际保存外观，而不只看界面预览。
 - 确认重生保留外观、阶段和保存槽，且保存外观只发给所属玩家。
 - 改变身高、身体引用和变形状态，检查碰撞箱、视线高度、手持物品和显示缩放。
+- 让一名矮小和一名高大的角色身穿全套盔甲、手持武器施放分身；确认头部位于头盔内，盔甲贴合四肢，武器握在手中。
+- 打开 `/ise humanoid design`，穿上一件 `npc` 部件后重载数据包，确认它仍在；再打开 `/ise humanoid edit` 或重新登录，确认它被移除。
 - 分别重载目录与客户端资源，检查保存外观及渲染缓存失效。
 - 新槽位或通道须往返验证 NBT 和网络状态、检查枚举兼容，再通过插件导出。
 - 测试中断的首次创建流程及等待界面，确认不覆盖活动界面。
+- 生成多个种族的隶属招募者，包括龙人族、狐妖族和粘液族。与同种族玩家对比特征，确认粘液族呈半透明，再重载数据包检查特征仍在。
+- 给 NPC 穿上清空某个特征槽和身体的服装，确认特征恢复、身体显示为人台。确认隶属契约经纪人与公会接待员仍是白色人台。
+- 以带 Mermod 尾巴的人形玩家游泳。确认双腿及腿部穿戴层恰好在尾巴绘制期间隐藏；尾巴样式为常驻时在陆地上同样如此；残影仍保留双腿。
 
 姓名与文化选择见[命名API](/zh-cn/dev/naming/)。
 

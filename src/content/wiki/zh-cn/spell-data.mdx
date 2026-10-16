@@ -3,10 +3,10 @@ title: "法术数据"
 description: "当前法术阶段、弹射物、表现、绑定池、物品分配与星界能量映射。"
 category: data
 order: 40
-updated: 2026-09-24
+updated: 2026-10-15
 ---
 
-Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行提供星界能量费用映射。本页以 Spell Engine 1.10.7+1.20.1 为核对版本，说明本集成使用的主动法术、弹射物、表现及物品格式。
+Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行提供星界能量费用映射。本页以 Spell Engine 1.10.10+1.20.1 为核对版本，说明本集成使用的主动法术、弹射物、表现及物品格式。
 
 ## 文件放在哪里
 
@@ -129,7 +129,7 @@ Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行�
 | `cost.item.amount` | `integer` | `1` | 所需物品数量。 |
 | `cost.item.consume` | `boolean` | `true` | false 只检查数量，不消耗。 |
 
-其他动作类型包括 STATUS_EFFECT、FIRE、SPAWN、SUMMON、TELEPORT、COOLDOWN、AGGRO、DISRUPT、IMMUNITY、VELOCITY 及 CUSTOM，各自需要对应分支的数据。被动触发、修正器、蓄力加成及这些动作负载由[固定版本 Spell Engine 格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)负责，不是异界扩展新增字段。
+其他动作类型包括 STATUS_EFFECT、FIRE、SPAWN、SUMMON、TELEPORT、COOLDOWN、AGGRO、DISRUPT、IMMUNITY、VELOCITY 及 CUSTOM，各自需要对应分支的数据。被动触发、修正器、蓄力加成及这些动作负载由[固定版本 Spell Engine 格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)负责，不是异界扩展新增字段。
 
 ### 弹射物与陨落投递结构
 
@@ -171,7 +171,7 @@ Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行�
 | `area_impact.visuals` | `object` | `{}` | 范围中心的粒子与模型组合。 |
 | `area_impact.sound` | `object` | `null` | 范围影响声音。 |
 
-飞行运动、碰撞特性、实体放置、云或近战投递及模型动画变换，均在[同版本完整格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)中继续扩展此结构。不要直接搬用旧版扁平弹射物格式的字段。
+飞行运动、碰撞特性、实体放置、云或近战投递及模型动画变换，均在[同版本完整格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java)中继续扩展此结构。不要直接搬用旧版扁平弹射物格式的字段。
 
 ### 公共动画、声音与粒子对象
 
@@ -204,7 +204,7 @@ Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行�
 | `particles[].batch.min_speed` | `number` | `0` | 初速度下界。 |
 | `particles[].batch.max_speed` | `number` | `0` | 初速度上界。 |
 
-[粒子格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java)还定义寿命、不透明度、缩放、附着与批次几何控制。[模型效果](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java)定义变换及定时动画。这些由依赖拥有；扩展上表之外的字段时请使用链接中的相同版本。
+[粒子格式](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java)还定义寿命、不透明度、缩放、附着与批次几何控制。[模型效果](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java)定义变换及定时动画。这些由依赖拥有；扩展上表之外的字段时请使用链接中的相同版本。
 
 ### 物品分配与绑定池
 
@@ -259,15 +259,15 @@ Spell Engine 负责法术定义、绑定池及物品分配；异界扩展另行�
 
 ```json
 {
-  "isekaiexpansion:healing": 12
+  "isekaiexpansion:healing": 8
 }
 ```
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
-| `isekaiexpansion:healing` | `integer` | 解析后映射中缺失时为 `0` | 动态法术 ID 键的示例，此处基础费用为 12。所有非空键都会接受，不检查法术是否存在；仅正数值会写入。 |
+| `isekaiexpansion:healing` | `integer` | 缺失时使用阶级预算 | 动态法术 ID 键的示例，此处基础费用为8。所有非空键都会接受，不检查法术是否存在；仅正数值会写入。 |
 
-没有包装或元数据字段，其他键表示其他法术 ID 字符串。最终费用还受卷轴、天赋、种族及滞空修正影响；引导按每次成功投递扣费。
+没有包装或元数据字段，其他键表示其他法术 ID 字符串。最终费用还受天赋、种族及滞空修正影响；引导按每次成功投递扣费。未映射法术按1–6阶使用5、10、18、28、40、60的回退预算，高于6阶也使用60；该预算不限制法术支持的阶位。引导按投递次数分摊并向上取整，每次至少1。本地绑定以学派天赋替代经验要求；书卷与默认法术数值见[法术目录](/zh-cn/wiki/spell-catalog/)。
 
 ## 完整示例
 

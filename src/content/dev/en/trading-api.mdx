@@ -3,7 +3,7 @@ title: "Trading API"
 description: "Open authoritative merchant catalogues and query personal trade rapport inside an active dialogue."
 category: api
 order: 145
-updated: 2026-09-30
+updated: 2026-10-14
 ---
 
 `TradingAPI` opens a merchant catalogue in an active Blabber conversation and exposes personal rapport ranks. Villagers and NPCs share catalogue generation, payment, stock ledgers and courtesies. Player rules are in [Trading](/en/wiki/trading/).
@@ -25,11 +25,11 @@ Import `io.github.ladysnake.blabber.Blabber` and the facade. The entity must be 
 
 ### Bind an NPC profession
 
-Set `trade_profession` in the NPC preset to a catalogue ID such as `minecraft:farmer`. Author the matching catalogue under `data/<namespace>/trade_overrides/`; [Trade overrides](/en/wiki/trade-overrides/) describes schema version 3. A custom job needs no villager profession registration. Gate optional provider mods with `requires_mods`.
+Declare the profession in the NPC class's preset, for example `NpcPreset.builder().tradeProfession("minecraft:farmer")`; see [NPC assets](/en/dev/npc-assets/). Author the matching catalogue under `data/<namespace>/trade_overrides/`; [Trade overrides](/en/wiki/trade-overrides/) describes schema version 3. A custom job needs no villager profession registration. Gate optional provider mods with `requires_mods`.
 
-`BaseNpcEntity.getTradeProfession()` resolves a common NPC's saved assignment before its preset. `setTradeProfession(identifier)` assigns a common NPC job; null returns to the preset. Unique NPCs reject instance assignment and always use their preset. Evelina's preset selects `isekaiexpansion:mahoutsukai_evelina`. `canTradeWith` requires an enabled catalogue and the preset's `trade_access`: `trusted` by default, or `public`. Both the disabled menu choice and server admission use this predicate. Unique NPCs exclude courtesy, refresh and bargaining actions on both rendering and execution paths; automatic stock remains active.
+`BaseNpcEntity.getTradeProfession()` resolves a common NPC's saved assignment before its preset. `setTradeProfession(identifier)` assigns a common NPC job; null returns to the preset. Unique NPCs reject instance assignment and always use their preset. Evelina's preset selects `isekaiexpansion:mahoutsukai_evelina`. `canTradeWith` requires an enabled catalogue and the preset's trade access: `TRUSTED` by default, or `PUBLIC`, which the allegiance broker declares. Both the disabled menu choice and server admission use this predicate. Unique NPCs exclude courtesy, refresh and bargaining actions on both rendering and execution paths; automatic stock remains active.
 
-These entity methods are internal integration points. The preset field is optional and defaults to no trade profession; malformed identifiers reject that preset. `TradeProfession` is the corresponding optional entity NBT string. The humanoid export command preserves the effective profession.
+These entity methods are internal integration points. The preset call is optional and defaults to no trade profession; a malformed identifier fails when the NPC class loads. `TradeProfession` is the corresponding optional entity NBT string. `/ise humanoid export npc` preserves the effective profession and the declared access.
 
 ### Query recognition
 
@@ -52,6 +52,8 @@ int rank = TradingAPI.rapportRank(player, merchant);
 `TradeTransaction` prices canonical currency costs using `TradePricing` before bargaining, validates both inputs, currency and output capacity, then pays using Isekai Core `NumismaticCompat`. The displayed exchange uses that same quote. Currency change can occupy space during payment; remaining output uses `offerOrDrop`. Villager `Merchant.trade` runs with a customer scoped to its synchronous callback and cleared in `finally`. Villager experience no longer advances catalogue access. NPCs use their shared authoritative list directly.
 
 After payment, the service records stock use and personal rapport. `MerchantCourtesies` revalidates the definition, session, rank, charge and item before giving or repairing anything. Maintenance compares the selected main-hand snapshot again and changes damage only. Gift capacity is checked before charge consumption.
+
+After a completed currency purchase, `DialogueTrading` calls `QuestTradePurchaseTrigger.completed` once with the delivered stack and paid amount. The quest bridge admits owned catalogues only and uses the active `TRADE_PURCHASE` index. Failed or cancelled quotes and player sales emit nothing. Gold exchange and guild crystal recycling share `InventorySale`: its plan validates the quoted slot and full stack snapshot, then checks all payment capacity before applying inventory changes.
 
 ### Register a courtesy action
 
@@ -95,7 +97,7 @@ Confirmation checks the live offer object and current quote before payment. Blab
 
 ## Verifying
 
-Run `./gradlew.bat -I tools/trading/verify.gradle checkCommerce processResources` and `python tools/trading/validate_coverage.py`. The JVM checks exercise production parsing, rapport limits, payout budgets, save/reload and stock transitions. Coverage checks compare the configured profession dump with catalogue, scene and bilingual-text resources.
+Run `./gradlew.bat compileJava processResources`. Check catalogue, dialogue and bilingual-text resources together when changing a profession.
 
 In game, check a fresh level 1 villager, two players with different rapport, all 5 catalogue tiers, repeated trades, restart, restock and rotation. Test full-inventory gifts, changed held-item repair, changed NPC profession and a reload while a quote is open. Open a fresh cartographer's service menu with and without goods. REI shows bundled catalogue tiers and first-visit availability. These interactive checks require a running pack.
 

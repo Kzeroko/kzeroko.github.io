@@ -3,7 +3,7 @@ title: "Structure-space Data"
 description: "Create property regions with anchor NBT and define the furniture that scores their coziness."
 category: data
 order: 82
-updated: 2026-09-19
+updated: 2026-10-04
 ---
 
 Structure-space anchors define a property's regions, resident capacity and contract prices. Furniture JSON is a separate server data format: it decides which placed blocks count towards the permanent home's coziness.
@@ -110,7 +110,7 @@ Here `part` is the dynamic property name covered by `properties.<name>`. To requ
 
 1. As a creative operator with permission level 2, use `isekaiexpansion:structure_dev_wand` on a block to set the first corner; sneak-use to set the second.
 2. Apply the wand to an anchor to replace its regions. Sneak-apply appends another region. This updates the authoring block, not the runtime property.
-3. Open the anchor without the wand. In Regions, edit the inclusive relative minimum and maximum coordinates. Add region duplicates the selected region; Remove region retains at least a single region.
+3. Open the anchor without the wand. In Regions, edit the inclusive relative minimum and maximum corners, or press the pick button beside a corner and click a block in the world to set it relative to the anchor. Add region duplicates the selected region; Remove region retains at least a single region.
 4. Use Preview draft to inspect unsaved geometry. The stored anchor must have ShowBox enabled for its renderer to display the draft. Closing the editor clears that draft preview.
 5. Set the identity, capacity and prices. Save with Bind / update in this world enabled to register the property too. This toggle starts disabled. The server accepts edits only within 64 blocks of the anchor; check its chat response rather than treating the local sent indicator as success.
 

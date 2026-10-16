@@ -3,7 +3,7 @@ title: "Magic circles"
 description: "Layered magic seals, cast sequences and independent rendering."
 category: client
 order: 55
-updated: 2026-09-25
+updated: 2026-10-15
 ---
 
 Magic circles compose independently selected seal layers, plain stroke rings, luminous lines and cylindrical casting auras from immutable sequences. `MagicCircleAPI` is the client facade; the animation graphs and server circle builders remain internal project machinery.
@@ -62,7 +62,7 @@ The compiler uses average source ink colour, a pale core and a restrained local 
 
 ### Sequences and layers
 
-`MagicCircleSequences` constructs and registers the built-in graphs once. `SpellClientData.registerCircleSequence(Identifier, CircleSequence)` takes the sequence directly. Without a registration, beaming chooses `PULSE_SINGLE`, tier below 3 chooses `FACE_SINGLE` and other tiers choose `FACE_TRIPLE`.
+`MagicCircleSequences` constructs and registers the built-in graphs once. `SpellClientData.registerCircle(Identifier, Circle)` registers an explicit design, sequence and reveal mode per spell. No registration means no casting circle; tier and school do not supply a fallback.
 
 The current built-in graphs and their IDs live in `MagicCircleSequences`. Register additional sequences during common initialisation on both sides. Duplicate IDs and unknown lookup IDs throw; render data must reference the registered object.
 
@@ -122,6 +122,7 @@ A standalone sequence pivots around the entity bounding-box centre. `YOffset` is
 | `Scale` | `number` | required | Positive multiplier up to ×16. |
 | `Speed` | `number` | required | Signed rotation multiplier, −16–16. Zero stops rotation. |
 | `YOffset` | `number` | required | World-space vertical offset, −64–64 blocks. |
+| `Fused` | `list` of `identifier` | absent | Designs of the spells infused into this circle's spell, in formula order. Absent or empty draws the design alone; entries past the first 2 are ignored, and an invalid identifier throws. The client frames the first partner's inner glyph with the host's outer ring, takes a second partner's strokes and blends all their effect colours, composing each combination once. Written only when nonempty. |
 
 ## Extending it
 
@@ -153,3 +154,7 @@ Run `./gradlew.bat compileJava` after code changes. Inspect the edited effects i
 
 - [Shaders and materials](/en/dev/shaders-and-materials/)
 - [Spell integration](/en/dev/spell-integration/)
+
+### Projectile emitters
+
+`MagicProjectileAPI.Placement` positions standalone circles forward, beside or behind the caster with a bounded separation search. `ProjectilePatternAPI.Rain` uses `RAIN_DISK`, with radius matching the random emission disk and a pivot at its world position. See [Projectile attachments and patterns](/en/dev/projectile-attachments/) for height, angle, count and interval contracts.

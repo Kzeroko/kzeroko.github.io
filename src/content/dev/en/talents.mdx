@@ -3,7 +3,7 @@ title: "Talent runtime"
 description: "Talent registration, rolls, practice formulas, saved state, synchronisation and operator tools."
 category: systems
 order: 160
-updated: 2026-09-30
+updated: 2026-10-15
 ---
 
 Each player stores an innate rank, hidden potential, proficiency level and practice counter for every talent, plus a separate reveal component. Gameplay reads the effective rank after practice; visibility is a presentation concern and does not gate bonuses or practice awards.
@@ -18,7 +18,7 @@ The implementation is under `internal.talent`, with consumption helpers under `u
 
 ### Registry, initial rolls and families
 
-Ranks E/D/C/B/A/S correspond to 0/1/2/3/4/5; numeric conversion clamps to that range. The current catalogue contains 36 talents: 18 melee weapon types, 4 ranged types, dual wielding, Astral Energy capacity, 6 common elements and 6 extended spell schools.
+Ranks E/D/C/B/A/S correspond to 0/1/2/3/4/5 and S+ to 6. Rolls, stored innate ranks and `/ise talent set` stay within E–S, because `TalentRank.innate` clamps to 0–5; `fromLevel` clamps to 0–6. The current catalogue contains 36 talents: 18 melee weapon types, 4 ranged types, dual wielding, Astral Energy capacity, 6 common elements and 6 extended spell schools.
 
 | Definition group | E / D / C / B / A / S weights | Luck strength |
 | --- | --- | --- |
@@ -67,7 +67,19 @@ base = 90 * (max(0, L) + 1) ^ 1.55
 stepCost = max(10, round(round(base * toll) / 10) * 10)
 ```
 
-`expCap` returns 0 at L ≥ 9. It does not itself return 0 at an earlier personal mastery ceiling; use `canStillGrow()` to determine whether training is legal. `cumulativeExp` sums step costs up to the shared level limit. `TalentProficiencyLeveler` supplies the personal ceiling to IsekaiCore's `LevelingHandler`, which performs carry-over; this adapter clears practice when no growth remains. The handler cache is indexed by innate rank × 100 + potential, with at most 600 entries.
+These formulas are the standard ladder. `TalentLadder` reads it per `TalentCurve` and is the one authority for maximum level, step cost, cumulative practice, effective rank and ascension, so the stored progress, the leveling handler and the screen cannot disagree. On the standard ladder `expCap` returns 0 at the talent's mastery level, where `canStillGrow()` is false. `TalentProficiencyLeveler` supplies each curve's maximum level to IsekaiCore's `LevelingHandler`, which performs carry-over; this adapter clears practice when no growth remains. Its handler table is indexed by curve × 600 + innate rank × 100 + potential, 1,800 entries in all, filled on first use.
+
+### Curves, S+ and the reservoir
+
+| Curve | Talents | Levels | Rank gameplay reads |
+| --- | --- | --- | --- |
+| `STANDARD` | Weapons and dual wielding | 0 to the mastery level | Innate rank plus earned tiers |
+| `ASCENDANT` | The 12 spell schools | 0 to the mastery level, then up to 9,999 levels of S+ when the ladder reaches S | S+ from the first level past mastery |
+| `RESERVOIR` | Astral Energy capacity | 0–9,999 | The rolled rank |
+
+A school ascends only when its standard ladder can reach S, that is when `min(potential tiers, 5 − i)` carries the innate rank to S; an innate S school's mastery level is 0, so its first level is already S+. Its ascension is the level minus the mastery level. Ascension n costs `6000 + 1500 × (n − 1)` practice. `TalentAscension.power` equals the ascension up to 10, then `10 + 10 × ln(1 + (n − 10) / 10)`; the S+ spell bonuses read that power, as [Talents](/en/wiki/talents/) lists. `TalentRank.describe` writes S+ for ascension 1 and `S+ n` from 2.
+
+The step from reservoir level n costs `60 + 15 × n` practice. `AstralReservoir.bonus` adds `base × (innate multiplier − 1) + per-level reserve × level` to maximum energy, both read from the rolled rank: multipliers 0.6, 0.8, 1, 1.3, 1.6 and 2, and per-level reserve 1, 1.25, 1.5, 2, 2.5 and 3 from E to S. One payment of cost c from e energy held, with capacity m, earns `round(2 + 60 × L × (1 + 2L) × (1 + 3D³))` practice, where `L = min(1, c / m)` and `D = 1 − min(1, max(0, e − c) / m)`; a zero cost or capacity earns nothing.
 
 ### Practice, consumers and visibility
 
@@ -77,16 +89,16 @@ stepCost = max(10, round(round(base * toll) / 10) * 10)
 | --- | --- |
 | Melee talent damage modifier | 8 to the tagged melee weapon type; another 8 to dual wielding if both currently held weapons qualify. Direct damage source must be a player. |
 | Ranged talent damage modifier | 11 to the tagged ranged weapon type; uses projectile-owner/ranged-attacker resolution. |
-| Spell `RELEASE` with progress > 0.30 | 10 to the mapped school and 4 to base Astral Energy. |
-| Spell `CHANNEL` alone | No practice from this hook. |
+| Magic spell `RELEASE` with progress > 0.30 | 10 to the mapped school; weapon arts award nothing. |
+| Every energy payment for a spell | Reservoir practice from the payment formula above: once per non-channelled release, once per paid channel delivery. |
 
-Damage awards occur inside modifier evaluation, without a positive-damage predicate, final-health-loss confirmation or per-swing deduplication. Dual wielding does not require separate successful hits with both hands. Spell awards follow qualifying release regardless of a positive energy charge, including the channelled release path; the school award can be absent when unmapped while the reserve award remains.
+Damage awards occur inside modifier evaluation, without a positive-damage predicate, final-health-loss confirmation or per-swing deduplication. Dual wielding does not require separate successful hits with both hands. School awards follow a qualifying release regardless of a positive energy charge, including the channelled release path; an unmapped school earns none. Reserve practice follows the payment instead, so a channel trains the reserve on every paid delivery but its school only on release.
 
 Melee/ranged/spell bonuses read effective rank. Attack-speed refresh runs on the server living-entity tick and adds both hands' melee deltas plus one dual-wield delta with `EntityAttributeModifier.Operation.ADDITION`. The current UI percentage formatting does not change that operation. `DualWieldTalentUtil.offHandMultiplier` exists but has no consumer in this checkout; its extra offhand factors are not applied by the current damage integration.
 
-Spell talent checks gate mapped-school binding and casting, with creative bypass. Cast-time scaling applies only to a positive original duration for a non-channelled player spell. Energy cost multiplies the spell's base cost with talent and other cost modifiers before rounding. The capacity modifier replaces UUID `435f53d1-e0fd-4307-bc5d-df7fc035c78b` with `attribute base × (rank multiplier − 1)`; it is refreshed on join/patch, rank set and proficiency changes.
+Spell talent checks gate mapped-school binding and casting, with creative bypass; woven formulas use `FormulaAffinity` instead, described in [Spell formula runtime](/en/dev/spell-formula-runtime/). Cast-time scaling applies to both the cast process and the displayed duration, only for a positive original duration of a non-channelled player spell. Energy cost multiplies the spell's base cost with talent and other cost modifiers before rounding. The capacity modifier replaces UUID `435f53d1-e0fd-4307-bc5d-df7fc035c78b` with `AstralReservoir.bonus`; it is a temporary `ADDITION` modifier refreshed on join/patch, respawn, explicit capacity-base changes, a capacity rank set and every capacity level change. Astral Energy keeps its saved reserve through reconnect and respawn. `ASEnergyLifecycle` restores persisted capacity, reapplies the talent, and ticks energy at the end of the server tick after equipment attributes settle. A genuinely lower final capacity still clamps the reserve; death does not explicitly zero it.
 
-Reveal hooks are separate: melee attack actions with targets reveal the weapon and eligible dual-wield talent; ranged shots at progress ≥ 1 reveal the ranged talent. The crystal-hidden group has a reveal helper and operator command, but no item-use call site. Spell practice does not reveal talents. Reveal-all clears explicit unlocks; disabling reveal-all alone does not otherwise clear explicit entries. `lockAll` only disables that flag, whereas the reset command also calls `clearUnlocked`.
+Reveal hooks are separate: melee attack actions with targets reveal the weapon and eligible dual-wield talent; ranged shots at progress ≥ 1 reveal the ranged talent. The crystal-hidden group has a reveal helper and operator command, but no item-use call site. Spell casting reveals the entries it uses: a magic release past 0.30 of its cast, or a channel delivery that pays energy, reveals the school's talent and Astral Energy Capacity through `TalentUnlockUtil.tryUnlockSpellTalents` before the energy is paid. Reveal-all clears explicit unlocks; disabling reveal-all alone does not otherwise clear explicit entries. `lockAll` only disables that flag, whereas the reset command also calls `clearUnlocked`.
 
 ## Contracts
 
@@ -102,7 +114,7 @@ Reveal hooks are separate: melee attack actions with targets reveal the weapon a
 | `TalentsComponent.get(id)` | Effective rank; absent entry returns E. |
 | `innate(id)` | Innate rank; absent entry returns E. |
 | `progress(id)` | Returns mutable live progress, creating E/potential 0 if missing; rejects null ID. |
-| `set(id, rank)` | Changes innate rank and syncs; keeps potential, proficiency and practice. Does not validate registry membership. |
+| `set(id, rank)` | Changes innate rank and syncs; keeps potential and practice and lowers proficiency to the new ceiling when needed. Does not validate registry membership. |
 | `forceReroll(luck)` | Replaces all talent progress with fresh rolls; does not reset reveal state. |
 | `TalentRevealer.unlock/unlockAll` | Adds visibility, without registry validation or rank changes; batches synchronisation for multiple entries. |
 | `TalentRevealComponent.patchData()` | Removes obsolete explicit unlock IDs; the join hook does not call this method. |
@@ -117,7 +129,7 @@ Register consistently during common initialisation, before player join or client
 | `talents` | Compound | Empty | Map from talent identifier string to progress compound. |
 | `talents.<id>.rank` | Integer | 0 | Innate rank, clamped to 0–5. |
 | `talents.<id>.potential` | Integer | 0 | Hidden potential, clamped to 0–99. |
-| `talents.<id>.level` | Integer | 0 | Proficiency, clamped to 0–9, not to personal mastery. |
+| `talents.<id>.level` | Integer | 0 | Proficiency, clamped to 0 and the talent's maximum level on its curve. |
 | `talents.<id>.exp` | Integer | 0 | Practice, clamped nonnegative; not capped against step cost during load. |
 | `revealAll` | Boolean | false | Separate reveal component flag; true ignores the explicit list on read. |
 | `unlocked` | List of strings | Empty | Valid identifier strings become explicit unlocks; duplicates collapse, invalid IDs skip. Written only when not reveal-all and nonempty. |
@@ -130,7 +142,7 @@ On first generation, patch rolls all entries, syncs and applies capacity. On lat
 
 Raw practice calls sync at most once per 40 ticks (2 seconds) of world time. This is checked when another award arrives, not by a scheduled trailing flush. A final award inside the throttle window can remain invisible until another sync or reconnect. Level changes sync immediately.
 
-`isekaiexpansion:player_talent_growth` carries talent identifier, proficiency level and effective rank as identifier/VarInt/VarInt. It announces only an increase in earned rank, not every proficiency level. `isekaiexpansion:player_talent_unlocked` carries only the revealed identifier. Neither packet replaces component state.
+`isekaiexpansion:player_talent_growth` carries talent identifier, proficiency level, effective rank and ascension as identifier/VarInt/VarInt/VarInt. It announces only an increase in effective rank or in S+ level, not every proficiency level. `isekaiexpansion:player_talent_unlocked` carries only the revealed identifier. Neither packet replaces component state.
 
 The client screen captures a fixed `TalentSnapshot` when opened. Hidden entries mask names, bonuses and mastery but the synced component still contains progress and potential: hiding the number is a UI convention, not secrecy from the client. Revealed statistics use the same bonus helpers as gameplay. The card band uses personal mastery headroom, while the dossier's earned-tier denominator uses potential's maximum tiers; an innate A with deep potential can therefore have a one-tier trainable ladder but a two-tier potential denominator.
 
@@ -138,7 +150,7 @@ Talent labels use `talent.<namespace>.<path>`, descriptions append `.desc`, and 
 
 ## Extending it
 
-Add a definition during common initialisation, supply both language entries and an icon, and add any gameplay consumer or practice hook explicitly. Registration alone does not create a new damage category, school mapping or training source. This internal example assumes imports from `internal.talent`, Minecraft `Identifier` and `ServerPlayerEntity`:
+Add a definition during common initialisation, supply both language entries and an icon, and add any gameplay consumer or practice hook explicitly. `curve(TalentCurve)` picks the ladder; `STANDARD` is the default. Registration alone does not create a new damage category, school mapping or training source. This internal example assumes imports from `internal.talent`, Minecraft `Identifier` and `ServerPlayerEntity`:
 
 ```java
 public static void registerExampleTalent() {
@@ -165,18 +177,18 @@ All commands below require permission level 2. `<target>` accepts a player selec
 | --- | --- |
 | `reroll <target> [luck]` | Default luck 0; command accepts nonnegative float only. Resets all ranks/potential/practice, keeps reveal state. |
 | `set <target> <talent> <rank>` | Rank 0–5; changes innate rank only. |
-| `proficiency level <target> <talent> <level>` | Level 0–9; clears practice but does not clamp to personal mastery. |
+| `proficiency level <target> <talent> <level>` | Level 0–9,999, clamped to the talent's maximum level; clears practice. Feedback repeats the requested level. |
 | `proficiency potential <target> <talent> <potential>` | Potential 0–99; keeps level and practice, refreshes derived effects. |
 | `proficiency grant <target> <talent> <amount>` | Positive integer; uses normal award guards, so creative/spectator/capped targets can receive no practice even though command feedback counts them. |
-| `proficiency inspect <target> <talent>` | Reports innate/effective rank, level, practice/cap, raw potential, potential tiers and current toll. |
+| `proficiency inspect <target> <talent>` | Reports innate rank, effective rank with its S+ level, level, practice/cap, raw potential, potential tiers and current toll. |
 | `reveal unlock <target> <talent>` | Reveals one entry. |
 | `reveal crystal <target>` | Reveals the 13 capacity/school entries. |
 | `reveal all <target>` | Enables reveal-all and clears explicit unlocks. |
 | `reveal reset <target>` | Disables reveal-all and clears explicit unlocks. |
 
-Test potential boundaries 21/22 and 65/66, rank gains at 4/9, innate A/S headroom, oversized practice grants and stored values beyond personal mastery. Verify a hidden talent still receives practice, reveal changes no rank, and a reroll preserves reveal state. Compare both hands' flat speed additions with screen percentages. Check mapped/unmapped schools, channel versus release, zero-cost spells, join patch of newly added definitions, respawn, and an award just inside the sync window followed by no further awards.
+Test potential boundaries 21/22 and 65/66, rank gains at 4/9, innate A/S headroom, oversized practice grants and stored levels beyond the talent's maximum. Grant an S school 6,000 practice to reach S+, and check that a school whose potential stops short of S never ascends. Verify a hidden talent still receives practice, reveal changes no rank, and a reroll preserves reveal state. Compare both hands' flat speed additions with screen percentages. Check mapped/unmapped schools, channel versus release, zero-cost spells, join patch of newly added definitions, respawn, and an award just inside the sync window followed by no further awards.
 
-The rank/potential setters are operator tools, not normal gameplay transitions: they can leave above-ceiling levels or old practice totals. Inspect the result rather than assuming all fields were normalised together.
+The rank/potential setters are operator tools, not normal gameplay transitions: they lower the level to the new ceiling but keep the practice counter, which may exceed the next step's cost. Inspect the result rather than assuming all fields were normalised together.
 
 ## Related
 

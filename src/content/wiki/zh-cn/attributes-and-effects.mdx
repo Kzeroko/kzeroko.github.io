@@ -3,7 +3,7 @@ title: "属性与状态效果"
 description: "了解各项属性的用途、星能与盾势恢复，以及战斗百分比的适用范围。"
 category: combat
 order: 10
-updated: 2026-09-24
+updated: 2026-10-10
 ---
 
 属性描述当前能力；状态效果则临时改变属性或启用特殊行为。本页分别说明伤害、恢复、控制和社交属性，完整[状态效果目录](/zh-cn/wiki/status-effects/)另页列出。
@@ -49,7 +49,7 @@ updated: 2026-09-24
 | 仇恨倍率 · `isekaiexpansion:aggro_generation` | 改变受支持的选敌和命中仇恨行为。 |
 | 奥义伤害 · `isekaiexpansion:burst_damage` | 专门加成奥义伤害类别。 |
 | 星能汲取 · `isekaiexpansion:energy_leech` | 玩家符合条件的法术或普通攻击命中时，按能量上限恢复星能。 |
-| 破盾效能 · `isekaiexpansion:shield_break` | 目标玩家正在使用仍可防御的盾牌时，提高对其伤害。 |
+| 破盾效能 · `isekaiexpansion:shield_break` | 目标玩家或召唤出的分身正在使用仍可防御的盾牌时，提高对其伤害。 |
 | 闪避反击倍率 · `isekaiexpansion:evasion_counter` | 在受支持的闪避状态路径中反击，要求攻击者在 8 格内。若攻击者为玩家，则在 12 ticks（0.6 秒）内无法使用物品、攻击、移动或跳跃。 |
 | 异常命中率 · `isekaiexpansion:debuff_accuracy` | 抵消韧性的异常抵抗；达到 100% 时跳过命中随机检查。 |
 | 根性触发率 · `isekaiexpansion:guts_chance` | 受击前生命高于 25% 时，有概率在符合条件的致命攻击后保留 1 点生命。 |
@@ -61,7 +61,7 @@ updated: 2026-09-24
 | 驯养伙伴上限 · `isekaiexpansion:tamed_limit` | 伙伴名额上限，向下取整。默认 3，属性范围为 0–1024。 |
 | 天咒亲和力 · `isekaiexpansion:tenju_affinity` | 提高施加天咒时的效果等级。 |
 | 伤害追加等级 · `isekaiexpansion:bonus_damage_level` | 提高伤害追击状态所产生的每次追加攻击。 |
-| 魔剑感知 · `isekaiexpansion:magic_sword_sense` | 延长受支持魔剑锁定射线的基础 15 格距离。 |
+| 魔剑感知 · `isekaiexpansion:magic_sword_sense` | 从15格基准延长附着物挥动锁敌范围；若配置范围更大则采用配置，上限64格。 |
 | 体质 · `isekaiexpansion:constitution` | 以 ×1 转交给 PlayerEx 体质。 |
 | 力量 · `isekaiexpansion:strength` | 以 ×1 转交给 PlayerEx 力量。 |
 | 灵巧 · `isekaiexpansion:dexterity` | 以 ×1 转交给 PlayerEx 灵巧。 |
@@ -109,9 +109,13 @@ updated: 2026-09-24
 
 根性要求致命攻击前的生命高于 25%。不屈根性会跳过该生命门槛并将概率设为 100%；两者都不能抵挡虚空、疾病或药物疾病。成功触发后生命设为 1。
 
+精灵的「精灵之谐」与史莱姆的「无定型捕食者」已包含摔落伤害免疫，与猫人现有的免疫规则相同。该效果属于种族出身层，不需要额外选择能力。
+
 ## 相关页面
 
 - [状态效果](/zh-cn/wiki/status-effects/)
 - [战斗运行时](/zh-cn/dev/combat-runtime/)
 - [元素](/zh-cn/wiki/elements/)
 - [装备成长](/zh-cn/wiki/leveling/)
+
+附着物挥动按准星瞄准，距离取配置范围与“15格加魔剑感知”的较大值，上限64格。主手持任意物品或空手均可触发释放；关系与可见性检查决定准星下的有效目标，没有选中实体时仍向瞄准点发射。见[附着弹体与发射模式](/zh-cn/dev/projectile-attachments/)。

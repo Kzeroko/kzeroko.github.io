@@ -1,0 +1,44 @@
+---
+title: "World Gates"
+description: "Discover ancient portal ruins and establish long-distance routes through the Overworld."
+category: world
+order: 45
+updated: 2026-10-16
+---
+
+World Gates stand among ruined arches, monoliths and broken sanctuaries in the Overworld. Each gate connects to a single distant partner. Finding an entrance opens a route to another region, while the journey to each ruin remains part of exploration.
+
+## A route worth discovering
+
+| Property | Value |
+| --- | --- |
+| Ruin designs | 6 equally weighted variants |
+| Portal scale | Approximately 10 blocks wide and tall |
+| Natural ruin spacing | Nominally 2304 blocks; at least 2000 blocks between generated gate anchors |
+| Natural partner distance | 1024–8192 blocks horizontally |
+| Entry charge | 40 ticks (2 seconds) of continuous contact |
+
+The ruins use weathered masonry, carved stone and scattered rubble. Their gates have different proportions and colours, hold a fixed orientation and emit a quiet portal ambience. They cannot be crafted, picked up or moved with pistons.
+
+Unsuitable terrain, oceans and nearby structures can leave a region without a gate, creating larger gaps. The spacing applies to naturally generated ruins; developer-placed gates are configured separately.
+
+## Entering a gate
+
+Walk into the glowing surface and remain there while it prepares the destination. The first journey establishes the pair; later journeys keep the same destination. There is no destination menu. A first visit may take longer while the distant terrain loads, and leaving the surface cancels preparation.
+
+- **While mounted:** dismount before entering.
+- **After arrival:** leave the gate before trying to return; the portal cooldown prevents immediate bouncing.
+- **When the destination is blocked:** travel fails until there is a clear, dry landing on a supported surface.
+- **When no partner is available:** the gate reports that it cannot form a route; it does not create a replacement platform or portal.
+
+## Exploration and other travel
+
+| Interaction | Result |
+| --- | --- |
+| Global portal magic | Contact attunes you to that World Gate. |
+| Atlas | IsekaiTweaks categorises the structure as a major ruin interest point. |
+| Roads and mounts | Still connect settlements and places beyond the fixed gate pairs. |
+
+## Where the data lives
+
+The six templates ship under `data/isekaiexpansion/structures/world_portal_ruins/`. World generation uses the shared [structure placement format](/en/wiki/structure-placement/). Mapmakers can configure anchors inside their own landmarks using the [World Gate developer guide](/en/dev/world-gates/).

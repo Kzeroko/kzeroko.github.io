@@ -3,48 +3,54 @@ title: "法术集成"
 description: "注册、投递约定、星界能量扣费、物品数据与依赖衔接。"
 category: systems
 order: 30
-updated: 2026-09-25
+updated: 2026-10-16
 ---
 
 法术集成使用 Spell Engine 的世界注册表与自定义投递处理器。异界扩展的 `spell` 及 `internal.spell` 类型属于内部集成入口，不是公开 API 门面；数据包编写见[法术数据](/zh-cn/wiki/spell-data/)。
 
 ## 它做什么
 
-当前构建固定使用 Minecraft 1.20.1、Spell Engine 1.10.7+1.20.1、Spell Power 1.6.0+1.20.1、Ranged Weapon API 2.3.4+1.20.1 及 Tiny Config 3.1.0+1.20.1。Fabric Loader 为 0.19.5。这些是本检出的构建输入，不代表其他版本兼容。
+当前构建固定使用 Minecraft 1.20.1、Spell Engine 1.10.10+1.20.1、Spell Power 1.6.0+1.20.1、Ranged Weapon API 2.3.4+1.20.1 及 Tiny Config 3.1.0+1.20.1。Fabric Loader 为 0.19.5。这些是本检出的构建输入，不代表其他版本兼容。
 
-`IIsekaiSpell` 负责 ID、新定义、投递回调及可选提示词元。`IsekaiSpellRegistry.registerSpell` 注册自定义处理器、保存实例并安装定义供应器。`registerDefinition` 只注册定义。本地映射中的重复 ID 会被后者替换；应在世界注册表填充前的初始化阶段注册。
+`IIsekaiSpell` 负责 ID、新定义、投递回调、可选提示词元及术式结构；`formula()` 默认封印，其余内容见[术式运行机制](/zh-cn/dev/spell-formula-runtime/)。`IsekaiSpellRegistry.registerSpell` 注册自定义处理器、保存实例并安装定义供应器。`registerDefinition` 只注册定义。本地映射中的重复 ID 会被后者替换；应在世界注册表填充前的初始化阶段注册。
+
+配置式投射物法术位于`spell.instance.catalog`：`SpellCatalog`注册目录，`ConfiguredSpell`提供共用元数据。召唤与三重均为注册法术上的术式式样，通过`SpellShape`选择。可复用附着组、奥术连射与陨星雨见[附着弹体与发射模式](/zh-cn/dev/projectile-attachments/)。
 
 ## 运行时模型
 
 `DynamicRegistrySetupCallback` 为每个法术注册表创建新定义。通过当前世界的 `SpellRegistry.from(world)` 获取条目，不要把世界注册表条目保存在静态状态中。代码定义的法术不需要配套的重复 JSON。
 
-`IsekaiSpellDefinition` 立即校验样本，并校验后续每次工厂结果。法术本身、学派、active/cast、目标、投递或费用为 null 时注册失败。CUSTOM 还要求 custom 对象；包装器将法术 ID 写入处理器 ID。样本学派会被缓存，因此工厂必须保持学派身份一致。
+`IsekaiSpellDefinition` 立即校验样本，并校验后续每次工厂结果。法术本身、学派、active/cast、目标、投递、费用或学习数据为null时注册失败，本地法术阶位必须处于`SpellTiers.MIN/MAX`范围（1–13）。CUSTOM 还要求 custom 对象；包装器将法术 ID 写入处理器 ID。样本学派会被缓存，因此工厂必须保持学派身份一致。
+
+若法术实例字段依赖静态数据，应先初始化这些数据再构造单例。`FireballSpell.INSTANCE`声明在标识符与投递数据之后，确保`SpellCatalog`加载时其`SpellPayload`取得有效ID。
 
 | 回调 | 触发时机 | 约定 |
 | --- | --- | --- |
 | `onCast(IsekaiSpellContext)` | 非引导自定义投递 | 仅在投递成功时返回 true；默认 false。 |
 | `onChannelTick(IsekaiSpellContext)` | 引导自定义投递 | 同样要求如实返回成功状态；默认 false。 |
 | `onChannelRelease(IsekaiSpellContext)` | 引导法术的成功 RELEASE 事件 | 清理或收尾回调，默认不执行操作。 |
-| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, Map<String,String>)` | 提示词元展开 | 为语言文本中的原始词元加入替换值。 |
+| `appendTooltipTokens(Spell, PlayerEntity, ItemStack, SpellTuning, Map<String,String>)` | 提示词元展开 | 按传入的调整值为语言文本中的原始词元加入替换值：已铭刻术式的第一环，或 `SpellTuning.BASE`。 |
 
-适配器拒绝客户端世界及非玩家施法者。上下文复制目标列表，保留 Spell Engine 传入的影响上下文。引导结束会依据当前法术强度创建新的影响上下文，并非复用最后一次投递的上下文。
+适配器拒绝客户端世界。非玩家施法者通过`IEntitySpell`投递，引导光束通过`IChannelBeamSpell`投递；不支持的非玩家投递返回false。上下文复制目标列表，保留 Spell Engine 传入的影响上下文。引导结束会依据当前法术强度创建新的影响上下文，并非复用最后一次投递的上下文。
+
+玩家投递时通过 `FormulaCasting.active` 查找该法术的术式。上下文携带第一环的 `SpellTuning` 与本次施法的种子；法术未编织或术式无效时，使用带同一种子的 `SpellTuning.BASE`。编织过的串联在非引导施法成功后，由 `FormulaChain.unfold` 排定后续法术。非玩家施法者始终按基础调整值施法。
 
 ### 施法与扣费
 
-尝试前置检查跳过创造模式玩家。其余情况会拒绝职业限制的魔法，但卷轴可绕过职业限制；失衡状态、天赋不符或星界能量不足也会阻止施法。正在进行的同 ID 引导会跳过额外入场能量检查，使结束引导不需要再支付一次投递费用。
+尝试前置检查跳过创造模式玩家。其余情况会拒绝职业限制的魔法；失衡状态、天赋不符或星界能量不足也会阻止施法。编织过的术式以术式守卫的判定和术式亲和取代天赋检查。正在进行的同 ID 引导会跳过额外入场能量检查，使结束引导不需要再支付一次投递费用。
 
-星界能量费用为能量映射值、卷轴倍率、天赋倍率、各适用种族费用能力及滞空修正相乘后取整，并保证非负。映射缺失时费用为 0。准入、扣费与提示使用同一计算函数。
+星界能量费用为能量映射值（编织过的术式改用其评定能量）、天赋倍率、各适用种族费用能力及滞空修正相乘后取整，并保证非负。条目缺失时使用`SpellEnergyBudget`：1–6阶的整次预算依次为5、10、18、28、40、60；引导按总投递次数分摊、向上取整，每次至少1。高于6阶使用60星能回退预算，该预算不限制法术支持的阶位。准入、扣费与提示使用同一计算函数。
 
 | 事件 | 本地费用行为 |
 | --- | --- |
 | 引导投递成功 | 服务端投递返回钩子发出 CHANNEL，扣除该次投递的星界能量。 |
 | 下次引导投递费用不足 | HEAD 钩子对匹配的施法过程执行正常 RELEASE，并拒绝本次投递。 |
-| 进度高于 0.30 的 RELEASE | 非引导法术扣星界能量；卷轴数量减少 1；获得法术及星界能量熟练度。引导不在结束时再次扣星界能量。 |
+| 进度高于 0.30 的 RELEASE | 非引导法术扣除正数星界能量；魔法法术获得法术及星界能量熟练度。引导不在结束时再次扣星界能量。 |
 | 创造模式玩家 | 准入及本地消耗绕过费用。 |
 
 结束阈值为严格大于：进度等于 0.30 时不会进入该扣费及熟练度分支。此逻辑接收引擎的成功事件；自定义投递后不要再手动发出一次本地事件。
 
-`SpellParametersMixin` 对正时长的非引导施法乘以天赋、种族急速能力及卷轴施法倍率。瞬发与引导保留上游计算结果。构建器 `channel(duration, deliveryCount)` 分别接收秒数及总投递次数，次数至少为 1。
+`SpellParametersMixin` 包装 `getCastTimeDetails` 与 `getCastDuration`：前者为实际施法过程计时，后者供提示与 HUD 读取。两者从 `SpellCastTiming` 取同一倍率：玩家施放原始时长为正的非引导法术时，为天赋 × 种族急速能力 × 编织术式的吟唱倍率。施法过程至少保留 1 刻，动画速度按同一倍率放慢。`getCooldownDuration` 套用术式的冷却倍率。瞬发与引导保留上游计算结果。构建器 `channel(duration, deliveryCount)` 分别接收秒数及总投递次数，次数至少为 1。
 
 ### 施法移动
 
@@ -58,9 +64,29 @@ updated: 2026-09-25
 
 `SpellHudMixin` 接管上游技能槽与施法进度条绘制，保留目标及错误反馈。读条出现和消失时淡入淡出并缩放，位置变化采用插值；资源重载后重新获取图像。进度最多外推一个游戏刻，客户端暂停时停止推进。打开界面、隐藏 HUD 或断开连接会清除读条。窗口不接收输入，并遵循 `HudAPI` 的可见性控制。
 
+### 学习与绑定书桌
+
+`SpellScrollAPI.create(entry)`通过`SpellContainers.forScroll`创建单法术书卷。`NONE`访问不提供主手施法解析，但通过Trinkets装备后，书卷上的法术会参与已装备法术收集。`SpellScrollAPI.rarity(tier)`委托`SpellTiers.grade`，把1–4、5–8、9–13阶映射为1、2、3品，越界阶级钳制到端点。`ScrollItemMixin`也为Spell Engine原生卷轴设置外观。十三种学派图案（含中性回退）全部加载已有的三个品级素材；未知学派使用中性图案。逐物品堆模型、译名、稀有度及不可变容器由`SpellItemData`管理。
+
+可合并物品标签包含`isekaiexpansion:spell_scroll`。追加式物品标签`trinkets:spell/book`与`trinkets:spell/scroll`将同一物品加入上游栏位。其他Spell Engine载体保留上游法术池、书架、容量、同阶数量与材料检查。绑定钩子移除经验消耗和等级要求；服务端添加法术前由`FormulaBinding.mayInscribe`检查：普通书卷经`SpellTalentUtil.shouldSpellPass`检查学派天赋，编织过的书卷检查术式守卫与术式亲和；已绑定法术仍可移除。绑定成功时，Spell Engine 合成的`lambda$onButtonClick$4`把书卷上的术式写入载体，解绑时由`lambda$onButtonClick$2`清除。两者都是 Spell Engine 1.10.10 中未映射的目标，升级依赖时需要重新核对。创造模式和未映射到天赋的学派遵循共用豁免规则。
+
+Miku分配使用`isekaiexpansion:all_spells`池、8槽、`extra_tier_binding`为7，初始列表为空。该池标记通用载体：候选包含已绑定法术与当前可合并书卷上的有效法术，不限制命名空间，也不会免费列出整个注册表。服务端当前材料和原生处理器拥有最终决定权；绑定成功消耗一本书卷。解绑遵循上游设置，不返还材料。已安装的Wizards及其他Spell Engine法术共用这份约定，无需命名空间白名单。
+
+`SpellScrollLoot`向内置箱子战利品追加独立池，引用`spell_scrolls/grade_1`至`grade_3`。这些表生成原生卷轴，并使用`spell_engine:spell_bind_randomly`、本地全部法术标签和对应品级的阶位范围：1–4、5–8或9–13。函数写入法术后设置卷轴外观。创造物品组则根据世界注册表中的可学习条目生成书卷，包括其他模组。
+
+`SpellBindingScreenRegistrationMixin`在Spell Engine原本的绑定界面注册中替换为ModernUI `MenuScreenFactory`。每次注册只转发一次，仅修改绑定处理器的工厂，不再于客户端启动回调中重复注册。冒险者书桌包含载体与书卷下拉选单、带筛选的法术目录及详情档案。选项遵循原生槽位插入规则，按阶位与名称排列，滚动区高度最多176 dp，展开一项会收起另一项；卷轴标签包含法术名称。`SpellSigilView`以学派颜色的环绘制法术或融合图标，52 dp及以上另加阶位数字封印。档案将原生效果描述、四项战斗数值和亲和要求分区显示，操作按钮固定在滚动区下方。`client.screen.adventurer`中与术式编织台共用的`AdventurerViews`对面板、内容布局和滚动视口逐层裁剪，卡片不会越过固定页首或页尾。过长的选项与卡片标签最多显示两行并省略，悬停仍可查看完整名称。进入、选择、结果提示、悬停与按压动画由`ModernUiMotion`管理，关闭时取消所属动画。
+
+选中的候选带有编织过的书卷或已铭刻的术式时，档案会增加术式分区，显示串联、阶位、吟唱、冷却、能量与判定。载体已掌握主导法术、且书卷会改变现有铭刻时，操作变为**重新铭刻术式**。操作按钮使用深色次要样式，只有可执行的主操作会亮起；解绑使用危险色调。
+
+Minecraft线程采集独立的`BindingSnapshot`，包含物品副本、候选、天赋资格和共用能量费用；UI线程管理视图与动画。操作回到Minecraft线程后先检查当前处理器、预期候选和物品内容，再发送标准槽位或按钮包，重新铭刻则发送`ReinscribeFormulaPacket`，由服务端按自己的处理器、槽位与术式判定再次检查并消耗书卷。控件不直接修改背包。选物品时使用原生拾取与交换事务，将原物品或剩余堆叠放回来源槽位；堆叠超过载体槽容量时，先快速移回原载体，背包无空位则安全终止。`SpellTooltipInvoker`复用原生描述解析和扩展模组的文本处理，不重复名称与数值行；`SpellParameters`提供考虑施法者状态的数值。背包和候选变化立即发布，动态天赋与费用文本至少每秒刷新一次。客户端按钮禁用不能替代服务端检查。
+
+`ScrollItemMixin.appendTooltip` 通过 `SpellScrolls.appendTier`，在物品名称之后插入首个绑定法术的阶位与品阶，共用绑定台的译文和品阶映射。世界缺失、容器为空或法术无法解析时不添加此行。运行时依赖现要求 Spell Engine `>=1.10.10`。已解析的 `1.10.10+1.20.1` 版本光束辅助逻辑使用 `COLLIDER`；本地 `BeamBlocks` 按实体上下文查询方块碰撞形状，瞄准与可见性射线也使用 `COLLIDER`。只有选中轮廓的植物不会阻挡光束。
+
+本地引导光束与法术射线按中心线碰撞确定地形截断位置。实体选取仍使用伤害半径，并逐个检查可见性；薄台阶只碰到光束外缘时，不会缩短光束。客户端插值也沿中心线检测缓存的碰撞盒，将接触特效放在该线的终点，并使用命中面的法线。
+
 ### 物品、冷却与抗性
 
-卷轴创建通过 `SpellItemData.setSpellContainer` 写入 CONTAINED `SpellContainer`。容器值不可变，应通过 copy/with 方法替换。完整查询 `SpellContainerHelper.containerFromItemStack` 依次考虑物品堆数据、数据包分配、物品默认值及回退；单独使用 `SpellItemData.getSpellContainer` 不包含数据包分配。这些行为由 Spell Engine 的[固定版本物品实现](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java)负责。
+书卷通过`SpellItemData.setSpellContainer`写入不能施法的`NONE`容器，持有施法载体使用`CONTAINED`。容器值不可变，应通过 copy/with 方法替换。完整查询 `SpellContainerHelper.containerFromItemStack` 依次考虑物品堆数据、数据包分配、物品默认值及回退；单独使用 `SpellItemData.getSpellContainer` 不包含数据包分配。这些行为由 Spell Engine 的[固定版本物品实现](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/item/SpellItemData.java)负责。
 
 Minecraft 1.20.1 将容器存放在物品堆的 `spell_engine` 复合标签内。读取器不会回退读取旧版根级容器。优先通过物品数据 API 操作，避免直接拼装 NBT。
 
@@ -111,10 +137,16 @@ final class ExampleSpell implements IIsekaiSpell {
 
 ## 验证
 
-修改 Java 后运行 `./gradlew.bat compileJava`，再实际加载世界：编译不会应用混入或解码注册表数据。覆盖普通施法成功与失败、引导耗尽及结束、卷轴消耗、创造豁免、学派准入、暴击治疗与伤害、冷却恢复及断开重连。
+权限等级为2的玩家可运行`/ise dev clearSpellCooldowns`（或`/isekaiexpansion dev clearSpellCooldowns`），清除自己的法术冷却条目，包括共享冷却组。命令调用Spell Engine的`reset(null)`，将清除后的状态同步到客户端，并反馈移除的条目数。先施放带独立冷却和共享冷却的法术，再运行命令，确认两者均恢复就绪；再次运行时检查零条目的反馈。
 
-检查法术注册表 JSON 与网络编解码往返、绑定台池解析及物品堆容器持久化。在匹配依赖版本下检查客户端预测、星界能量提示、快捷栏及弹射物显示。这些是验证步骤，不代表已经完成游戏内测试。
+运行`./gradlew.bat test --tests net.kzeroko.isekaiexpansion.spell.IsekaiSpellDefinitionTest --tests net.kzeroko.isekaiexpansion.internal.spellformula.FormulaRatingTest`，检查全部13个受支持阶位、越界阶位与缺失学习或自定义投递数据的拒绝、工厂的新实例、绑定费用和术式成长规则。
+
+修改 Java 后运行 `./gradlew.bat compileJava`，再实际加载世界：编译不会应用混入或解码注册表数据。覆盖普通施法成功与失败、引导耗尽及结束、绑定时书卷消耗、创造豁免、学派准入、暴击治疗与伤害、冷却恢复及断开重连。
+
+运行`./gradlew.bat test --tests net.kzeroko.isekaiexpansion.internal.beam.BeamCollisionTest`验证中心线几何与插值。在游戏中测试Arona平滑地形上的Conquest 1/8台阶、窄缝、斜向命中墙面和伤害半径边缘的目标；转向与移动施法者时检查接触特效是否居中。
+
+检查窄窗与宽窗下的绑定布局、悬停和按压反馈、筛选、重复点击、天赋变化、受限池、满槽、同阶限制、解绑及Wizards卷轴，以及编织过的书卷的绑定、重新铭刻与解绑。检查法术注册表 JSON 与网络编解码往返、绑定台池解析及物品堆容器持久化。在匹配依赖版本下检查客户端预测、星界能量提示、快捷栏及弹射物显示。这些是验证步骤，不代表已经完成游戏内测试。
 
 ## 相关页面
 
-[法术数据](/zh-cn/wiki/spell-data/)说明数据包格式与加载限制。[属性与效果](/zh-cn/wiki/attributes-and-effects/)说明战斗属性。
+[法术数据](/zh-cn/wiki/spell-data/)说明数据包格式与加载限制。[属性与效果](/zh-cn/wiki/attributes-and-effects/)说明战斗属性。[术式运行机制](/zh-cn/dev/spell-formula-runtime/)说明术式存储、评级、守卫与串联施法。

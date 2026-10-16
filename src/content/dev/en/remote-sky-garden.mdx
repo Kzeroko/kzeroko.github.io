@@ -1,0 +1,76 @@
+---
+title: "Remote Sky Garden runtime"
+description: "Once-per-world preparation, extended build height, authored arrival planes and the permanent travel destination."
+category: systems
+order: 96
+updated: 2026-10-14
+---
+
+Remote Sky Garden is prepared in the Overworld before player entry. Its startup service is an internal implementation, not a public API. Gameplay and administrator options are covered by [world spawn](/en/wiki/world-spawn/) and [world spawn configuration](/en/wiki/world-spawn-configuration/).
+
+## What it does
+
+The existing semi-random ground search selects a region. A separate offshore survey then chooses the hub's origin, inspecting generated columns beneath its complete footprint and raising the whole structure above obstructions. Failure to find a fitting site stops loading with a diagnostic. It does not carve terrain or disable lighting. Offshore placement limits direct overhead land shadow; angled shader shadows are renderer-dependent.
+
+`OverworldHeight` extends the Overworld dimension types during terrain registry bootstrap. It preserves the preset's greater height, minimum Y and other dimension properties. It changes empty build space, not noise height or sea level. Existing KTM2 terrain already provides a tall dimension; the separate setting makes the minimum ceiling explicit.
+
+## Runtime model
+
+`SkyGardenStartupMixin` runs at the start of `MinecraftServer.prepareStartRegion`. The server loads the descriptor, validates every native piece, saves the origin and resource digest, then writes terrain, architecture and the arrival marker in that order. Explicit air clears prior layers; omitted cells preserve them. Piece decoding is bounded. World writes retain ordinary lighting semantics. A final pass resolves neighbour shapes and schedules fluids after all layers exist.
+
+The marker is consumed only after placement. Chunks are flushed before the persistent state becomes ready. Reopening a ready world uses its recorded hub; it does not paste it again. An interrupted first preparation replays the same reservation before players enter. A changed resource digest or insufficient dimension height fails rather than migrating prototype data. Preparation is synchronous during loading; first-start duration still needs measurement in the full pack.
+
+`isekaiexpansion_sky_garden` stores origin, digest, bounds, arrival and readiness. `isekaiexpansion_world_spawn` stores the active marker plane. Both use version `1`. The hub contributes its exact three-dimensional bounds to protected zones, decoration guards and unmanaged-spawn guards; the ocean below stays outside those bounds. Returning players keep their saved position, and personal respawn points keep precedence.
+
+The travel ledger uses version `1` with a tagged destination: `none`, `sky_garden`, `anchor` or `companion`. Empty new ledgers default to the hub. Availability and coordinates sync to the owner; destination selection and landing remain server-authoritative. The hub uses no anchor slot and cannot be forgotten. With no prepared hub, the first attuned anchor becomes the destination. Old prototype ledger layouts are rejected.
+
+## Contracts
+
+### Ordered bundle descriptor
+
+The resource is `data/isekaiexpansion/spawn/remote_sky_garden.json`. Resource-pack priority selects one complete descriptor; layers are not merged between packs. The shipped layers are `remote_sky_garden` / `terrain-v4-fit1`, `remote_sky_garden_architecture` / `architecture-v10`, and `remote_sky_garden_arrival` / `spawn-v1`, all in the `isekaiexpansion` namespace. They contain `254` native pieces and `6002797` listed cells, including clearing air and the marker.
+
+| Field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `schema` | integer | Required | Exactly `1`. |
+| `layers` | array of objects | Required | `1–8` ordered native bundle references. |
+| `layers[].id` | identifier string | Required | Existing bundled manifest ID. |
+| `layers[].revision` | string | Required | Existing immutable bundle revision. |
+| `spawnMarker` | integer array | Required | Exactly `3` coordinates in the common local frame, inside the combined bounds. |
+
+Unknown descriptor or layer keys, fractional coordinates, missing resources, bad hashes, unknown states and invalid piece data fail preparation. Exactly one world-spawn marker must exist at the declared position. Native bundle schema and limits are documented in [Atelier structures](/en/dev/atelier-structures/).
+
+### World spawn marker
+
+`isekaiexpansion:world_spawn_point` is an operator authoring block. Feet are one block above its position. The shipped marker replaces the pinned gold cell at local `(0, -1, 183)`, producing feet Y `0` before the world-origin offset.
+
+| Field | Type | Default | Contract |
+| --- | --- | --- | --- |
+| `Radius` | NBT int | `10` | Horizontal circular radius, `0–64` blocks. |
+| `Yaw` | NBT float | `180` | Finite degrees; the configure command accepts `-180–180`. Rotation and mirroring transform it. |
+| `FinalState` | NBT compound | Gold block | Native block state, restored after consuming the marker. Must be dry, non-air and have no block entity. |
+| `FinalState.Name` | NBT string | Required when supplying FinalState | Registered block ID. |
+| `FinalState.Properties` | NBT compound of strings | Omitted | Exact valid state properties; see native state validation. |
+
+Missing marker fields use defaults; present fields with wrong types fail. Applying also requires a full safe floor at the centre and clear body space. Unsafe application restores the marker and leaves world spawn unchanged. Runtime arrivals sample only safe cells on the saved plane, favour empty cells, and fail if the plane has no safe stand. They do not use the heightmap, ground-arrival settings or the `spawnRadius` game rule.
+
+The developer block has no automatic ticker. Hub preparation and manual Atelier postprocessing consume it; a plain template placement must explicitly apply it. Placement journals now use schema `3`, with spawn before/after snapshots. Undo restores the prior spawn only if the current spawn still matches this job's result, preserving later administrator changes. Bundle, draft and natural-landmark schemas remain `2`; no old journal reader is retained.
+
+## Extending it
+
+A creative operator obtains a marker with `/ise dev world_spawn block`, sets its plane with `/ise dev world_spawn configure <pos> <radius> <yaw>`, and consumes it with `/ise dev world_spawn apply <pos>`. Commands require permission level `2`. Author `FinalState` through typed block-entity NBT when gold is not the desired restored floor. Keep the marker under walkable floor rather than on a roof.
+
+Studio uses distinct physical icons for developer blocks. The garden viewer's marker and radius overlay read the deployment metadata generated by the companion export tool; they are authoring aids, not extra shipped geometry. Refresh the live block catalogue after installing a build that registers the new block.
+
+## Verifying
+
+Run `gradlew.bat compileJava`, the `SpawnAnchorTest` and `TravelHubTest` tests, and `gradlew.bat -I tools/atelier/verify.gradle checkSkyGarden`. The native check verifies all piece hashes, bounds and counts, typed marker rotation, and the `317` supported clear terrace cells. It does not instantiate Conquest's runtime collision shapes.
+
+Use a fresh prototype world for acceptance: verify preparation completes before entry, the first arrival faces the sanctuary, simultaneous arrivals spread safely, personal respawn and reconnect positions survive, the hub appears in the ledger, and reopening creates no second island. Measure startup time and inspect normal lighting and the selected shader. Live Conquest placement, fluid behaviour and shader appearance require this in-game pass.
+
+## Related
+
+- [World spawn](/en/wiki/world-spawn/)
+- [World spawn configuration](/en/wiki/world-spawn-configuration/)
+- [Atelier structures](/en/dev/atelier-structures/)
+- [Teleport Stones](/en/wiki/teleport-stones/)

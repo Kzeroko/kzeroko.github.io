@@ -3,7 +3,7 @@ title: "NPC foundations"
 description: "Entity roles, portable state, inventory layout and the lifecycle shared by citizens and named companions."
 category: systems
 order: 60
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
 NPC behaviour is built on `entity.BaseNpcEntity`, with role-specific subclasses and managers under `internal.ai`. These are project implementation and extension types, not a public NPC facade. Use the dedicated public facades for city and revival integration.
@@ -25,7 +25,11 @@ The constructors disable loot pickup, mark NPCs persistent and install custom na
 
 ### Brain and tick ownership
 
-The base brain owns CORE, IDLE and REST task lists. Core tasks include water survival, doors, looking, waking, follower commands, dialogue, staying and following; idle tasks choose local wandering/look/wait work. The base rest list is empty. Simple roles add civilian fleeing; combat roles add ranged escape. Unique roles add POI activity and sleep/home-return work, with IDLE at 0, REST at 16000 and IDLE again at 23000 daytime ticks.
+The base brain owns CORE, IDLE and REST task lists. Core tasks include water survival, doors, looking, waking, follower commands, dialogue, staying and following; idle tasks choose local wandering/look/wait work. The base rest list is empty. Simple roles add civilian fleeing; combat roles use controller-owned ranged action roles, finite defensive windows and bounded ground footwork. Unique roles add POI activity and sleep/home-return work, with IDLE at 0, REST at 16000 and IDLE again at 23000 daytime ticks.
+
+Internal `NpcRestTask` owns both home and bed travel through transient `NPC_REST_TRAVEL` memory. STAY and wandering yield navigation while it is present; the command anchor remains unchanged, and an NPC waiting for a bed holds at home. POI work ends when IDLE ends. Unreachable paths release ownership, and movement stalled for 200 ticks (10 seconds) retries after 80 ticks (4 seconds).
+
+`NpcRestPolicy` requires night-time REST and rejects FOLLOW, combat intent, dialogue, emotes, item use, active POI use, flight, riding, follower commands, water and lava. An NPC in a protected zone or structure space cannot seek rest; home destinations and both halves of candidate beds also reject these areas, regardless of player ownership or permissions. Bed discovery, travel and waking share this policy, so changed conditions interrupt travel or wake a sleeper.
 
 Server `mobTick` reconciles invalid follower ownership, updates dodge/idle state, emotes and role state, then item use. Unless a goal effect suspends brain control, it ticks the brain and follower commands. POI cooldowns still tick; suspended combat is interrupted. Riding compatibility runs only outside that suspension. Therefore brain suspension is not a blanket pause of every NPC manager.
 
@@ -72,7 +76,7 @@ These are common custom fields, in addition to vanilla entity/equipment state. C
 | `NpcBehavior.FollowOwner` | `UUID` | `absent` | Saved only for FOLLOW with owner and positive session. |
 | `NpcBehavior.FollowSession` | `long` | `absent` | Must match the owner's live server session; owner alone is insufficient. |
 | `NpcOutfit` | `string` | preset default | Resolved outfit ID; applied after restoring the base character. |
-| `HumanoidProfile` | `compound` | generated/preset | Saved and restored only for non-authored NPC presets; authored profiles come from data. |
+| `HumanoidProfile` | `compound` | generated/preset | Saved and restored only for NPCs whose preset declares no character; an authored character comes from the NPC class. |
 | `StayAnchor` | `compound` | absent | Optional dimension and block position for staying or radius wandering. |
 | `HomeAnchor` | `compound` | absent | Optional home location, independent of stay anchor. |
 | `StayAnchor.Dim` | `string` | required | World ID; invalid identifier is not caught by this reader. |
@@ -100,7 +104,7 @@ These are common custom fields, in addition to vanilla entity/equipment state. C
 
 Inventory loading clears current storage, restores each nonempty stack at its explicit numeric Slot (or list index when absent), and tries `addStack` when that destination is invalid. A repeated valid slot overwrites the earlier entry. Repacking ignores the returned remainder, so overflowing legacy data can lose items; it is not a lossless migration guarantee. New writes include Slot for every nonempty stack, preserving quick-use positions in sparse lists.
 
-The shared humanoid profile is tracked for clients, with a revision increment when the tracker changes. Citizens no longer use a separate appearance-key-only tracker. Authored NPCs resolve their character from the current preset; generated characters persist their base profile. The equipped outfit overlays that base without replacing it.
+The shared humanoid profile is tracked for clients, with a revision increment when the tracker changes. Citizens no longer use a separate appearance-key-only tracker. Authored NPCs resolve their character from the preset their class declares; generated characters persist their base profile. The equipped outfit overlays that base without replacing it.
 
 ### Follower sessions and death
 
@@ -146,11 +150,12 @@ Order is create → position → initialise → configure callbacks → home →
 ## Verifying
 
 - Spawn simple, combat, unique and citizen roles. Confirm civilian flee versus combat behaviour, unique rest scheduling, and that missing content does not accidentally activate item use or emotes.
+- At night, test STAY and both wandering modes with a bed away from the command anchor. Interrupt travel with FOLLOW, dialogue and combat, then check occupied or removed beds and protected-zone or structure-space boundaries across either bed half. Confirm waking restores the existing command behaviour.
 - Save sparse quick-use inventory, all 22 physical slots and both hands. Test legacy missing Slot, out-of-range slots, duplicate slots and overflow in a disposable save.
 - Open customisation on a dedicated server for a citizen, adventurer and unique NPC. Compare the world appearance, switch outfits repeatedly and return to the default. Check both inventory tabs, one player inventory, hand preview updates and cursor continuity. Open as spouse, allegiance owner and other player; test click, number-key swap and shift-click, then close/remove the NPC or leave range. Verify handler indices differ from physical quick-use/special indices.
 - Start FOLLOW, fill the 4-member squad, unload/reload a follower, disconnect/rejoin and release a stored contract as owner/other player. Check return mode and that stale sessions never silently become new ownership.
 - Die with inventory while a grave can be recorded, then test a duplicate stable identity. Verify inventory is not both dropped and restored; examine the revival system's result before claiming recovery.
-- Reload an authored preset and a generated citizen. Confirm authored changes take effect, generated identity survives, and outfits remain overlays. Test malformed anchors separately from tolerant city-binding reads.
+- Reload data packs with an authored NPC and a generated citizen loaded. Confirm the authored character is revalidated against the catalogue, generated identity survives, and outfits remain overlays. Test malformed anchors separately from tolerant city-binding reads.
 
 ## Related
 

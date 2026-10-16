@@ -3,7 +3,7 @@ title: "对话对象与界面"
 description: "Blabber 阻塞对象、单次回复、常驻视觉内容与 ModernUI 展示桥接。"
 category: client
 order: 135
-updated: 2026-09-30
+updated: 2026-10-07
 ---
 
 对话对象让服务端交互暂时用目录、提示或仅保留字幕的等待状态替代普通选项。常驻贡献器通过独立绘制列表添加不阻塞对话的视觉内容，在 Minecraft 客户端线程捕获游戏状态，再由 ModernUI 的 UI 线程绘制。
@@ -12,7 +12,7 @@ updated: 2026-09-30
 
 服务端 API 属于 Blabber：`io.github.ladysnake.blabber.api.DialogueAPI`、`DialogueScreenObject` 与 `DialogueObjectResult`。客户端约定位于 `io.github.ladysnake.blabber.api.client`：`DialogueClientAPI`、`DialoguePresentation`、`PersistDialogueScreenObject`、`DialogueScreenContext` 与 `DialogueDrawList`。
 
-本仓库使用 Blabber `0.5.1-build36` 和 Isekai Core `0.4.0-build61`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
+本仓库使用 Blabber `0.5.1-build36` 和 Isekai Core `0.4.0-build65`。下述依赖约定根据本地 Blabber 源码检核，没有与已编译 jar 做二进制一致性比较。客户端与服务端应使用匹配构建，因为数据包包含交互版本与对象 token。
 
 异界扩展在客户端初始化时安装 `IsekaiDialoguePresentation`，并将 `NpcFavorDialogueHud` 注册为 `isekaiexpansion:npc_status`。依赖负责对象状态、选择与输入，宿主提供目录容器、标签及提示控件。
 
@@ -113,6 +113,12 @@ static void registerDialogueLabel() {
 
 `TRADE`还提供全部交易、买、卖。方向读取`Exchange.resultMoney`：正的收款额归为卖，其余归为买；与类别、文字和价格条件共同生效，从报价返回时保留选择。`DialogueScreenContext.reserveTop(height, gap)`从y=22开始分配行，后续行从前一行底部加gap开始。`contentTop()`给出目录起点，至少28，并留5单位间距。NPC与商人信息栏共用该预留空间；交易底边距屏幕底部保持12单位。对象更新包在下一帧捕获前刷新会话元数据。
 
+
+### 钱囊叠层
+
+`PurseHud` 是内部客户端展示组件，在 Minecraft 渲染线程调用 Isekai Core 的 `NumismaticClientCompat.getWallet(player)`，仅在余额变化时更新各币种的数字字符串。缺少货币支持时隐藏钱囊，真实的零余额仍会显示；背包里的散装钱币不计入这里。
+
+探索与对话共用原有钱囊绘制方式：GUI锚点为 `(81, 15)`，缩放为 `0.45`，使用迁入的 `isekaiexpansion:textures/gui/money.png` 底图和三行竖排钱币。底图仍在 `(-13, -24)` 绘制为 `64 × 64`；钱币行仍位于 `3`、`14`、`25`，保留原有颜色、字体及文字阴影。`IsekaiDialoguePresentation` 在提示层下方放置全屏、不接收交互的 `DialogueSurfaceAPI` 视图，让对话沿用同一套 Minecraft 坐标和绘制代码。探索时的钱囊受 `HudAPI` 淡入淡出控制。IsekaiTweaks 已移除原有钱囊HUD混入及其注册。
 
 ### 客户端注册与展示
 

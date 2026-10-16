@@ -3,10 +3,10 @@ title: "Dialogue camera and terrain fading"
 description: "Session-owned shoulder framing, actor facing, movement claims and nearby-terrain shader coverage."
 category: client
 order: 75
-updated: 2026-09-30
+updated: 2026-10-10
 ---
 
-Dialogue camera follows a player and speaker with a shoulder shot, searching up to 32 candidate positions when it reevaluates the view. Session and entity identity checks keep the camera tied to the current conversation, while a separate terrain shader patch fades geometry close to any scripted camera.
+Dialogue camera follows a player and speaker with a shoulder shot, searching up to 32 candidate positions when it reevaluates the view. Session and entity identity checks keep the camera tied to the current conversation, while a separate terrain shader patch fades geometry close to scripted cameras, except casting warmup.
 
 ## What it does
 
@@ -92,7 +92,7 @@ Facing requires distinct, living, present actors in the same world; the actor mu
 
 ### Nearby terrain fading
 
-`CameraMixin` advances `CameraBlockFade` whenever the camera is updated, using whether the controller returned a scripted pose. This includes dialogue, camera-API and full cinematic poses, even when blend weight is still zero. A pending request with no pose does not itself enable fading.
+The camera director advances `CameraBlockFade` once per frame, before the world renders, using whether any camera source directed that frame with a weight above zero. That covers dialogue, camera-API and full cinematic poses as well as editor viewports, scene previews and shot reels; a scripted pose whose blend weight is still zero does not enable fading, and neither does a pending request with no pose. Casting warmup (`WARMUP`) never enables this terrain fade.
 
 | Envelope value | Behaviour |
 | --- | --- |

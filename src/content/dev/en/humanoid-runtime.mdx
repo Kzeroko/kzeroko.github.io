@@ -3,7 +3,7 @@ title: "Humanoid saves, editor and paint runtime"
 description: "Creation scopes, profile persistence, compact packets, paint storage and diagnostic commands."
 category: systems
 order: 101
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
 Character creation, saved appearances and painting share server-authoritative appearance state. This reference covers their internal persistence, editor permissions and network contracts.
@@ -22,6 +22,15 @@ Creation normally advances `BASE → TRAIT → COMPLETE`. The base step commits 
 
 Opening an editor replaces the player's grant with a fixed 15-minute expiry measured by the monotonic clock. Submission neither renews nor consumes it. Disconnect closes it. A grant permits its own scope; only `CREATION` permits every scope. Invalid scope ordinals decode as `WARDROBE`.
 
+Every grant also carries a `HumanoidAccess`. Every path grants `PLAYER` except `/ise humanoid design`, which grants `DESIGNER`. Designer access is held per player in memory beyond the edit grant: it lasts until disconnect or until a `PLAYER` grant replaces it, and that replacement revalidates the stored profile before the editor opens. `sanitizeForPlayer` applies the held access to every validation, including login, data-pack reload, resync, saved-slot saves and submissions.
+
+| Access | Editor lists | Server keeps |
+| --- | --- | --- |
+| `PLAYER` | Player-facing parts; gated ones greyed with their rule. | Player-facing parts whose rule passes. |
+| `DESIGNER` | Every part; NPC-reserved cards carry an NPC badge and the footer hint is prefixed with Designer. | Every part, subject to the catalogue's compatibility rules. |
+
+The client never chooses its access. The open packet carries it to shape the screen, and the server applies its own record to whatever is submitted.
+
 | Scope | Server merge | Editor chapters |
 | --- | --- | --- |
 | `CREATION` | Entire submitted profile, then sanitisation. | `PRESET BODY FACE HAIR TRAIT OUTFIT UNDERWEAR ACCESSORY PAINT IDENTITY` |
@@ -33,7 +42,7 @@ Opening an editor replaces the player's grant with a fixed 15-minute expiry meas
 
 Within the slot kinds a scope owns, the merged references are replaced outright, so a slot that is empty in the source profile becomes empty. Slots of other kinds are never read from the submission. The cleared reference `isekaiexpansion:cleared`, which outfit overlays use to empty a slot, is not a catalogue part, so a submission carrying it is treated like any unknown reference. Sanitisation then refills origin traits and makes every [part chain](/en/dev/humanoid-parts/) whole or absent. Chapter visibility does not alter these server merge rules: wardrobe colour edits, for example, do not copy the palette.
 
-**Current access limitation:** `RequestHumanoidScreenPacket` routes a `CREATION` request through the owed-creation flow, but directly grants other requested scopes without a permission or stage check. Scopes constrain a submitted merge; they are not an access-control boundary for privileged editing. An invalid or expired submit only revalidates the existing profile; an unchanged profile need not produce a corrective sync.
+**Current access limitation:** `RequestHumanoidScreenPacket` routes a `CREATION` request through the owed-creation flow, but directly grants other requested scopes under `PLAYER` access without a permission or stage check; such a grant also ends designer access. Scopes constrain a submitted merge; they are not an access-control boundary for privileged editing. An invalid or expired submit only revalidates the existing profile; an unchanged profile need not produce a corrective sync.
 
 The service resolves the actual origin, sanitises catalogue compatibility, removes unavailable parts and unknown paint references, and fills first-creation defaults. An empty catalogue preserves part references. Catalogue fallback may refill a mandatory slot after unavailable parts were removed; do not interpret the intermediate removal pass as a guarantee that every fallback meets an unlock condition. Direct internal assignment bypasses this pipeline.
 
@@ -47,7 +56,7 @@ The ModernUI editor does not pause the world. First-time creation blocks normal 
 
 The name browser selects translated full-name IDs and checks new choices against the server catalogue on submission. It creates at most 8 result controls. Compact reset controls restore numeric defaults, compatible parts, active colour channels or the blank account-name default, with undo/redo support. See [Naming API](/en/dev/naming/) for selection and persistence contracts.
 
-Preset gallery cards do not enforce preset unlock metadata. Part cards use gender lock/origin, assets, requirements and unlock checks, list parts styled for the character's gender or unisex first and preview a chained part with its whole chain; the client-side advancement check cannot establish a server advancement award. Server validation remains authoritative.
+Preset gallery cards do not enforce preset unlock metadata. Part cards list only parts the session's access offers and use gender lock/origin, assets, requirements and, under `PLAYER` access, unlock checks; list parts styled for the character's gender or unisex first and preview a chained part with its whole chain; the client-side advancement check cannot establish a server advancement award. Server validation remains authoritative.
 
 ## Contracts
 
@@ -126,7 +135,7 @@ The composed texture cache targets 384 entries with access-order eviction. Its k
 
 Paint revision invalidates painted entries; resource reload clears the cache. A stale job must still match its entry before upload, otherwise its image is closed. Keep resource ownership and render-thread upload intact when changing composition.
 
-NPCs finish their controller-driven pose through `HumanoidBoneShaper.finishAnimatedPose`. It applies identity proportions even during death and item use, then clears transformation-change flags without resetting the rendered transforms. This keeps the next controller tick from accumulating custom offsets or scale while preserving the completed pose for repeated render passes.
+NPCs finish their controller-driven pose through `HumanoidBoneShaper.finishAnimatedPose`. It applies identity proportions even during death and item use, then clears transformation-change flags without resetting the rendered transforms. This keeps the next controller tick from accumulating custom offsets or scale while preserving the completed pose for repeated render passes. The same step hides the chest bones under worn chest armour and the leg bones while a [leg replacement](/en/dev/humanoid/) rule holds for the NPC.
 
 NPC locomotion belongs to IsekaiExpansion's `NpcAnimationController` and the shared Gecko kit. Entity-specific files override individual clips, including for unique characters; see [NPC assets](/en/dev/npc-assets/). Citizens, adventurers and unique NPCs all use the common follower tasks. Better Animations' sibling integration is limited to `isekaiexpansion:simple_clone`; NPCs no longer opt into its player locomotion layer.
 
@@ -144,7 +153,7 @@ For Player Animator, skin replacement is scoped to the native player-model draw.
 
 First-person rendering receives the caller's already-posed arm and applies `animatedArm.rotate`; arm-visible part layers follow the body pose. A runtime failure disables `HumanoidFirstPersonArmRenderer` for the client process. The player feature separately disables its own instance after a render failure. Inspect the logged exception; neither flag is cleared by these classes on resource reload.
 
-`HumanoidItemAnchor` applies only to players whose humanoid body is active. It reads pivot differences from `right_arm` to `main_item` and `left_arm` to `off_item`, applies the current arm pose, scales the locator offset by arm thickness/length, then cancels that local scale before orienting the item. Locator rotation is not read. Overall height already belongs to the outer render transform.
+`HumanoidItemAnchor` applies to any entity the rig presents inside a vanilla pass already sized by height: players, and clones, whose renderer sizes its pass the same way. It reads pivot differences from `right_arm` to `main_item` and `left_arm` to `off_item`, applies the current arm pose, scales the locator offset by arm thickness/length, then cancels that local scale before orienting the item. Locator rotation is not read. Overall height already belongs to the outer render transform.
 
 Anchors cache by body model. The shared rig is tried only when neither body anchor resolves; if one body anchor exists, the missing side does not separately inherit the rig anchor and that side returns to the normal held-item path. Moving only a locator's rotation therefore cannot repair a grip offset. The held-item feature also applies the player's active item animation transform before drawing.
 
@@ -165,15 +174,16 @@ These commands are under `/isekaiexpansion` (alias `/ise`) and require permissio
 | Command | Result |
 | --- | --- |
 | `/ise humanoid edit [target]` | Full creation editor for the executing player or selected players; not marked first-time. |
+| `/ise humanoid design [target]` | The same editor under `DESIGNER` access. |
 | `/ise humanoid appearance <target>` | Appearance-scope editor for selected players. |
 | `/ise humanoid reset <target>` | Sanitises the default profile, resets stage to `BASE`, opens first-time full creation. |
 | `/ise charactercreate [targets]` | Replays the first-join opening sequence for the executing player or selected players. Unspends the fate and retracts its effects, empties every enabled origin layer and lets automatic layers choose as a login does, resets the character to a sanitised first-time default at `BASE`, then grants `CREATION_BASE` with the origin chooser held behind it. The trait step and the fate follow in their normal order, and the first-join particle arrival replays. |
 | `/ise humanoid export player <name> [target] [--purge]` | Exports self or a humanoid entity to `config/isekaiseries/humanoid_presets/<name>.json`. |
-| `/ise humanoid export npc <name> <target>` | Exports a base NPC's base profile and wardrobe to `config/isekaiseries/npc_presets/<name>.json`. |
+| `/ise humanoid export npc <name> [target]` | Exports self, a player or an NPC as Java preset source to `config/isekaiseries/npc_presets/<name>.java`; see [NPC assets](/en/dev/npc-assets/). |
 | `/ise humanoid resync` | Resends the current catalogue and revalidates online players; does not reload files. |
-| `/ise humanoid status` | Reports part/preset/NPC-preset counts and stored paint count/size. |
+| `/ise humanoid status` | Reports part and player-preset counts and stored paint count/size. |
 
-Export names keep lowercase ASCII letters, digits and underscore, convert hyphen/space to underscore, drop other characters and stop at 48 characters. Empty results fail. Existing output files are overwritten. `--purge` removes nickname use, literal/preset name, origin and trait parts while retaining gender and age. JSON exports omit paint, round shapes to 3 decimal places and have the outfit-unlock caveat documented in [preset data](/en/wiki/humanoid-presets/). Review and copy exports into a data pack; the export directory is not an automatic catalogue input.
+Export names keep lowercase ASCII letters, digits and underscore, convert hyphen/space to underscore, drop other characters and stop at 48 characters. Empty results fail. Existing output files are overwritten. `--purge` removes nickname use, literal/preset name, origin and trait parts while retaining gender and age. Player exports are preset JSON and NPC exports are Java source; both omit paint and round shapes to 3 decimal places. Review a player export and copy it into a data pack, and paste an NPC export into its class; the export directory is not an automatic input.
 
 Verify scope merges with changed palette, gender and trait references and with emptied slots, including one member of a part chain. Exercise grant expiry and saved-slot apply separately. Test initial creation through origin choice, respawn and reconnect, plus a held screen interrupted by another UI. Observe another player to confirm live appearance sync without exposing saved slots.
 

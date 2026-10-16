@@ -1,0 +1,133 @@
+---
+title: "转移名录 API"
+description: "读取玩家已共鸣的传送点与目的地，并在服务端代码中共鸣或遗忘传送点。"
+category: api
+order: 135
+updated: 2026-10-14
+tags: []
+---
+
+`TravelLedgerAPI` 读写每个玩家的转移名录，所有转移之石都从这本名录出发：最多 16 个按玩家顺序排列的已共鸣传送点，外加石头当前设定的目的地。可以用它在任务或脚本里赠送传送点，或者读取玩家要去哪里；石头本身、引导过程和名录界面仍由模组负责。
+
+## 入口
+
+门面是 `net.kzeroko.isekaiexpansion.api.travel.TravelLedgerAPI`。公开类型都在同一个包里：记录 `TravelAnchor`、密封接口 `TravelTarget` 及其记录 `SkyGarden`、`Anchor` 和 `Companion`，以及枚举 `AttuneResult`。实现位于 `internal.travel`。
+
+门面不负责发起转移、收取代价或选择目的地，选择目的地由名录界面完成。队伍同伴根本不存进名录：界面从队伍提供者实时列出他们，只有被选中的同伴才会作为目的地记录下来。
+
+## 常见用法
+
+### 赠送一个传送点
+
+```java
+static void grantAltar(ServerPlayerEntity player, BlockPos altar) {
+    var result = TravelLedgerAPI.attune(player, player.getServerWorld(), altar);
+    if (result == AttuneResult.LEDGER_FULL) {
+        player.sendMessage(Text.literal("Your travel ledger is full"), true);
+    }
+}
+```
+
+`altar` 处的方块必须属于 `isekaiexpansion:teleportable_blocks` 标签，否则调用返回 `NOT_AN_ANCHOR` 且不做任何改动。这个方法不检查距离和权限，玩家能否与该方块共鸣由调用方决定。
+
+### 读取目的地传送点
+
+```java
+static Optional<TravelAnchor> destinationAnchor(PlayerEntity player) {
+    return TravelLedgerAPI.destination(player)
+            .filter(target -> target instanceof TravelTarget.Anchor)
+            .map(target -> ((TravelTarget.Anchor) target).id())
+            .flatMap(id -> TravelLedgerAPI.anchors(player).stream()
+                    .filter(anchor -> anchor.id() == id)
+                    .findFirst());
+}
+```
+
+目的地也可能是 `TravelTarget.Companion`，记录的是一名队伍成员的 UUID，那位玩家可能不在线。
+
+### 遗忘某个维度里的全部传送点
+
+```java
+static void forgetDimension(ServerPlayerEntity player, RegistryKey<World> dimension) {
+    var doomed = TravelLedgerAPI.anchors(player).stream()
+            .filter(anchor -> anchor.dimension().equals(dimension))
+            .map(TravelAnchor::id)
+            .toList();
+    doomed.forEach(id -> TravelLedgerAPI.forget(player, id));
+}
+```
+
+`anchors(player)` 返回的是实时只读视图，所以要先收集好 ID，再逐个遗忘。
+
+## 方法一览
+
+### 门面
+
+| 签名 | 端 | 返回值／效果 |
+| --- | --- | --- |
+| `capacity()` | 双端 | `16`，一本名录最多容纳的传送点数。 |
+| `anchors(PlayerEntity)` | 双端 | 按玩家顺序排列的实时不可修改列表。 |
+| `destination(PlayerEntity)` | 双端 | 石头的目的地，没有则为空。 |
+| `attune(ServerPlayerEntity, ServerWorld, BlockPos)` | 服务端 | 把传送点追加到末尾并同步；结果见下表。 |
+| `forget(ServerPlayerEntity, int)` | 服务端 | 移除该 ID 的传送点并同步；名录里没有时返回 `false`。 |
+
+### 记录与结果
+
+| 类型 | 约定 |
+| --- | --- |
+| `TravelAnchor(id, dimension, pos, block, label)` | `id` 在名录内唯一，移除后不会复用。`pos` 以不可变形式保存。`block` 是共鸣时该位置的方块。`label` 是玩家起的名字，最长 32 个字符，或为 null。 |
+| `TravelAnchor.displayName()` | 有名字时返回字面文本，否则返回方块名称。 |
+| `TravelTarget.SkyGarden()` | 常驻庭院，不占共鸣名额。新名录默认选择此目标。 |
+| `TravelTarget.Anchor(id)` | 按 ID 指向名录里的传送点。 |
+| `TravelTarget.Companion(player)` | 按 UUID 指向队伍成员，不能为 null。 |
+
+| `AttuneResult` | 含义 |
+| --- | --- |
+| `ATTUNED` | 已记入。若此前没有目的地，或默认庭院不可用，它同时成为目的地。 |
+| `ALREADY_ATTUNED` | 名录里已有同一维度、同一位置的传送点。 |
+| `LEDGER_FULL` | 名录已有 16 个传送点。 |
+| `NOT_AN_ANCHOR` | 该方块不属于 `isekaiexpansion:teleportable_blocks`。 |
+
+遗忘作为目的地的传送点会清空目的地，之后直接使用石头会打开名录。
+
+### 存储
+
+名录是玩家组件 `isekaiexpansion:travel_ledger`，随玩家一起保存，重生时复制，只镜像给名录主人；每次改动后发送一次二进制同步包。
+
+| 键 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `NextId` | `integer` | `0` | 下一个传送点 ID。读取时会抬到已存最大 ID 之上。 |
+| `Anchors` | `array<object>` | `[]` | 按玩家顺序排列的传送点。读取时第 16 个之后的条目会被丢弃。 |
+| `Anchors[].Id` | `integer` | `0` | 传送点 ID。 |
+| `Anchors[].Dimension` | `string` | 必填 | 维度标识符；缺失或无法解析时丢弃该条目。 |
+| `Anchors[].Pos` | `long` | `0` | 打包的方块坐标。 |
+| `Anchors[].Block` | `string` | 必填 | 方块标识符；未注册的方块会丢弃该条目。 |
+| `Anchors[].Label` | `string` | 不存在 | 玩家起的名字，读取时截断到 32 个字符。 |
+| `Version` | `integer` | 必填 | 必须为`1`；非空旧原型名录会失败。全新空数据保留默认庭院目标。 |
+| `Destination` | `compound` | 必填 | 带类型的目的地记录。 |
+| `Destination.Type` | `string` | 必填 | `none`、`sky_garden`、`anchor`或`companion`；其他值会失败。 |
+| `Destination.Id` | `integer` | `0` | 用于`anchor`；名录中没有该传送点时清空选择。 |
+| `Destination.Player` | `int-array` | companion时必填 | 玩家UUID；格式错误时失败。 |
+
+## 线程与生命周期
+
+`attune` 和 `forget` 要在服务端线程、针对仍然存在的玩家调用。它们没有线程检查，在其他线程调用会与保存和同步互相竞争。
+
+读取在双端都可以。服务端读到的是权威名录。客户端只镜像本地玩家自己的名录：其他玩家的名录不能当作有效镜像。首次同步前，空名录可能仍带有默认庭院目标，但尚无可用状态。镜像在登录后和每次改动后到达，所以刚进入游戏的头几个 tick 里，客户端读取仍可能为空。
+
+玩家实体存在之前，这里的方法都不能用。名录在死亡、切换维度和下线后都会保留，只有遗忘传送点才会减少。
+
+内部的 `TravelLedgerFragment` 是公开的顶层 ModernUI 片段，提供公开无参构造器。片段状态保存筛选、当前聚焦的庭院、传送点或同伴，以及提示。重建后会在 Minecraft 客户端线程重新接入控制器并捕获最新名录快照，UI线程不读取实时玩家对象。销毁视图时取消动画并释放控件引用。
+
+客户端验收应包含：未设置目的地时使用石头打开名录，设置传送点后重新打开，切换筛选并调整窗口尺寸。确认片段重建后仍接收实时同步，并在目标仍存在时保留聚焦目标。
+
+## 常见陷阱
+
+- **一直持有列表**。`anchors(player)` 是名录的实时视图，之后的改动会改变你手里的内容。要长期保存就先复制一份。
+- **默认传送点还在**。名录只记录共鸣时的位置。转移时会重新检查方块，方块不在了就移除该传送点；这个 API 不做检查。
+
+## 相关页面
+
+[转移之石](/zh-cn/wiki/teleport-stones/)从玩家角度介绍石头、代价与名录界面。
+
+庭院准备与抵达平面见[遥空庭院运行机制](/zh-cn/dev/remote-sky-garden/)。

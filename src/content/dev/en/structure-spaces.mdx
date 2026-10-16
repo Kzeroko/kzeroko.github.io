@@ -3,7 +3,7 @@ title: "Structure-space Runtime"
 description: "Property identity, acquisition, access checks, furniture surveys, persistence and client snapshots."
 category: systems
 order: 82
-updated: 2026-09-27
+updated: 2026-10-08
 ---
 
 `net.kzeroko.isekaiexpansion.api.structurespace.StructureSpaceAPI` is the public facade for server-owned homes. It delegates to `internal.structurespace.StructureSpaceService`; storage is package-private, while `SpaceShape`, `SpaceEntry` and `HomePermission` are internal types exposed by the facade's current signatures.
@@ -80,7 +80,7 @@ All methods with a world/player argument operate on live server state. `rentCost
 | `getSpacesForPlayerStructure(player)` | Same query at the player's current position. |
 | `allows(world, player, pos, permission)` | Requested permission; true outside homes. |
 | `canPlayerUseInSpace(world, player, pos)` | USE; true outside homes. |
-| `canPlayerModifyInSpace(world, player, pos)` | BREAK exception for protected structures; false outside homes. |
+| `canPlayerModifyInSpace(world, player, pos)` | BREAK; false outside homes. |
 | `canPlayerBedSetSpawn(player, bedPos)` | SLEEP exception; false outside homes. |
 | `hasSpaceAccess(world, player, pos)` | Resident membership only; guests do not qualify; false outside homes. |
 | `tryRent(world, key, uuid, durationTicks)`, `tryBuy(world, key, uuid)` | Unpaid trusted acquisition; honours flags/capacity and emits acquisition events. |
@@ -174,7 +174,7 @@ Ledger snapshots traverse server worlds and take at most 256 homes before sortin
 
 Call world-state methods on the server thread after the world exists. Maps and storage are unsynchronised; the facade does not check or schedule thread affinity. Do not use it from generation workers: the processor explicitly queues registration. It strips anchors even when world/context/NBT is absent, and only catches errors around the later registration call.
 
-Home hooks cover server block use/break, placement, bucket placement/pickup, ignition, direct entity interaction/attack and sleeping. Creative operators level 2 bypass those home guards. Dungeon restrictions, mining fatigue and unbreakable tags can still reject an otherwise permitted action. This is not a universal claim engine for projectiles, automation or environmental changes. Integrations should call `allows` with the action-specific permission; do not substitute `hasSpaceAccess`.
+Home grants are enforced by the shared [protection layer](/en/dev/protected-zones/): block use and breaking, placement, restricted tools, bucket placement and pickup, sign edits, trampling and direct entity interaction or attack. `HomeSystem` keeps the sleeping check. Creative operators level 2 bypass these guards. Dungeon restrictions, mining fatigue and the unbreakable tag can still reject an otherwise permitted action. Environmental damage from mobs, explosions, fire, fluids, pistons and dispensers is refused only inside protected zones, so a home outside every zone has player rules only. Integrations should call `allows` with the action-specific permission; do not substitute `hasSpaceAccess`.
 
 ## Extending it
 

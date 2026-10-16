@@ -1,0 +1,133 @@
+---
+title: "Travel Ledger API"
+description: "Read a player's attuned anchors and destination, and attune or forget anchors from server code."
+category: api
+order: 135
+updated: 2026-10-14
+tags: []
+---
+
+`TravelLedgerAPI` reads and edits the per-player ledger that every teleport stone travels from: up to 16 attuned anchors in the player's order, and the destination their stones are set to. Use it to grant an anchor from a quest or script, or to read where a player is headed; the stone, its channel and the ledger screen stay with the mod.
+
+## Entry point
+
+The facade is `net.kzeroko.isekaiexpansion.api.travel.TravelLedgerAPI`. Its public types are in the same package: the `TravelAnchor` record, the sealed `TravelTarget` interface with its `SkyGarden`, `Anchor` and `Companion` records, and the `AttuneResult` enum. The implementation lives under `internal.travel`.
+
+The facade does not start crossings, collect tolls or select destinations; selection belongs to the ledger screen. Party companions are not stored in the ledger at all: the screen lists them live from the team provider, and only a selected companion is recorded, as the destination.
+
+## Common tasks
+
+### Grant an anchor
+
+```java
+static void grantAltar(ServerPlayerEntity player, BlockPos altar) {
+    var result = TravelLedgerAPI.attune(player, player.getServerWorld(), altar);
+    if (result == AttuneResult.LEDGER_FULL) {
+        player.sendMessage(Text.literal("Your travel ledger is full"), true);
+    }
+}
+```
+
+The block at `altar` must be in the `isekaiexpansion:teleportable_blocks` tag, otherwise the call returns `NOT_AN_ANCHOR` and changes nothing. The method does not check distance or permissions; the caller decides whether the player may attune that block.
+
+### Read the destination anchor
+
+```java
+static Optional<TravelAnchor> destinationAnchor(PlayerEntity player) {
+    return TravelLedgerAPI.destination(player)
+            .filter(target -> target instanceof TravelTarget.Anchor)
+            .map(target -> ((TravelTarget.Anchor) target).id())
+            .flatMap(id -> TravelLedgerAPI.anchors(player).stream()
+                    .filter(anchor -> anchor.id() == id)
+                    .findFirst());
+}
+```
+
+A destination can also be a `TravelTarget.Companion` naming a party member’s UUID, or `TravelTarget.SkyGarden` for the permanent hub. The companion may be offline; the hub must be prepared before crossing.
+
+### Forget every anchor in one dimension
+
+```java
+static void forgetDimension(ServerPlayerEntity player, RegistryKey<World> dimension) {
+    var doomed = TravelLedgerAPI.anchors(player).stream()
+            .filter(anchor -> anchor.dimension().equals(dimension))
+            .map(TravelAnchor::id)
+            .toList();
+    doomed.forEach(id -> TravelLedgerAPI.forget(player, id));
+}
+```
+
+`anchors(player)` is a live read-only view, so collect the IDs before forgetting any of them.
+
+## Reference
+
+### Facade
+
+| Signature | Side | Return / effect |
+| --- | --- | --- |
+| `capacity()` | both | `16`, the most anchors one ledger holds. |
+| `anchors(PlayerEntity)` | both | Live unmodifiable list in the player's order. |
+| `destination(PlayerEntity)` | both | The stones' destination, or empty. |
+| `attune(ServerPlayerEntity, ServerWorld, BlockPos)` | server | Adds the anchor at the end and syncs; see the result table. |
+| `forget(ServerPlayerEntity, int)` | server | Removes the anchor with that ID and syncs; `false` when the ledger has none. |
+
+### Records and results
+
+| Type | Contract |
+| --- | --- |
+| `TravelAnchor(id, dimension, pos, block, label)` | `id` is unique within the ledger and never reused after removal. `pos` is stored immutable. `block` is the anchor's block at attunement time. `label` is the player's name, at most 32 characters, or null. |
+| `TravelAnchor.displayName()` | The label as literal text, otherwise the block's name. |
+| `TravelTarget.SkyGarden()` | Permanent hub, no attunement slot. New ledgers default to this target. |
+| `TravelTarget.Anchor(id)` | A ledger anchor by ID. |
+| `TravelTarget.Companion(player)` | A party member by UUID; nonnull. |
+
+| `AttuneResult` | Meaning |
+| --- | --- |
+| `ATTUNED` | Added. It also becomes the destination when none was set or the default hub is unavailable. |
+| `ALREADY_ATTUNED` | The ledger already holds an anchor at that dimension and position. |
+| `LEDGER_FULL` | The ledger holds 16 anchors. |
+| `NOT_AN_ANCHOR` | The block is not in `isekaiexpansion:teleportable_blocks`. |
+
+Forgetting the destination anchor clears the destination, so the next plain use of a stone opens the ledger.
+
+### Storage
+
+The ledger is the player component `isekaiexpansion:travel_ledger`. It is saved with the player, copied on respawn and mirrored only to its owner, as a binary packet sent after each change.
+
+| Key | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `NextId` | `integer` | `0` | Next anchor ID. Reading raises it above the largest stored ID. |
+| `Anchors` | `array<object>` | `[]` | Anchors in the player's order. Entries past the 16th are dropped when read. |
+| `Anchors[].Id` | `integer` | `0` | Anchor ID. |
+| `Anchors[].Dimension` | `string` | required | Dimension identifier; a missing or unparseable one drops the entry. |
+| `Anchors[].Pos` | `long` | `0` | Packed block position. |
+| `Anchors[].Block` | `string` | required | Block identifier; an unregistered block drops the entry. |
+| `Anchors[].Label` | `string` | absent | Player's name for the anchor, trimmed to 32 characters on read. |
+| `Version` | `integer` | required | Exactly `1`; older nonempty prototype ledgers fail. Empty new data retains the default hub. |
+| `Destination` | `compound` | required | Tagged destination record. |
+| `Destination.Type` | `string` | required | `none`, `sky_garden`, `anchor` or `companion`; other values fail. |
+| `Destination.Id` | `integer` | `0` | For `anchor`; a missing ledger anchor clears selection. |
+| `Destination.Player` | `int-array` | required for companion | Player UUID; malformed data fails. |
+
+## Threading and lifecycle
+
+Call `attune` and `forget` on the server thread with a live player. They have no thread guard; an off-thread call races the save and the sync.
+
+Reads work on both sides. On the server they read the authoritative ledger. On the client only the local player's own ledger is mirrored: another player’s ledger is not a usable mirror. Before initial sync, an empty local ledger may still carry the default hub target without availability. The mirror arrives after login and after every change, so a client read during the first ticks after joining can still be empty.
+
+Nothing here works before the player entity exists. A ledger survives death, dimension changes and logging out; it is lost only by forgetting its anchors.
+
+The internal `TravelLedgerFragment` is a public top-level ModernUI fragment with a public no-argument constructor. Fragment state retains the filter, focused hub, anchor or companion and notice. Recreation attaches to the controller on the Minecraft client thread and captures a fresh ledger snapshot; the UI thread never reads the live player. Destroying the view cancels its motion and releases its controls.
+
+To verify the client, open a stone with no destination, reopen with a selected anchor, change filters and resize the window. Check that a recreated fragment accepts live sync and preserves its focused target when that target still exists.
+
+## Pitfalls
+
+- **Holding the list.** `anchors(player)` is a live view of the ledger; a later edit changes what you are holding. Copy it if you keep it.
+- **Assuming an anchor still stands.** The ledger records where an anchor was attuned. The crossing re-checks the block and strikes an anchor whose block is gone; the API does not.
+
+## Related
+
+[Teleport Stones](/en/wiki/teleport-stones/) describes the stones, tolls and ledger screen for players.
+
+Hub preparation and the authored arrival plane are described in [Remote Sky Garden runtime](/en/dev/remote-sky-garden/).

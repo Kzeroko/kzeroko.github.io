@@ -1,0 +1,101 @@
+---
+title: "鞣制配方数据"
+description: "鞣制缸接受哪些皮料、几张做一件、品级上限、难度与色调。"
+category: data
+order: 183
+updated: 2026-10-06
+---
+
+一个鞣制配方对应鞣制缸接受的一种皮料。配方不写产物：一批出什么品级的皮革由工艺决定，再受配方的 `max_grade` 和鞣匠的工具限制。
+
+## 文件放在哪里
+
+使用 `data/<namespace>/recipes/<path>.json`，类型为 `isekaiexpansion:tanning`。路径决定配方 ID；内置皮料放在 `recipes/tanning/hides/` 下，这只是惯例，不是硬性要求。优先级更高的数据包里同 ID 的配方会替换优先级较低的那个。
+
+两个配方都接受同一种物品时，鞣制缸使用配方 ID 按文本排序靠前的那个。每种皮料只写一个配方。
+
+| 配方 | 皮料 | 每件所需皮料 | 品级上限 | 难度 | 色调 |
+| --- | --- | --- | --- | --- | --- |
+| `isekaiexpansion:tanning/hides/rabbit_hide` | `minecraft:rabbit_hide` | 4 | `rare` | 1 | `fawn` |
+| `isekaiexpansion:tanning/hides/cowhide` | `minecraft:leather` | 1 | `noble` | 2 | `amber` |
+| `isekaiexpansion:tanning/hides/infernal_wing_membrane` | `isekaiexpansion:infernal_wing_membrane` | 1 | `legendary` | 4 | `russet` |
+| `isekaiexpansion:tanning/hides/wyvern_skin` | `uselessreptile:wyvern_skin` | 1 | `legendary` | 4 | `honey` |
+| `isekaiexpansion:tanning/hides/raevyx_wing_hide` | `saintsdragons:raevyx_wing_hide` | 1 | `legendary` | 5 | `amber` |
+| `isekaiexpansion:tanning/hides/ignivorus_wing_hide` | `saintsdragons:ignivorus_wing_hide` | 1 | `legendary` | 5 | `russet` |
+
+后三个只在安装了 Useless Reptile 或 Saint's Dragons 时加载。
+
+### 鞣制缸读取的标签
+
+| 标签 | 作用 |
+| --- | --- |
+| `#isekaiexpansion:tanning_agents` | 用来泡制鞣液的物品。每 4 件消耗一个；不在 `#minecraft:logs` 里的物品优先消耗。内置内容：装有农夫乐事时的 `farmersdelight:tree_bark`，以及 `#minecraft:oak_logs`、`#minecraft:spruce_logs`、`#minecraft:dark_oak_logs`、`#minecraft:mangrove_logs`。 |
+| `#isekaiexpansion:tanned_leathers` | 全部六种品级的鞣制皮革，供接受任意品级的配方使用。鞣制缸本身不读取它。 |
+
+## 最小示例
+
+```json
+{
+  "type": "isekaiexpansion:tanning",
+  "hide": { "item": "minecraft:leather" }
+}
+```
+
+保存为 `data/example/recipes/plain_hide.json` 后，这种皮料每张做一件，最高可达传说，难度 2，鞣成琥珀色。
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `type` | `identifier` | 必填 | 固定为 `isekaiexpansion:tanning`。 |
+| `hide` | `ingredient` | 必填 | 皮料：一个物品、一个标签，或二者组成的数组。匹配不到任何物品的原料会让配方被拒绝。 |
+| `hides_per_piece` | `integer` | `1` | 做一件成品需要的皮料数，`1–16`。一批最多 16 件，件数由手中的皮料数除以这个值得出。 |
+| `max_grade` | `enum(common, uncommon, rare, epic, noble, legendary)` | `legendary` | 这种皮料无论工艺多好都不会超过的品级。 |
+| `difficulty` | `integer` | `2` | 皮料难度，`1–5`。等级越高动作越快、判定窗口越窄，刮肉需要刮干净的次数也越多。 |
+| `tone` | `enum(fawn, honey, amber, russet)` | `amber` | 皮张要鞣成的颜色。它决定目标色块和进度格的颜色；无论哪种色调，判定时机都一样。 |
+| `fabric:load_conditions` | `array<object>` | absent | Fabric 资源加载条件。存在且不满足时配方不加载。内置的其他模组皮料使用 `fabric:all_mods_loaded`。 |
+
+### 难度
+
+| 等级 | 出手窗口 | 提起窗口 | 需刮干净次数 | 动作速度 |
+| --- | --- | --- | --- | --- |
+| 1 | ±2.6 刻 | ±3.2 刻 | 5 | ×0.85 |
+| 2 | ±2.2 刻 | ±2.7 刻 | 6 | ×1.00 |
+| 3 | ±1.9 刻 | ±2.3 刻 | 6 | ×1.10 |
+| 4 | ±1.65 刻 | ±2.0 刻 | 7 | ×1.20 |
+| 5 | ±1.4 刻 | ±1.7 刻 | 8 | ×1.30 |
+
+## 完整示例
+
+这种粗毛皮每件要两张，最高到史诗，比牛皮稍难一些。
+
+```json
+{
+  "type": "isekaiexpansion:tanning",
+  "hide": { "tag": "c:pelts" },
+  "hides_per_piece": 2,
+  "max_grade": "epic",
+  "difficulty": 3,
+  "tone": "honey"
+}
+```
+
+## 校验
+
+读取文件时会逐项检查，任何一项不合格都会拒绝整个配方；Minecraft 记录解析错误，其余配方照常加载。
+
+- **缺少 `hide`**：拒绝。
+- **`hide` 里有未知物品或原料为空**：拒绝。标签在匹配时才解析，所以空标签能加载，只是不接受任何物品。
+- **`hides_per_piece` 超出 `1–16`**：拒绝。
+- **`difficulty` 超出 `1–5`**：拒绝。
+- **未知的 `max_grade`**，或 **`tone` 不是四种目标色之一**：拒绝。取值不区分大小写；`rawhide`、`umber`、`bisque` 是皮张经过的颜色，不能作为目标。
+- **未知键**：忽略。
+- **两个配方 ID 接受同一种皮料**：都会加载；鞣制缸使用排序靠前的那个 ID。
+
+## 重载
+
+鞣制配方与服务器的其他配方一起重载，并一同发送给客户端。客户端用它们预览鞣制缸，每一批的判定都由服务器做出。一批在完成前一直使用开工时的配方，所以重载不会改变正在进行的批次。
+
+## 相关
+
+[皮革鞣制](/zh-cn/wiki/tanning/)介绍工序、品级和工具。[鞣制运行时](/zh-cn/dev/tanning-runtime/)面向开发者说明批次与事件。完成的批次以来源 `isekaiexpansion:tanning` 计入 `recipe_crafted` 类[任务目标](/zh-cn/wiki/quest-objectives/)。

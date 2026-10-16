@@ -3,17 +3,17 @@ title: "NPC 模型、服装与市民资源"
 description: "将 NPC 表现接入共享人形部件、服装覆盖层和动画集。"
 category: assets
 order: 40
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
-NPC 身体与穿戴层使用共享人形部件系统。NPC 自有资源是动画集，角色外观和衣柜由预设提供；市民使用同一渲染器及生成的外观配置。
+NPC 身体与穿戴层使用共享人形部件系统。NPC 自有资源是动画集，角色外观和衣柜是在其类中声明的预设；市民使用同一渲染器及生成的外观配置。
 
 ## 你要做的东西
 
 | 资源 | 位置 |
 | --- | --- |
 | 部件目录项 | `data/<namespace>/humanoid_parts/<slot>/<part>.json` |
-| NPC 角色与衣柜 | `data/<namespace>/npc_presets/<entity-type-path>.json` |
+| NPC 角色与衣柜 | NPC 类：`getNpcPreset()` 返回其 `NpcPreset` |
 | 部件网格 | `assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json` |
 | 可选性别网格 | 同一路径以 `.male.geo.json` 或 `.female.geo.json` 结尾 |
 | 纹理样式 | `assets/<namespace>/textures/entity/humanoid/<slot>/<part>/<style>.png` |
@@ -22,7 +22,7 @@ NPC 身体与穿戴层使用共享人形部件系统。NPC 自有资源是动画
 | NPC 动画集 | `assets/<namespace>/animations/entity/npc/<entity-type-path>.animation.json` |
 | 共享动画回退 | `assets/isekaiexpansion/animations/entity/npc/base.animation.json` |
 
-NPC 默认以实体类型 ID 查找预设。子类可覆盖 `getNpcPresetId()` 共用其他预设。身体模型和纹理由 `HumanoidRenderResolver` 从选定的 `body` 部件解析，不再从旧的 NPC 专用网格目录取得。
+预设 ID 即实体类型 ID，用于界定服装名称和每名玩家的衣柜奖励；只有多个实体类型必须共用这些记录时才覆盖 `getNpcPresetId()`。身体模型和纹理由 `HumanoidRenderResolver` 从选定的 `body` 部件解析，不再从旧的 NPC 专用网格目录取得。
 
 ## 前置要求
 
@@ -61,17 +61,20 @@ NPC动画查找保留实体类型的命名空间与路径。`BaseNpcEntity.getNp
 
 1. 将身体和穿戴件制作成共享人形部件。可替换服装放在独立槽位，使角色保留其基础配置。
 2. 将网格与纹理样式导出到上述路径，确认选定样式存在，需要回退时包含 `default`。
-3. 在人形目录声明部件，并在 NPC 预设中引用。内置 `data/isekaiexpansion/npc_presets/mahoutsukai_evelina.json` 是完整具名角色示例；`citizen.json` 只提供衣柜，不声明编写的角色外观。
-4. 专属动画文件只需包含要覆盖或新增的片段，名称与请求键保持一致；未填写的基础片段逐个回退。
-5. 定义修改后重载数据包，网格、纹理与动画修改后重载客户端资源，两者是不同路径。在游戏中核对已加载 NPC 的显示部件、当前服装和属性。
+3. 在人形目录声明部件。只供该 NPC 使用的部件写上 `"audience": "npc"`，像随模组提供的伊芙琳礼装一样，确保不会提供给任何玩家。
+4. 以设计者权限搭配外观并导出，然后在 NPC 类中声明预设，见[声明预设](#声明预设)。`MahoutsukaiEvelina` 是完整的具名角色示例。
+5. 专属动画文件只需包含要覆盖或新增的片段，名称与请求键保持一致；未填写的基础片段逐个回退。
+6. 部件定义修改后重载数据包，网格、纹理与动画修改后重载客户端资源，两者是不同路径；预设属于代码，修改后需要重新构建。在游戏中核对已加载 NPC 的显示部件、当前服装和属性。
 
 ### 市民
 
-`CitizenNpcEntity` 将实体 UUID、解析后的性别、身份种族及生成标签传给 `HumanoidProfileGenerator`。即使预设包含外观字段，该覆盖实现仍生成初始外观，不使用基础实现来采纳手写外观；衣柜仍来自 NPC 预设。`setCitizenIdentity`会在服务器上重新生成外观。生成性别使用实体UUID，不依赖显示名称。[命名API](/zh-cn/dev/naming/)在实体加载时，按种族、性别和市民文化为无名的非独特NPC取名；市民身份应在生成前设置。
+`CitizenNpcEntity` 将实体 UUID、解析后的性别、身份种族及生成标签传给 `HumanoidProfileGenerator`。即使预设声明了角色外观，该覆盖实现仍生成初始外观，不使用基础实现来采纳手写外观。市民不声明预设，因此穿着后备的 `default` 服装。`setCitizenIdentity`会在服务器上重新生成外观。生成性别使用实体UUID，不依赖显示名称。[命名API](/zh-cn/dev/naming/)在实体加载时，按种族、性别和市民文化为无名的非独特NPC取名；市民身份应在生成前设置。
 
-生成标签包含城镇、文化、职业，以及存在时的种族路径；性别不属于标签。生成器选择 BODY、EYES、EYEBROWS、HAIR、UNDERWEAR_TOP、UNDERWEAR_BOTTOM、OUTFIT_TOP、OUTFIT_BOTTOM、SHOES。先按性别锁定与种族筛选，只保留始终解锁、且目录 `gender` 与市民相同或为通用的候选，再优先选择至少命中一个请求标签的部件。如果没有这种候选，必需槽取目录首个候选，可选槽保持空。标签只是偏好，不是强制条件；`gender` 匹配则是强制条件。为某个槽位选中的链式部件会同时填满其他成员的槽位，生成器会跳过已经填好的槽位。
+生成标签包含城镇、文化、职业，以及存在时的种族路径；性别不属于标签。生成器选择 BODY、EYES、EYEBROWS、HAIR、UNDERWEAR_TOP、UNDERWEAR_BOTTOM、OUTFIT_TOP、OUTFIT_BOTTOM、SHOES。先按性别锁定与种族筛选，只保留自由可用（`player` 受众且 `always` 规则）、且目录 `gender` 与市民相同或为通用的候选，再优先选择至少命中一个请求标签的部件。NPC 专属部件永远不会被抽到。如果没有这种候选，必需槽取目录为该槽设定的默认部件，可选槽保持空。标签只是偏好，不是强制条件；`gender` 匹配则是强制条件。为某个槽位选中的链式部件会同时填满其他成员的槽位，生成器会跳过已经填好的槽位。
 
 随机种子取决于 UUID、性别和种族，候选目录及标签也会改变结果，因此修改目录后相同 UUID 不保证外观不变。无需制作独立的市民变体目录。
+
+生成器不抽取特征槽。NPC 接收外观时按其种族补上特征，方式与玩家种族授予特征相同，详见[人形架构](/zh-cn/dev/humanoid/)。肤色从 8 种人类肤色中选取；种族为 `isekaiorigins:slime` 时改从 6 种粘液肤色中选取，其半透明身体按此肤色染色。
 
 ## 声明它
 
@@ -100,32 +103,130 @@ NPC动画查找保留实体类型的命名空间与路径。`BaseNpcEntity.getNp
 
 持续武器近战由 Better Mob Combat 在 Gecko 动作时序之外驱动，无须逐动作编写 Gecko 攻击动画，启动与时序见 [NPC 战斗](/zh-cn/dev/npc-combat/)。可选部件次级动画查找 `idle`、`run`，接受精确名称，或忽略大小写后以 `.idle`/`_idle`、`.run`/`_run` 结尾的名称；无效或缺失资源使次级动画禁用。
 
+### 声明预设
+
+NPC 的外观是其类中的代码。覆盖 `BaseNpcEntity.getNpcPreset()`，返回一个 `NpcPreset` 常量；默认值为 `NpcPreset.EMPTY`，即未编写外观的人台，带后备衣柜且不开店。下例是 `MahoutsukaiEvelina` 的节选，完整预设见该类：
+
+```java
+private static final NpcPreset PRESET = NpcPreset.builder()
+        .character(HumanoidProfile.builder(HumanoidGender.FEMALE)
+                .age(17)
+                .origin("isekaiorigins:human")
+                .shape(shape -> shape.withArmThickness(0.901F).withLegThickness(0.901F))
+                .color(HumanoidColorChannel.SKIN, 0xFFF2F5)
+                .color(HumanoidColorChannel.HAIR_BASE, 0xFDF5FF)
+                .part(HumanoidSlot.BODY, "isekaiexpansion:body/feminine")
+                .part(HumanoidSlot.HAIR, "isekaiexpansion:hair/long_wavy")
+                .build())
+        .fixedGender()
+        .outfit(NpcOutfit.builder("default")
+                .asDefault()
+                .sort(0)
+                .attribute("minecraft:generic.armor", 12.0)
+                .part(HumanoidSlot.OUTFIT_TOP, "isekaiexpansion:outfit_top/evelina_mage_robe")
+                .build())
+        .outfit(NpcOutfit.builder("casual")
+                .sort(10)
+                .attribute("minecraft:generic.armor", 1.0)
+                .part(HumanoidSlot.OUTFIT_TOP, "isekaiexpansion:outfit_top/evelina_casual_blouse")
+                .clear(HumanoidSlot.SHOES)
+                .build())
+        .tradeProfession("isekaiexpansion:mahoutsukai_evelina")
+        .build();
+
+@Override
+public NpcPreset getNpcPreset() {
+    return PRESET;
+}
+```
+
+部件、种族与职业 ID 在类初始化时解析，因此格式错误的 ID 会在类加载时失败，而不是变成一个永远不出现的部件。格式正确但目录中不存在的 ID，会在 NPC 接收外观时被移除。
+
+| 调用 | 默认值 | 作用 |
+| --- | --- | --- |
+| `NpcPreset.builder().character(profile)` | `no character` | NPC 出生时的外观。不设置时，基础实现保留裸骨架人台，生成式 NPC 自行生成外观。 |
+| `.fixedGender()` | `off` | 运行时永不切换角色性别。独特 NPC 无论如何都会固定性别。 |
+| `.outfit(outfit)` | `fallback default` | 按声明顺序添加衣柜条目。一个都不声明时，NPC 拥有始终可用、无覆盖也无属性的 `default` 服装。 |
+| `.tradeProfession(id)` | `none` | 该 NPC 出售商品所用的[交易覆盖](/zh-cn/wiki/trade-overrides/)职业。 |
+| `.tradeAccess(access)` | `TRUSTED` | `PUBLIC` 向所有玩家开放商店；`TRUSTED` 需要信任。 |
+
+`HumanoidProfile.builder(gender)` 声明角色外观：
+
+| 调用 | 默认值 | 作用 |
+| --- | --- | --- |
+| `.age(years)` | `18` | 限制为 12–400。 |
+| `.nickname(name)` | `none` | 手写显示名称，按角色界面的规则清理，并启用名称显示。 |
+| `.presetName(id)` | `none` | 姓名池中的可翻译全名；取代昵称并启用名称显示。 |
+| `.origin(id)` | `none` | NPC 的种族。种族特征会补入空的特征槽，该种族不能穿戴的部件会被移除，与该种族的玩家相同。 |
+| `.shape(edit)` | `neutral` | 套用 `HumanoidBuild` 的 with 方法，例如 `withHeight`，取值范围见[预设数据](/zh-cn/wiki/humanoid-presets/)。 |
+| `.face(edit)` | `neutral` | 套用 `HumanoidFace` 的 with 方法，例如 `withEyeScale`。 |
+| `.color(channel, rgb)` | `channel default` | 以 `0xRRGGBB` 表示的配色。 |
+| `.part(slot, id)` / `.part(slot, id, style)` | `empty` | 以 `default` 或指定样式穿戴目录部件。 |
+
+`NpcOutfit.builder(id)` 声明一个衣柜条目：
+
+| 调用 | 默认值 | 作用 |
+| --- | --- | --- |
+| `.asDefault()` | `off` | 无人选择前 NPC 穿着的服装。强制使用 `PLAYER` 受众与 `ALWAYS` 规则。 |
+| `.audience(audience)` | `PLAYER` | `NPC` 让该服装不进入任何衣柜，只有调用 `setOutfitId` 的代码能为 NPC 换上。 |
+| `.unlock(rule)` | `granted` | 玩家何时可以选择，规则见[预设数据](/zh-cn/wiki/humanoid-presets/)。`granted` 按玩家的衣柜奖励记录判断。 |
+| `.category(category)` | `OUTFIT` | 衣柜分页：`OUTFIT`、`HAIR` 或 `ACCESSORY`。 |
+| `.sort(order)` | `1000` | 分页内排序，其次按 ID；不决定初始服装。 |
+| `.attribute(id, value)` / `.attribute(id, value, operation)` | `none` | 穿着期间的属性修饰符，按注册 ID 指定；运算方式默认为 `ADDITION`。 |
+| `.part(slot, id)` / `.part(slot, id, style)` | `inherit` | 在该槽位为角色叠穿部件。 |
+| `.clear(slot)` | `inherit` | 穿着该服装时清空槽位。 |
+
+服装 ID 会去除首尾空格并转为小写，且必须唯一：重复的 ID 会在类加载时抛出异常。只有第一个声明为默认的服装保留该标记。没有默认服装时，初始服装依次取第一个 `ALWAYS` 服装、第一个面向玩家的服装、第一个声明的服装。
+
+属性 ID 在授予生效时才解析，而不是在类加载时，因此可以引用其他模组稍后注册的属性。未注册的 ID 或 NPC 不具备的属性会被跳过并记录警告。同一服装中每个属性只写一次：修饰符身份包含预设、服装和属性，不包含运算方式。
+
+### 设计并导出外观
+
+在游戏中搭配外观，再由导出命令写出常量：
+
+1. 执行 `/ise humanoid design`，以设计者权限打开完整的角色界面。界面列出全部部件，NPC 专属部件带 NPC 标记，且不检查任何解锁规则。
+2. 搭配角色并确认。只要你仍持有设计者权限，服务端就会在你的角色上保留专属部件。
+3. 执行 `/ise humanoid export npc <name>`，写出 `config/isekaiseries/npc_presets/<name>.java`，再把常量粘贴进类中。
+
+| 命令 | 作用 |
+| --- | --- |
+| `/ise humanoid design [targets]` | 以设计者权限为你或目标玩家打开创建界面。 |
+| `/ise humanoid export npc <name>` | 把你自己的角色导出为预设。 |
+| `/ise humanoid export npc <name> <target>` | 导出某名玩家的角色，或某个 NPC 当前的基础外观及其声明的衣柜、职业与商店准入。 |
+
+导出玩家时，按衣柜叠穿的方式拆分角色。服装与饰品槽位成为一个以 `asDefault()` 和 `sort(0)` 声明的 `default` 服装；身体、面部、头发、特征与内衣槽位，以及身份、体型、面部、配色和种族成为角色外观。导出 NPC 时保留其原有拆分。
+
+文件开头是若干注释行，写明来源、粘贴说明和常量用到的导入。只写出与默认值不同的内容：体型与面部数值四舍五入到 3 位小数，颜色写作 `0xRRGGBB`，名称仅在启用名称显示时写出。绘制数据不导出。名称规则见[人形运行时](/zh-cn/dev/humanoid-runtime/)，同名文件会被覆盖。
+
+你登出或被授予玩家界面时，设计者权限结束；此后你的角色重新按玩家规则验证，所有专属部件都会被移除。请在此之前导出。
+
 ### 衣柜组合与重载
 
-实体分别保存基础外观与显示外观。服装按槽位顺序覆盖声明的槽位，`none` 在该服装下移除对应槽。被覆盖的槽位遵循[部件链](/zh-cn/dev/humanoid-parts/)：写出一个成员就会穿上整条链，替换或清除某个成员会卸下其他成员。**包括 body 在内的所有槽位均可被覆盖**。切换不破坏底层基础配置，但显示出来的身体并不保证不变。
+实体分别保存基础外观与显示外观。服装按槽位顺序覆盖声明的槽位，`clear(slot)` 在该服装下移除对应槽。被覆盖的槽位遵循[部件链](/zh-cn/dev/humanoid-parts/)：写出一个成员就会穿上整条链，替换或清除某个成员会卸下其他成员。**包括 body 在内的所有槽位均可被覆盖**。切换不破坏底层基础配置。叠加后的结果会像基础外观一样经过清理：被清空的特征槽重新获得种族特征，NPC 的性别或种族不能穿戴的部件会被移除，被清空的身体保持为空，只留下裸骨架人台。
 
-通过 `tryEquipOutfit` 选择服装会检查可选性及请求玩家的解锁规则；直接 `setOutfitId` 只解析 ID、刷新外观与属性，不执行这些玩家资格检查。服装授予记录按玩家保存，键为预设 ID 加归一化服装 ID，因此为一个 NPC 实例解锁，也适用于同预设的其他实例。
+通过 `tryEquipOutfit` 选择服装会检查该服装是否面向玩家，以及请求玩家是否满足其解锁规则；直接 `setOutfitId` 只解析 ID、刷新外观与属性，不执行这些玩家资格检查。服装授予记录按玩家保存，键为预设 ID 加归一化服装 ID，因此为一个 NPC 实例解锁，也适用于同预设的其他实例。
 
-数据包成功重载后，已加载 NPC 重新解析预设。基础实现替换手写的基础外观；生成外观通常保留，除非子类的解析路径重新生成。当前服装被删除后回退到新默认项。属性刷新移除**当前**目录声明的修饰符 ID，再添加生效服装的授予，并将生命限制到新上限。
-
-若重载删除旧服装或属性授予，已加载 NPC 可能保留旧的临时修饰符，因为清理仅枚举新声明。不能将此路径描述为无条件删除全部旧授予，评审衣柜重载修改时须专门检查属性移除。
+数据包成功重载后，已加载 NPC 按重载后的部件目录重新验证。手写外观的 NPC 重新解析其类声明的角色外观，因此现已存在的部件会出现在它身上。生成外观予以保留并重新清理，因此为其种族新增的特征也会出现。服装会重新解析并重建授予：先移除预设中所有服装声明的修饰符，再添加生效服装的授予，并将生命限制到新上限。
 
 服装显示键为 `npc_outfit.<namespace>.<preset-path-with-dots>.<outfit-id>`。授予是按预设、服装、属性生成键的临时修饰符；同一服装对同一属性重复授予会共用修饰符 UUID，不是可以独立叠加的条目。
 
 ## 检查清单
 
 - 确认预设和部件 ID 可解析，逐项检查选定纹理样式及性别网格。
+- 用 `/ise humanoid export npc` 导出该 NPC，与其类中的声明比对，确认往返一致。
 - 在闲置、行走、奔跑、游泳、攀爬、睡眠与战斗中检查身体、头、四肢和物品锚点。
 - 从专属文件移除`walk`，确认仍播放基础行走；保留自定义`idle`以检查覆盖优先级。
 - 在添加、清除及替换槽位的服装之间切换，再恢复基础外观。
 - 检查玩家独立解锁记录，以及共享预设的另一个 NPC。
-- 修改和删除授予后重载，检查实际属性，不只看服装菜单。
+- 切换带属性授予的服装，检查实际属性，不只看服装菜单。
 - 用不同身份和目录标签检查生成市民，不要把标签偏好理解为强制筛选。
+- 生成带特征的种族与粘液族市民，确认特征出现，且粘液族使用粘液肤色。
 - 从另一客户端观察基础与分层几何，包含手持物品、遮罩和缺失资源情况。
 
 ## 相关页面
 
-- [玩家与 NPC 预设数据](/zh-cn/wiki/humanoid-presets/)
+- [人形预设数据](/zh-cn/wiki/humanoid-presets/)
+- [人形运行时](/zh-cn/dev/humanoid-runtime/)
 - [人形部件](/zh-cn/dev/humanoid-parts/)
 - [Blockbench 插件](/zh-cn/dev/blockbench-plugin/)
 - [NPC 基础](/zh-cn/dev/npc/)

@@ -3,7 +3,7 @@ title: "Combat attributes and status runtime"
 description: "Attribute metadata, damage stages, energy and shield storage, status application and lifecycle contracts."
 category: systems
 order: 35
-updated: 2026-09-26
+updated: 2026-10-15
 ---
 
 This subsystem connects registered attributes, Data Attributes mappings, PlayerEx damage functions and status-effect lifecycle hooks. Its helpers are internal implementation surfaces; the [player attribute guide](/en/wiki/attributes-and-effects/) and [effect catalogue](/en/wiki/status-effects/) cover gameplay outcomes.
@@ -147,11 +147,13 @@ Both components tick on the server and synchronise through CCA. NBT reads use th
 | Shield · `lockGauge` | boolean | false | Post-consumption recovery pause. |
 | Shield · `lockGaugeTimer` | int | 0 | Elapsed lock ticks. |
 
-Energy recovers 1 per `(int)(20 / regen)` ticks, at most once per tick. Removal clamps current energy to 0, starts a 20-tick lock and synchronises. Direct `setEnergy` is not clamped; `addEnergy` only caps its upper result, and caller-supplied negative amounts are not rejected. The lock timer advances only while below maximum, so a lock can remain set while the reserve is full.
+Energy recovers 1 per `max(1, (int)(20 / regen))` ticks after player attributes settle. Removal clamps current energy to 0, starts a 20-tick lock and synchronises. `setEnergy` clamps to 0 through current capacity; `addEnergy` uses an overflow-safe sum, and gains/costs reject negative amounts. NBT reads preserve the nonnegative saved reserve until that final capacity is available. Respawn restores persistent capacity and its talent modifier before reconciliation. The lock timer advances only while below maximum, so a lock can remain set while the reserve is full.
 
 Shield capacity is `max(0, round(baseGauge × shieldPowerMultiplier))`; recovery amount is `max(1, round(5 × shieldPowerMultiplier))`, with interval `max(1, round(20 / regen))` or 20 for nonpositive regen. A block pauses recovery for 40 ticks. A pulse may exceed maximum until the next tick. Cooldown ticks return early and do not regenerate.
 
 For blocked damage above the shield's normal limit but within its maximum, add up to the base cost proportionally, then divide by Shield Power and round with minimum 1. Damage strictly above the maximum breaks immediately; exhausted gauge also breaks. Shield statistics and fallback constants are owned by IsekaiCore, so the component does not hard-code a universal shield profile.
+
+The gauge itself is `ShieldGauge`, shared by every entity that guards. `ShieldingComponent` hosts the player's copy, synchronises it and sends the break and recovery messages; a summoned clone holds a silent copy through `ShieldGuards.Holder`. `ShieldGuards.applyGuard` runs in the should-damage stage for any living entity: a target actively using a shield-like item whose gauge can still guard passes the hit to IsekaiCore's `ICShieldUtil.tryBlockDamage` and drains its gauge by the absorbed amount. Shield Break uses the same `isGuarding` test, so it applies to a guarding clone as well as a guarding player. The break sound plays in the guarding entity's own sound category.
 
 ## Contracts
 
@@ -206,7 +208,7 @@ Evasion counters play `IsekaiPlayerAnimations.REACTION_EVASION_RIPOSTE` at `REAC
 
 `DamageOverTimeEffect` pulses only on a live server entity when remaining duration is a positive multiple of its interval. Its settlement helper applies at least 1 pulse up to the caller's maximum, attributes an optional attacker and returns the sum of requested damage for successful calls, not measured health loss. It does not remove the status instance.
 
-Spell vulnerability definitions currently call a single-school setter twice. The inspected Spell Power source retains the last call; its power multiplier is additive to 1. The [effect catalogue](/en/wiki/status-effects/) records the resulting values and the inspected dependency revision. Preserve this distinction when fixing or upgrading the integration; do not silently document the discarded first-school tuple as active.
+`ElementalVulnerabilityEffect` implements Spell Power's `VulnerabilityEffect` with a school-keyed map. `ElementalReactionBonus` caps each effect at 3 contributing stacks and supplies additive per-stack bonuses. Major reactions reach +30% power, +5 percentage points of critical chance and +0.20 critical damage; minor reactions reach +15%, 0 and +0.10. Both declared schools remain active. See the [effect catalogue](/en/wiki/status-effects/).
 
 `IsekaiSpellSchools` reuses a pre-existing school with the same ID. Newly created custom school attributes have base/minimum 0 and maximum 2048; physical melee binds to `isekaiexpansion:physical_melee` while other custom schools use their Spell Power damage IDs. `IsekaiMagicAttribute` derives its UUID from mod ID, school ID and operation, so multiple values for that same school/operation are not independent modifier identities.
 
@@ -230,3 +232,5 @@ Test effect replacement and removal with extra modifiers, source-less harmful ef
 - [Status effects](/en/wiki/status-effects/)
 - [Spell integration](/en/dev/spell-integration/)
 - [Progression runtime](/en/dev/leveling/)
+
+Attachment swings aim at the cursor using the larger of the configured range and 15 blocks plus Magic Sword Sense, capped at 64 blocks. Any main-hand item or an empty hand can trigger release. Relation and visibility checks determine eligible cursor targets; a miss still releases toward the aimed point. See [Projectile attachments and patterns](/en/dev/projectile-attachments/).

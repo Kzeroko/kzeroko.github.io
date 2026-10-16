@@ -1,0 +1,380 @@
+---
+title: "Shot Planner"
+description: "Plan multi-shot camera reels in a live in-game studio and play them back as clean takes for an external screen recorder."
+category: assets
+order: 76
+updated: 2026-10-04
+tags: ["camera", "cinematics", "recording"]
+---
+
+The shot planner builds a reel of camera shots inside the running game and plays it back on a wall clock while a screen recorder such as OBS captures the window. Nothing is exported or rendered offline: you fly a free camera to each view, key it, preview the cut, then press record and play your character through the take.
+
+## What you are making
+
+A reel is one JSON file per plan, stored on the client at `config/isekaiseries/shot_reels/<id>.json`. It never reaches a server and is not part of a data pack. A reel holds an ordered list of shots, a set of title cards and a set of cues, plus presentation settings that apply to the whole reel.
+
+Reel time runs through three parts back to back: the pre-roll, every shot in order, then the post-roll. The pre-roll and post-roll show black, so a recording can be trimmed cleanly.
+
+| Part | Contents |
+| --- | --- |
+| Shot | One continuous camera take: a `path`, `orbit` or `follow` camera, an optional aim, dolly zoom and handheld shake, and the transition into it. |
+| Title card | Text over the picture at a reel time, in one of four styles. |
+| Cue | A chat command or a local sound fired when playback passes its time. |
+
+Coordinates are absolute world coordinates. The reel records the dimension it was planned in; the studio warns when it is opened elsewhere and hides its world gizmos there.
+
+## Requirements
+
+- **Operator permission.** The studio, `/ise reel` and the planner key require permission level 2. Below it the server refuses `/ise reel`, and the planner key prints `The shot planner needs operator permission (level 2)` without opening anything.
+- **A client world.** Reels play through the local camera only. Other players see your character, not your camera.
+- **An external recorder.** The planner draws the picture; it does not capture it. Record the game window with OBS or a similar tool.
+
+The studio is a [developer editor workspace](/en/dev/editor-preferences/): the world between its panels is a free spectator camera, so viewport navigation, picking and the shared shortcuts work exactly as in the other editors.
+
+## Steps
+
+<Steps>
+
+1. **Open the studio.** Run `/ise reel` or bind `key.isekaiexpansion.shot_planner` (unbound by default). The studio reopens on the document from your last session.
+
+2. **Name the reel.** Type an id in the toolbar field. Ids use `a-z`, `0-9`, `_`, `.` and `-`, at most 64 characters; letters are lowercased and spaces become underscores.
+
+3. **Fly to the opening view and press `K`.** With no shots, `K` creates the first path shot with a key at its start. Otherwise it keys the shot under the playhead at the playhead time.
+
+4. **Move the playhead, fly, press `K` again.** Each press adds a key, or replaces the key within 0.02 seconds of the playhead. Drag keys and shot ends on the timeline to retime them.
+
+5. **Look through the result.** Press `C` to view the shot camera at the playhead, or `Space` to preview from the playhead. Any viewport drag hands the camera back to the free view at the pose you were looking through.
+
+6. **Add shots, titles and cues.** Use the outliner buttons, then set each one in the inspector.
+
+7. **Save with `Ctrl+S`, then press `R`.** Record closes the studio, plays the reel from its start and reopens the studio when it ends. `Esc` ends the take early.
+
+</Steps>
+
+## Studio controls
+
+Shortcuts work whenever no text field has focus and no viewport drag is in progress.
+
+| Shortcut | Action |
+| --- | --- |
+| `K` | Key the camera from the current view at the playhead |
+| `C` | Toggle looking through the shot camera at the playhead |
+| `Space` | Preview from the playhead; again to stop |
+| `R` | Record a clean take from the start of the reel |
+| `F` | Look through the selected key, moving the free camera there |
+| `G` | Toggle the composition guides |
+| `Delete` / `Backspace` | Delete the selected key, shot, title card or cue |
+| `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` | Undo / redo / redo |
+| `Ctrl+S` | Save the reel |
+| `Ctrl+D` | Duplicate the focused shot after itself |
+| `←` / `→` | Move the playhead 0.05 seconds; 1 second with `Shift` |
+| `Home` / `End` | Playhead to the start / end of the reel |
+
+Undo keeps 200 steps. Edits to the same field within 0.9 seconds merge into one step, so typing a number or dragging a key undoes as a single change.
+
+The timeline shows four lanes: shots, path keys, title cards and cues. Drags snap to 0.05 seconds; hold `Shift` while pressing to place freely. The wheel pans, and `Ctrl` with the wheel zooms between 6 and 600 pixels per second. The shaded areas at either end are the pre-roll and post-roll.
+
+In the world, each shot draws its camera path as 48 segments, each path key draws a frustum matching its field of view and the window's aspect ratio, and the playhead pose draws in pink. A left click within 18 pixels of a key's frustum tip selects that key and moves the playhead to it. Gizmos hide while the reel itself is directing the camera.
+
+The composition guides draw rule-of-thirds lines, a centre cross and the picture frame inside the letterbox. While you look through the shot camera, the letterbox bars draw at 70% opacity so the cropped area stays visible.
+
+## Shot cameras
+
+### Path
+
+A path moves through keys. Each key stores a time from the start of the shot, a position, yaw, pitch, roll, field of view and the easing used to arrive at it from the previous key.
+
+| Interpolation | Position | Rotation and FOV |
+| --- | --- | --- |
+| `smooth` | Centripetal Catmull-Rom through every key | Catmull-Rom on yaw, pitch, roll and FOV |
+| `linear` | Straight lines between keys | Linear |
+
+Yaw is unwrapped along the key order, so the camera always turns the short way between neighbouring keys. Before the first key and after the last, the camera holds that key.
+
+Easing applies per segment, so an eased key brings the camera to rest on it. Two inspector actions reshape a multi-key move:
+
+- **Flow Ease** sets the second key to `ease_in_sine`, the last to `ease_out_sine` and every key between to `linear`. A two-key path gets `ease_in_out_sine`.
+- **Even Speed** retimes the inner keys by the distance travelled between the first and last key, rounded to 0.01 seconds, and sets every key after the first to `linear`. It needs at least three keys.
+
+### Orbit
+
+An orbit circles a target over the length of the shot. Radius, height, angle and field of view each run from a start value to an end value under one easing. Angle 0 places the camera south of the target; the camera sits at the target's framing point plus `(−sin θ × radius, height, cos θ × radius)` and looks at it. **Start Orbit From View** reads the start radius, height, angle and field of view from your current view.
+
+### Follow
+
+A follow camera holds an offset from a moving target and looks at it. With `relative` on, the offset turns with the target's body: `x` is the target's right, `y` up and `z` behind. Lag eases the camera toward that point with the given time constant; zero locks it on. Scrubbing and the pinned shot camera ignore lag. **Offset From View** reads the offset and field of view from your current view.
+
+### Targets
+
+Orbit centres, follow targets, aim targets and dolly-zoom subjects share one target shape.
+
+| Kind | Resolves to |
+| --- | --- |
+| `self` | Your own eyes |
+| `entity` | That entity's eyes, found by UUID; the stored position while it is not loaded |
+| `point` | A fixed world position |
+
+**Pick From Viewport** turns a click on yourself into `self`, on another entity into `entity` and on a block into `point`.
+
+### Modifiers
+
+| Modifier | Effect |
+| --- | --- |
+| Aim | Turns yaw and pitch toward a target plus an offset, blended by `weight` from 0 to 1. Roll is kept. |
+| Dolly zoom | Replaces the field of view so `frame_height` blocks around the subject fill the frame height: FOV = 2 × atan(frame height ÷ (2 × distance)). **Match Current Framing** reads the height from your view. |
+| Handheld | Adds smooth noise from three detuned sine waves: up to `rotation` degrees on yaw, 0.8× that on pitch, 0.5× on roll, and up to `position` blocks of sway, around `frequency` hertz. The noise depends only on shot time, so previews and takes match. |
+
+The final field of view is clamped to 5–150 degrees.
+
+## Playback and recording
+
+Playback follows the real-time clock rather than game ticks, so the camera stays smooth when the server lags. The clock stops while the game is paused. Preview speed can be 0.25×, 0.5×, 1× or 2×; recording always runs at 1×.
+
+| Transition | Effect at the cut |
+| --- | --- |
+| `cut` | Instant change |
+| `fade` | Through black, darkest at the cut; half the duration falls on each side |
+| `dip_white` | Through white, brightest at the cut; half the duration falls on each side |
+| `blend` | The camera glides from where the previous shot ended into this shot over the duration |
+
+The first shot's transition is ignored. Fade in and fade out ease the picture up from the pre-roll black and down into the post-roll black. The letterbox bars slide in over `bar_slide` seconds from the first shot and out over the same time before the last shot ends. When the window is wider than the picture ratio, the bars appear at the sides instead.
+
+Title cards use one of four styles:
+
+| Style | Layout |
+| --- | --- |
+| `chapter` | Large centred title between two rules, subtitle below |
+| `center` | Centred title and subtitle without rules |
+| `lower_third` | Name plate in the lower left with an accent bar |
+| `caption` | One line along the bottom on a dark plate |
+
+Cues fire as playback passes their time. A `command` cue is sent as your own chat command, so it runs with your permissions; a `sound` cue plays locally without position, so it reaches the recording but no other player. Recording and `/ise reel play` always fire cues; studio previews fire them only with **Cues in preview** on.
+
+During recording the HUD hides when `hide_hud` is on and the character stays playable unless `lock_movement` is on or the take carries you. `hide_player` hides your own body during playback and while you look through the shot camera. The perspective and HUD you had before return when the take ends.
+
+### Chunks around the camera
+
+The server sends real chunks only within your view distance of where you stand. Voxy, a third-party LOD renderer in the pack, draws LOD terrain wherever the client has no chunk, so a camera far from you would film LOD terrain and miss the mobs there.
+
+Previews and recordings of a reel with `hide_player` on carry you along the camera instead:
+
+1. The client samples the camera every 0.25 seconds from where playback starts, fills the gaps inside each shot without bridging cuts, and asks the server to load those chunks and one more on each side, at most 1024. They load at full status without ticking, so nothing simulates there before you arrive.
+2. The server makes you a spectator and moves you to the camera whenever it has moved at least 1 block, so real chunks, mobs and block updates stream around it.
+3. Playback holds black on its first frame, showing the loading progress, until every path chunk has settled or 15 seconds have passed, then starts its clock. The wait comes before the pre-roll; trim it with the rest.
+4. When playback ends or stops, you return to your exact position, rotation, game mode and flight. Disconnecting or a server stop returns you at once, and after a crash the server returns you on your next join.
+
+Carrying needs permission level 2 and the reel's dimension; without them playback runs where you stand. While carried, `~` in command cues resolves at the camera. Scene triggers, dungeon gateways and dungeon script triggers ignore spectators, so the path never sets them off.
+
+With `hide_player` off you stay where you are, and the studio draws path segments outside your loaded chunks in amber. Move closer before recording, or hide the player.
+
+## Declaring it
+
+The studio writes the reel; you can also write or edit the file by hand. The smallest file the loader accepts:
+
+```json
+{
+  "format": 1,
+  "shots": []
+}
+```
+
+A reel with one path shot and a title card:
+
+```json
+{
+  "format": 1,
+  "name": "ashen_gate",
+  "dimension": "minecraft:overworld",
+  "settings": { "letterbox": 2.39, "pre_roll": 1.0, "post_roll": 1.0 },
+  "shots": [
+    {
+      "name": "Establishing",
+      "duration": 6.0,
+      "camera": {
+        "type": "path",
+        "interpolation": "smooth",
+        "keys": [
+          { "time": 0.0, "pos": [10.5, 72.0, -4.0], "yaw": 160.0, "pitch": 8.0, "fov": 60.0 },
+          { "time": 6.0, "pos": [2.5, 70.0, 6.0], "yaw": 200.0, "pitch": 4.0, "fov": 50.0 }
+        ]
+      },
+      "handheld": { "rotation": 0.6, "position": 0.03, "frequency": 0.45 }
+    }
+  ],
+  "titles": [
+    { "start": 1.5, "duration": 4.0, "title": "Chapter One", "style": "chapter" }
+  ],
+  "cues": []
+}
+```
+
+### Reel fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format` | `integer` | required | Format version. Only `1` is accepted. |
+| `name` | `string` | `""` | Display name. Saving an unnamed reel names it after its id. |
+| `dimension` | `identifier` | none | Dimension the reel was planned in. Used for the studio warning and gizmo visibility only. |
+| `settings` | `object` | all setting defaults | Presentation and recording settings. See [Settings](#settings). |
+| `shots` | `array<object>` | required | Shots in playback order. An empty array is a valid reel that plays only its rolls. See [Shot fields](#shot-fields). |
+| `titles` | `array<object>` | `[]` | Title cards, sorted by `start` on load. See [Title card fields](#title-card-fields). |
+| `cues` | `array<object>` | `[]` | Cues, sorted by `time` on load. See [Cue fields](#cue-fields). |
+
+### Settings
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `letterbox` | `number` | `2.39` | Picture aspect ratio inside black bars. `0` or less turns the bars off; other values clamp to 1–4. |
+| `bar_slide` | `number` | `0.8` | Seconds the bars take to slide in and out. `0` keeps them fixed. |
+| `pre_roll` | `number` | `1.0` | Seconds of black before the first shot. |
+| `post_roll` | `number` | `1.0` | Seconds of black after the last shot. |
+| `fade_in` | `number` | `0.8` | Seconds the picture takes to fade up after the pre-roll. |
+| `fade_out` | `number` | `0.8` | Seconds the picture takes to fade down before the post-roll. |
+| `hide_hud` | `boolean` | `true` | Hides the HUD while recording. Studio previews always hide it. |
+| `hide_player` | `boolean` | `false` | Hides your own body during playback and while looking through the shot camera. Previews and recordings then carry you along the camera. |
+| `lock_movement` | `boolean` | `false` | Holds your character still while recording. |
+
+Negative seconds clamp to 0.
+
+### Shot fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `shots[].name` | `string` | `""` | Label in the studio. An empty name shows as `Shot` and its number. |
+| `shots[].duration` | `number` | required | Shot length in seconds. Below 0.05 the file is rejected. |
+| `shots[].transition.type` | `enum(cut, fade, dip_white, blend)` | `cut` | How this shot replaces the previous one. Required when `transition` is present. |
+| `shots[].transition.duration` | `number` | `0.5` | Transition length in seconds; `cut` forces `0`, other types clamp to at least 0.05. |
+| `shots[].camera` | `object` | required | The camera. `type` selects [Path camera](#path-camera), [Orbit camera](#orbit-camera) or [Follow camera](#follow-camera). |
+| `shots[].aim.target` | `object` | required | Aim target. See [Target fields](#target-fields). Required when `aim` is present. |
+| `shots[].aim.offset` | `array<number>` | `[0, 0, 0]` | Blocks added to the target point. |
+| `shots[].aim.weight` | `number` | `1.0` | Blend toward the aim, clamped to 0–1. |
+| `shots[].dolly_zoom.subject` | `object` | required | Subject whose framing stays constant. See [Target fields](#target-fields). |
+| `shots[].dolly_zoom.frame_height` | `number` | required | Blocks of height kept in frame at the subject, at least 0.1. |
+| `shots[].handheld.rotation` | `number` | `0.6` | Shake amplitude in degrees, at least 0. |
+| `shots[].handheld.position` | `number` | `0.03` | Sway amplitude in blocks, at least 0. |
+| `shots[].handheld.frequency` | `number` | `0.45` | Dominant shake frequency in hertz, at least 0.01. |
+
+### Path camera
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `camera.type` | `enum(path, orbit, follow)` | required | `path` for this table. |
+| `camera.interpolation` | `enum(smooth, linear)` | `smooth` | Curve through the keys. |
+| `camera.keys[]` | `array<object>` | required | Keys, sorted by `time` on load. An empty list gives the shot no camera, so the ordinary view shows for its duration. |
+| `camera.keys[].time` | `number` | required | Seconds from the start of the shot; negatives clamp to 0. |
+| `camera.keys[].pos` | `array<number>` | required | World position `[x, y, z]`. |
+| `camera.keys[].yaw` | `number` | required | Yaw in degrees, vanilla convention. |
+| `camera.keys[].pitch` | `number` | required | Pitch in degrees, clamped to −90–90. |
+| `camera.keys[].roll` | `number` | `0.0` | Roll in degrees; positive tilts the camera to the right. |
+| `camera.keys[].fov` | `number` | `70.0` | Vertical field of view in degrees, clamped to 5–160. |
+| `camera.keys[].ease` | `enum(linear, step, ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_sine, ease_out_sine, ease_in_out_sine, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_in_back, ease_out_back)` | `ease_in_out_sine` | Easing used to arrive at this key. |
+
+### Orbit camera
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `camera.center` | `object` | required | Target circled. See [Target fields](#target-fields). |
+| `camera.radius` | `array<number>` | required | Horizontal distance `[start, end]` in blocks. |
+| `camera.height` | `array<number>` | required | Height above the framing point `[start, end]` in blocks. |
+| `camera.angle` | `array<number>` | required | Angle `[start, end]` in degrees; 0 is south of the target. |
+| `camera.fov` | `array<number>` | required | Field of view `[start, end]` in degrees. |
+| `camera.roll` | `number` | `0.0` | Constant roll in degrees. |
+| `camera.ease` | `enum(linear, step, ease_in_quad, ease_out_quad, ease_in_out_quad, ease_in_sine, ease_out_sine, ease_in_out_sine, ease_in_cubic, ease_out_cubic, ease_in_out_cubic, ease_in_back, ease_out_back)` | `ease_in_out_sine` | Easing of the whole orbit over the shot. |
+
+### Follow camera
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `camera.target` | `object` | required | Target followed. See [Target fields](#target-fields). |
+| `camera.offset` | `array<number>` | required | Offset `[x, y, z]` in blocks: right, up, behind when `relative`, world axes otherwise. |
+| `camera.relative` | `boolean` | `true` | Turns the offset with the target's body yaw. |
+| `camera.lag` | `number` | `0.35` | Catch-up time constant in seconds; `0` locks on, negatives clamp to 0. |
+| `camera.fov` | `number` | `60.0` | Field of view in degrees, clamped to 5–160. |
+| `camera.roll` | `number` | `0.0` | Constant roll in degrees. |
+
+### Target fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `enum(point, self, entity)` | required | What the target follows. |
+| `pos` | `array<number>` | required for `point`, `[0, 0, 0]` for `entity` | The fixed point, or an entity's last known framing point. Ignored for `self`. |
+| `uuid` | `string` | required for `entity` | Entity UUID. Ignored for other kinds. |
+
+### Title card fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `titles[].start` | `number` | required | Reel time in seconds, including the pre-roll. |
+| `titles[].duration` | `number` | required | Seconds on screen, at least 0.1. |
+| `titles[].title` | `string` | `""` | Main line: literal text, or a translation key when one exists. |
+| `titles[].subtitle` | `string` | `""` | Second line, same rules. |
+| `titles[].style` | `enum(chapter, center, lower_third, caption)` | `chapter` | Layout, as listed under [Playback and recording](#playback-and-recording). |
+| `titles[].fade` | `number` | `0.6` | Seconds of fade in and fade out, limited to half the duration. |
+| `titles[].color` | `string` | `#FFFFFF` | Title colour as `#RRGGBB`. |
+
+### Cue fields
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `cues[].time` | `number` | required | Reel time in seconds, including the pre-roll. |
+| `cues[].type` | `enum(command, sound)` | required | Chat command or local sound. |
+| `cues[].value` | `string` | required | The command without its slash (a leading slash is removed), or a sound event id. |
+| `cues[].volume` | `number` | `1.0` | Sound volume, at least 0. Ignored for commands. |
+| `cues[].pitch` | `number` | `1.0` | Sound pitch, at least 0. Ignored for commands. |
+
+### Validation
+
+The loader is strict about what is present and silent about what is not:
+
+- **A missing required key** rejects the file with its JSON path, for example `$.shots[0].camera.type is required`.
+- **A wrong type, an unknown enum value, an invalid easing, UUID, colour or sound id** rejects the file with its path.
+- **A non-finite number** rejects the file.
+- **An unknown key** is ignored and dropped on the next save.
+- **An out-of-range number** clamps as described in the tables, except `shots[].duration`, which rejects below 0.05.
+- **Malformed JSON** rejects the file. A rejected file is never changed; the studio and `/ise reel` report the reason.
+
+Saving writes pretty-printed UTF-8 to a temporary file and moves it into place, atomically where the file system allows.
+
+### Commands and API
+
+The `reel` branch sits under the mod's command root: `/isekaiexpansion reel`, or `/ise reel` through the short alias. The server checks permission level 2 and hands the command to your client, which owns the reel files. Reel ids are suggested from your own reel folder.
+
+| Command | Effect |
+| --- | --- |
+| `/ise reel`, `/ise reel studio` | Opens the studio on the last document |
+| `/ise reel open <id>` | Loads a saved reel into the studio |
+| `/ise reel play <id>` | Plays a saved reel as a take; the studio does not reopen |
+| `/ise reel stop` | Stops any reel playback or preview |
+| `/ise reel list` | Lists saved reels; click one to open it |
+
+Other client code can drive the planner through `net.kzeroko.isekaiexpansion.api.client.camera.ShotPlannerAPI`. Call it on the client thread.
+
+```java
+ShotReel reel = ShotPlannerAPI.load("ashen_gate");
+ShotPlannerAPI.record(reel);
+```
+
+| Method | Effect |
+| --- | --- |
+| `load(String id)` | Reads and validates a saved reel; throws `IOException` for a missing, unreadable or invalid file |
+| `record(ShotReel reel)` | Plays the reel from its start as a take |
+| `stop()` | Stops playback or a studio preview |
+| `isPlaying()` | Whether a preview or take is running |
+| `openStudio()` | Opens the studio when the player has permission |
+
+Playback takes the camera ahead of every other camera owner, including server cinematic scenes, for as long as it runs. See the [developer editor workspace](/en/dev/editor-preferences/) page for the order.
+
+## Checklist
+
+- Open the reel in the dimension it was planned in and confirm the gizmos appear.
+- Scrub each shot with `C` on, then preview it at 1× with `Space`.
+- Check title cards and cues at their reel times, with **Cues in preview** on if commands matter.
+- Save, then record once with OBS running and trim the pre-roll and post-roll.
+- Confirm your perspective and HUD return after the take.
+- With the player shown, check that no path segment is amber. With the player hidden, preview far from where you stand, confirm real terrain up close and that you return afterwards.
+
+## Related
+
+- [Developer editor workspace](/en/dev/editor-preferences/) — viewport navigation, picking, preferences and the camera order.
+- [Scene recorder and visual editor](/en/dev/scene-editor/) — server-played cinematic scenes, which players experience in game.
+- [Camera Scene API](/en/dev/camera-api/) — client camera animations from assets.

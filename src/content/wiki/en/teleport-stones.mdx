@@ -1,0 +1,82 @@
+---
+title: "Teleport Stones"
+description: "Attune anchor blocks to a personal travel ledger and cross to them, or to a party member, with a teleport stone."
+category: world
+order: 85
+updated: 2026-10-14
+tags: ["travel", "teleport"]
+---
+
+A teleport stone carries you to the destination set in your travel ledger: Remote Sky Garden, one of up to 16 anchors you have attuned, or a member of your party. Holding the stone for 60 ticks (3 seconds) starts the crossing, and the stone's grade decides what each crossing costs.
+
+Remote Sky Garden is the default destination for a new ledger when the world hub is ready. Its permanent row stays visible under every filter, cannot be renamed or forgotten and uses none of the `16` anchor slots. Crossings use the hub’s safe arrival plane; the usual toll and channel duration still apply. You can select an attuned anchor or a companion instead. See [World spawn](/en/wiki/world-spawn/).
+
+## The three stones
+
+Every stone reads the same ledger. The ledger belongs to you rather than to a stone, so a new stone already knows every anchor you have attuned and a stone that crumbles takes nothing with it.
+
+| Stone | Stack size | Toll per crossing | Kept after use |
+| --- | --- | --- | --- |
+| Teleport Stone·Alpha | 16 | Crumbles and drains all Astral Energy | No |
+| Teleport Stone·Beta | 1 | A quarter of your maximum Astral Energy | Yes |
+| Teleport Stone·Gamma | 1 | Free | Yes |
+
+A toll never refuses a crossing: with too little Astral Energy you pay what you have. Creative mode pays no toll. After a crossing, that grade of stone cools down for 100 ticks (5 seconds).
+
+New characters start with a Teleport Stone·Beta; the first-spawn kit belongs to Isekai Core. Cartographers can offer all three stones through their [trades](/en/wiki/trading/).
+
+## Controls
+
+| Action | Result |
+| --- | --- |
+| Hold Use | Channels for 60 ticks (3 seconds), then crosses to your destination. |
+| Sneak + Use on an anchor block | Attunes the anchor and adds it to your ledger. |
+| Sneak + Use anywhere else | Opens the travel ledger. |
+| Use with no reachable destination | Opens the travel ledger and says why instead of channelling. |
+
+Releasing Use before the channel finishes cancels it. The stone's tooltip shows your current destination and the toll; hold Shift to see the controls.
+
+## Attuning anchors
+
+Two kinds of block can be attuned: the Respawn Altar, and the waystones added by the Fabric Waystones mod when it is installed.
+
+The Respawn Altar sets your respawn point when used with an empty main hand. It does not periodically apply Mining Fatigue to nearby players.
+
+- **The first anchor you attune** becomes your destination if none is set.
+- **An anchor already in your ledger** is not added twice.
+- **A full ledger** holds 16 anchors; forget one before attuning another.
+
+Anchors stay in your ledger through death and across dimensions. A ledger anchor can sit in any dimension, and a crossing to it may change dimension.
+
+## Choosing a destination
+
+The travel ledger lists your anchors in the order you arranged them, then your party members, with online members first. Filters show everything, anchors only or companions only. Selecting a row opens its details: realm, position, distance when it is in your realm, and status.
+
+- **Set as Destination** makes the selected row your stone's destination. Double-clicking a row sets it and closes the ledger.
+- **Rename** gives an anchor your own name of up to 32 characters. Saving an empty name restores the block's name.
+- **Move Up** and **Move Down** change the anchor's place in the list.
+- **Forget Anchor** removes the anchor after a second click within 3 seconds.
+
+The keyboard works too: Up and Down move through the list, Enter sets the destination and F2 renames.
+
+## Crossing
+
+When the channel completes, the crossing checks the destination before you leave:
+
+- **An anchor whose block is gone** is struck from your ledger, and you stay where you are.
+- **An anchor with no safe ground** on any of its four sides cannot be reached; the crossing lands beside the anchor, never on top of it.
+- **A party member** must be online, alive, not spectating and still in your party. You arrive where they stand.
+
+The toll and the cooldown apply only when a crossing actually starts.
+
+## Interactions
+
+| System | Effect on teleport stones |
+| --- | --- |
+| Astral Energy | Pays the Alpha and Beta tolls. |
+| Party | Party members appear as companions. The party system belongs to the pack's party integration; without a party the companion list is empty. |
+| Fabric Waystones | Its waystones are anchor blocks when the mod is present. |
+
+## Where the data lives
+
+Anchor blocks are the `isekaiexpansion:teleportable_blocks` block tag, so a data pack can add or remove anchor blocks by editing that tag. Your ledger is stored with your character.

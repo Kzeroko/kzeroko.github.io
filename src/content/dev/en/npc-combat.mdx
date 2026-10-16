@@ -3,7 +3,7 @@ title: "NPC combat"
 description: "Target intent, action selection, timed attacks, weapon melee, damage guards and combat state."
 category: systems
 order: 63
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 The NPC combat stack uses `entity.CombatNpcEntity` and the internal `internal.ai.action` implementation. These are project extension types, not a public combat facade. This page covers autonomous NPCs; a player-controlled morph continues to use the player's combat input.
@@ -53,7 +53,7 @@ The action set is built lazily from subclass registrations only. Empty sets supp
 
 On each controller tick, per-action cooldowns and a positive global cooldown decrement first. Dead, sleeping, item-using, POI-busy or emoting NPCs stop navigation and end an active action with `BLOCKED`. Goal-effect brain suspension calls `interrupt()` instead of ticking this controller, so these cooldowns do not advance through that path.
 
-An idle controller with no global cooldown evaluates each non-cooling action: meet its minimum completed-swing count, select a live same-world target, call `isInRange`, call `canStart`, and require a finite positive score. Highest priority wins, then highest score; an exact tie keeps the earlier registered action. A positive `rangeOverride()` replaces `attackRange`; otherwise the configured range is used. The selected action reserves its next permitted melee boundary: the controller does not begin another swing while waiting, and re-evaluates eligibility every tick.
+An idle controller with no global cooldown evaluates each non-cooling action: meet its minimum completed-swing count, select a live same-world target, call `isInRange`, call `canStart`, and require a finite positive score. For profiles without ranged tactics, highest priority wins, then highest score; an exact tie keeps the earlier registered action. A positive `rangeOverride()` replaces `attackRange`; otherwise the configured range is used. The selected action reserves its next permitted melee boundary: the controller does not begin another swing while waiting, and re-evaluates eligibility every tick.
 
 | Timing field | Type | Default | What it does |
 | --- | --- | --- | --- |
@@ -63,11 +63,87 @@ An idle controller with no global cooldown evaluates each non-cooling action: me
 
 `NpcActionTiming.instant()` is `(0, 1, 0)`. Starting an action calls `onStart` immediately; execution begins on a later controller tick. The final casting tick changes phase and returns, so it does not trigger execution in the same tick. During execution, `onTrigger` runs once at the selected tick; ATTACK also reports an attack to the emotion manager. The per-action cooldown starts after that trigger. The global cooldown starts when the action finishes or is stopped. A stop before the trigger also starts its per-action cooldown, preventing repeated cancelled casts from retrying every tick.
 
-The controller captures a target UUID and live reference. While active it checks life, removal and world, looks toward the target with `45`-degree limits, and runs the timeline. It does **not** re-run the active action’s `selectTarget`, `canStart`, range, visibility or score each execution tick. If `interruptible()` is true and the global cooldown is clear, an eligible action with strictly higher priority may replace it at its permitted melee boundary. Equal priority never pre-empts. Blocking, explicit interruption and target loss stop even non-interruptible actions.
+The controller captures a target UUID and live reference. While active it checks life, removal and world, tracks the target with bounded 15-degree body, head and pitch turning per tick, and runs the timeline. It does **not** re-run the active action’s `selectTarget`, `canStart`, range, visibility or score each execution tick. Without ranged tactics, if `interruptible()` is true and the global cooldown is clear, an eligible action with strictly higher priority may replace it at its permitted melee boundary. Equal priority never pre-empts. Blocking, explicit interruption and target loss stop even non-interruptible actions.
 
-Navigation locking applies at start and during casting/execution. Movement locking zeroes forward/sideways inputs during execution; it is not a velocity reset. Stop reasons are `FINISHED`, `TARGET_LOST`, `INTERRUPTED` and `BLOCKED`. `onStop` receives the captured target, which may be null, then tracked combat state is cleared. A stop before triggering consumes the authored action cooldown; an already-applied cooldown is retained. These authored timers never delay baseline weapon attacks.
+Navigation locking applies at start and during casting/execution. Movement locking zeroes forward/sideways inputs during execution; it is not a velocity reset. Stop reasons are `FINISHED`, `TARGET_LOST`, `INTERRUPTED` and `BLOCKED`. `onStop` receives the captured target, which may be null, then tracked combat state is cleared. For profiles without ranged tactics, a stop before triggering consumes the authored action cooldown; an already-applied cooldown is retained. These authored timers never delay baseline weapon attacks.
 
-If no action starts, approach logic considers the hostile target. It holds when the weapon hitbox reaches the target, including during special-action cooldowns, or while a selected ATTACK/DEBUFF action against that hostile waits at its melee boundary. Otherwise it approaches. HEAL, BUFF, CLEANSE and SHIELD do not hold offensive approach. Visible-target paths use zero target tolerance and refresh every `4–6` controller ticks, updating navigation speed in between; a long spell range cannot leave a melee fighter stopped outside weapon reach.
+### Ranged tactics
+
+`NpcConfig.rangedCombat` enables controller-owned humanoid tactics. There is no escape task or exclusive retreat phase. The NPC approaches only outside `attackRange`; inside it, a configured escape gets the idle boundary before another action starts. Short footwork remains available between actions. A brief grounded sidestep may accompany an unlocked cast. A blocked maneuver leaves offense available. Evelina uses the `MAGE` preset and a 16-block combat range.
+
+`NpcRangedTactics` coordinates the internal components: `NpcTacticalMemory` records hostile attack attempts, `NpcTacticalDecision` ranks actions and resolves timing, `NpcCombatFootwork` handles short steps, and `NpcCombatLeap` validates escape arcs through shared `NpcCombatTerrain` geometry. Incoming attacks refresh pressure memory, but never renew an active guard or reset defense cooldowns. A nearby target also creates pressure. Item auto-use waits while pressured or repositioning.
+
+Set `.role(NpcActionRole.QUICK)` on an action builder, independently from its school, target policy and priority. Ranged selection compares tactical rank before authored priority and score. Offensive candidates also require visibility. Critical `RECOVERY` targets at or below 45% health rank 60; other ranks are:
+
+| Role | Under pressure | Calm, at preferred distance | Calm, closer |
+| --- | --- | --- | --- |
+| `GENERAL` | 20 | 20 | 20 |
+| `QUICK` | 50 | 20 | 20 |
+| `CONTROL` | 45 | 15 | 15 |
+| `PRESSURE` | 25 | 30 | 30 |
+| `COMMITMENT` | 0 | 40 | 5 |
+| `RECOVERY` | 10 | 10 | 10 |
+
+`GENERAL` is the default. `QUICK`, `CONTROL` and `RECOVERY` use the response windup/recovery caps during the counter window or while crowded. Their individual spell cooldowns are unchanged. Under pressure, an interruptible nonresponsive windup can yield to a ready responsive action before its final commitment ticks. An executing `COMMITMENT` action can yield after its configured minimum channel time. Ranged tactics replace priority-only pre-emption; quick casts are not displaced by higher-priority long casts. Evelina marks fire/lightning as `QUICK`, ice as `CONTROL`, barrages and spectral swords as `PRESSURE`, rain/sweep/beam/ultimate as `COMMITMENT`, and healing as `RECOVERY`. Healing requires its selected target to be at or below 45% health.
+
+A dodgeable ranged NPC first tries a safe ground step when struck, except during movement-locked actions or final commitment/execution. Evasion receives a short existing combat-roll avoidance window only after a safe route is found. Otherwise the mage guard can reduce avoidable combat damage and add temporary knockback resistance. Guard is finite, has its own cooldown, and cannot overlap a new evasion. Environmental and bypass damage retain the shared avoidance policy. Control loss, death and removal clear active defenses; recovery costs survive control loss and target changes. Guard onset has enchantment particles and an amethyst chime.
+
+Footwork tries six directions, alternating its preferred side only after a successful plan. Close maneuvers angle away; distant ones move laterally. Each candidate checks the complete corridor at 0.35-block intervals, loaded chunks, world border, dry support, body clearance and support under each corner. Vertical changes are limited to 0.6 blocks. It rejects reduced separation and destinations beyond combat range when starting inside it. Visible endpoints score higher. Each movement tick rechecks its next segment and faces the target; a tracked footwork flag preserves combat torso facing on clients; failure or timeout releases the maneuver. This uses velocity and collision, never teleportation or flight. Melee approach remains unchanged, with visible-target paths refreshed every 4–6 controller ticks.
+
+`NpcRangedCombat` is immutable Java configuration passed to the `NpcConfig` builder, not a reloadable JSON file. Omission uses `DISABLED`; `MAGE` explicitly enables it. All four groups are required and non-null. The table gives `MAGE` values; `DISABLED` disables both tactics and escape.
+
+| Field | Type | Default | Bounds, unit and purpose |
+| --- | --- | --- | --- |
+| `enabled` | boolean | true | Enables tactics. |
+| `positioning` | Positioning | Required | Movement and pressure distances. |
+| `defense` | Defense | Required | Independent evasion and guard windows. |
+| `casting` | Casting | Required | Response cadence and interruption handling. |
+| `escape` | Escape | INTENSE | Configurable strong separation before idle action selection. |
+| `positioning.dangerDistance` | double | 4 | Positive blocks; closer enemies cause pressure and response cadence. |
+| `positioning.preferredDistance` | double | 9 | At least dangerDistance, no greater than attackRange when enabled; scoring preference, not a mandatory retreat destination. |
+| `positioning.stepDistance` | double | 3.5 | 1–6 blocks per candidate route. |
+| `positioning.stepSpeed` | double | 0.55 | Greater than 0, at most 1 block/tick. |
+| `positioning.stepTicks` | integer | 12 | 1–30 ticks; maximum movement duration. |
+| `positioning.repositionCooldownTicks` | integer | 32 | At least stepTicks; cooldown after a successful plan. |
+| `positioning.blockedRetryTicks` | integer | 12 | At least 1 tick before retrying a failed route search. |
+| `defense.evadeCooldownTicks` | integer | 36 | More than evadeInvulnerabilityTicks; successful evasion recovery. |
+| `defense.evadeInvulnerabilityTicks` | integer | 6 | Nonnegative ticks of avoidable-damage protection. |
+| `defense.guardCooldownTicks` | integer | 65 | More than guardTicks; measured from guard onset. |
+| `defense.guardTicks` | integer | 18 | At least 1 tick; fixed guard duration. |
+| `defense.guardedDamageMultiplier` | float | 0.55 | Greater than 0, at most 1; multiplier on avoidable incoming combat damage. |
+| `defense.guardKnockbackResistance` | double | 0.85 | 0–1 additive temporary knockback resistance. |
+| `defense.pressureMemoryTicks` | integer | 60 | At least 1 tick; tactical pressure after an incoming hostile attack. |
+| `defense.counterWindowTicks` | integer | 36 | 1 through pressureMemoryTicks; response cadence after an incoming attack. |
+| `casting.responseCastTicks` | integer | 10 | At least 1 tick; responsive windup cap. |
+| `casting.responseRecoveryTicks` | integer | 6 | At least 1 tick; responsive global recovery cap. |
+| `casting.groundGraceTicks` | integer | 10 | 0–20 consecutive airborne ticks retaining a ground windup; 0 disables grace. |
+| `casting.interruptedRetryTicks` | integer | 12 | At least 1 tick; pre-delivery interrupted action cooldown cap. |
+| `casting.interruptedRecoveryTicks` | integer | 6 | At least 1 tick; interrupted global cooldown cap. |
+| `casting.commitmentTicks` | integer | 8 | Nonnegative final windup ticks protected from tactical pre-emption/evasion. |
+| `casting.pressureChannelTicks` | integer | 30 | At least 1 execution tick before a commitment channel may yield. |
+
+Non-finite numbers and out-of-bound values throw. Tune movement, defenses and casting independently by constructing their records and passing them to `new NpcRangedCombat(true, positioning, defense, casting, escape)`. `rangedStatus()` exposes pressure, response, guard and maneuver flags for debugging without mutable state. An interrupted ranged action that has not triggered gets the short retry cooldown; an already-delivered spell keeps its paid cooldown. Incoming hostile attacks can shorten remaining global recovery to the response cap.
+
+
+### Escape intensity
+
+The original ranged task used a 40-tick cooldown, 8 angular samples per sector, trigger ratio 0.35, preferred radius ratio 0.90, and a leap impulse of 1.45 horizontally and 0.28 vertically. The current `Escape.INTENSE` preset preserves those trigger/radius/impulse/cooldown values, with a bounded arc search instead of a competing brain task. Evelina's 16-block range therefore triggers below 5.6 blocks and scores landings toward 14.4 blocks. The impulse returns to normal grounded casting after landing; it never creates flight or hover state.
+
+`NpcCombatLeap` tries eight evenly spaced directions and traces each actual discrete arc for at most 24 ticks, using 0.91 horizontal drag, 0.98 vertical drag and 0.08 gravity. Quarter-block body probes check loaded space, border and collisions; landing reuses `NpcCombatTerrain` support checks, requires at least 1 extra block of separation, stays inside combat range, and allows at most 1.75 blocks of height change. Visibility and closeness to the preferred radius determine the choice. Failed planning permits a short footwork fallback and immediate spell selection. Successful launches set an impulse once and expire on ground contact or timeout. No navigation reservation or teleport loop is involved. Committed actions are never cancelled to leap.
+
+`Escape.MEASURED` uses ratios 0.25/0.75, speed 0.95, lift 0.28, cooldown 60 ticks and retry 15 ticks. `Escape.DISABLED` turns off strong leaps while retaining other tactics. Construct `Escape` directly for per-NPC intensity:
+
+| Field | Type | Default | Bounds and meaning |
+| --- | --- | --- | --- |
+| `escape.enabled` | boolean | true | Enables escape attempts at idle boundaries. |
+| `escape.triggerRangeRatio` | double | 0.35 | Greater than 0 and less than desiredRangeRatio; fraction of attackRange. |
+| `escape.desiredRangeRatio` | double | 0.90 | Greater than triggerRangeRatio and at most 1; landing scoring radius as a fraction of attackRange. |
+| `escape.horizontalSpeed` | double | 1.45 | Greater than 0 and at most 2 blocks/tick; launch impulse. |
+| `escape.verticalSpeed` | double | 0.28 | Greater than 0 and at most 0.6 blocks/tick; upward impulse. |
+| `escape.cooldownTicks` | integer | 40 | At least 20 ticks; starts on successful launch. |
+| `escape.blockedRetryTicks` | integer | 10 | At least 1 tick; failed route retry delay. |
+
+Non-finite values throw. Guard, evasion, short footwork and leap cooldowns remain independent. The `rangedStatus()` snapshot includes an `escaping` flag.
 
 ### Support actions
 
@@ -126,7 +202,7 @@ Once unlocked, revenge stays unlocked until that player's memory expires. This i
 
 Outgoing player damage is restricted to the captured combat target, or a player on that target player's side. Without a captured target, the ordinary target must be a player and the same rule applies. Creative, spectator, dead and otherwise untargetable players fail. `NpcTargetDamageGuard` checks responsible NPC ownership from both attacker and direct source; this is additional to team friendly-fire protection.
 
-Dodging is an explicit entity capability, enabled with `setDodgeableNpc`. The default dodge requires a living, awake, non-item-using, unmounted entity, an eligible damage source and the dependency's airborne permission. It moves away from the source, falling back to backward facing, adds roll velocity and grants a roll-evasion window. A successful dodge sets `dodgeCooldownTick`, then tests the granted window against the current hit.
+Dodging is an explicit entity capability, enabled with `setDodgeableNpc`. Without ranged tactics, the default dodge requires a living, awake, non-item-using, unmounted entity, an eligible damage source and the dependency's airborne permission. It moves away from the source, falling back to backward facing, adds roll velocity and grants a roll-evasion window. A successful dodge sets `dodgeCooldownTick`, then tests the granted window against the current hit.
 
 | Local dodge calculation | Value or behaviour |
 | --- | --- |
@@ -148,12 +224,12 @@ The local window remains valid through its expiry tick. Damage bypassing invulne
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `normalMeleeAttacks` | boolean | true | Permits continuous weapon melee only on combat-capable NPCs. |
-| `attackRange` | double | 2.4 | Default action range in blocks; no constructor clamp. |
+| `attackRange` | double | 2.4 | Default action range in blocks and outer spacing range for ranged NPCs; no constructor clamp. |
 | `protectRange` | double | 12 | Protection/support radius in blocks; no constructor clamp. |
 | `aggroRange` | double | 12 | Ordinary hostile and hidden-target range in blocks; no constructor clamp. |
-| `dodgeCooldownTick` | integer | 30 | Cooldown after successful dodge; clamped to non-negative. |
+| `dodgeCooldownTick` | integer | 30 | Non-ranged successful dodge cooldown; clamped to non-negative. Ranged evasion uses its defense group. |
 
-Ranges are configuration inputs, not validated safe radii. Their squared uses do not reject negative inputs. These are `NpcConfig` defaults; individual NPCs override them.
+Most ranges remain unchecked configuration inputs. Enabling ranged tactics additionally requires preferredDistance to fit within attackRange. These are `NpcConfig` defaults; individual NPCs override them.
 
 Combat cooldown fields live directly in entity NBT:
 
@@ -174,13 +250,17 @@ At the end of the model's pose work, before humanoid body shaping, `HumanoidPlay
 
 Held-item offsets are applied through matrices: position divided by `16`, then Z/Y/X rotations. They are not accumulated onto item bones. The morph body channel has a separate outer matrix transform, and the bridge restores the Gecko `body` bind transform before applying host parts. Keep animation ownership separate from server hit authority when extending renderers.
 
+### Ground and aerial action requirements
+
+`NpcAction.environment()` and `NpcActions.Builder.environment(...)` select `GROUND`, `GROUND_OR_WATER`, `WATER`, `AIR` or `ANY`. The default GROUND_OR_WATER requires no flight or lava, plus ground contact or water contact. GROUND remains strict ground contact without flight; WATER requires water without lava/flight; AIR requires being off ground outside water/lava; ANY explicitly permits all environments. Evelina can therefore cast while submerged without enabling aerial attacks. Her Ice Burst still requires its target to stand on a surface. Selection and active execution both check the environment. Brief displacement pauses a ranged ground windup within its configured grace; executing ground/water spells still stop when their environment is lost. Volleys are non-interruptible by tactical selection, so preparing a counter never cancels their charge or sequence. Death, control loss, target loss and invalid environments still stop actions.
+
 ## Extending it
 
 Override `registerNpcActions(NpcActionSet.Builder)` on the NPC subclass. Use stable, unique IDs and deterministic registration order. Implement `NpcAction` or use `NpcActions.builder` when its targeting rules fit.
 
 | Member group | Responsibility |
 | --- | --- |
-| `id`, `type`, `priority`, `score` | Identity, action category and selection/pre-emption ordering |
+| `id`, `type`, `role`, `priority`, `score` | Identity, action category and selection/pre-emption ordering |
 | `selectTarget`, `canStart`, `rangeOverride` | Admission; recheck impact-specific constraints in the trigger |
 | `timing`, `cooldownTicks`, `globalCooldownTicks` | Timeline and separate cooldown lifecycles |
 | `locksNavigation`, `locksMovement`, `interruptible` | Requested locks; whether higher-priority actions may replace this action |
@@ -208,6 +288,8 @@ builder.add(NpcActions.builder("short_cast_lightning", NpcActionType.ATTACK)
 Evelina’s definitions use this builder while retaining her existing spell timing, damage and disabled normal melee. New archetypes choose their own rotation policies; the builder does not turn a caster into a melee fighter.
 
 ## Verifying
+
+Repeated-pressure regression checks cover fixed guard duration, independent defense cooldowns, responsive role ranking, bounded ground-windup grace and pre-delivery retry costs. In game, test Evelina against a Warden and several attackers in open space, beside walls and near ledges; verify actual hit cadence, grounded releases and visible defensive windows. Unit checks do not establish the outcome of those encounters.
 
 Run `./gradlew.bat compileJava`. In game, verify saved attribute loading, persistent modifiers, weapon swaps, action cancellation and independent NPC state with multiple players.
 

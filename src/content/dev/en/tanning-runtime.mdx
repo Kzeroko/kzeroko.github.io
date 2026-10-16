@@ -1,0 +1,107 @@
+---
+title: "Tanning runtime"
+description: "Server-run tanning batches, the stage simulation, lag-bounded timing, the overlay and the tanned-leather event."
+category: systems
+order: 183
+updated: 2026-10-06
+---
+
+Tanning is a transient server session per player, worked in the world at a vanilla cauldron and shown on a ModernUI overlay. A pure stage simulation is ticked by the session and streamed to the tanner every tick; nothing is persisted and nothing is taken from the player until a batch commits. These are internal contracts under `internal.tanning`, not a public API facade.
+
+## What it does
+
+The system owns one batch per tanner and one tanner per vat: starting a batch, simulating its six stages, judging timed input, and turning the result into leather. See [leather tanning](/en/wiki/tanning/) for the player rules and [tanning recipe data](/en/wiki/tanning-recipes/) for the JSON.
+
+It deliberately stops at the cauldron's own state. There is no block entity and no saved data: a server stop, a disconnect or a step away discards the batch, which is safe because nothing has been consumed. Leather consumers, trades and profession bonuses are outside it; the completion event is the extension point.
+
+## Runtime model
+
+| Package | Role |
+| --- | --- |
+| `internal.tanning` | Domain enums with no Minecraft types: grades, stages, tools, tones, difficulty, heat, climate. |
+| `internal.tanning.work` | The stage simulation, also free of Minecraft types, so `tools/tanning/TanningWorkCheck.java` can play it with bots. |
+| `internal.tanning.station` | The cauldron as a vat, the inventory kit, recipe lookup and tags. |
+| `internal.tanning.session` | Sessions, commit, world effects and the use/attack callbacks. |
+| `client.tanning` | The client's view of its own batch, its clock, the vat preview and in-world input. |
+| `client.render.hudoverlay.tanning` | The overlay window and the sprite atlas classes. |
+
+`TanningSystem.initCommon` registers the session ticker and the server `UseBlockCallback` and `AttackBlockCallback`. Using a cauldron in `TanningVat.isVat` with a `TanningToolItem` or a matching hide in the main hand calls `TanningSessions.begin`, which checks water, vat occupancy, the recipe, the round knife, agents and the held hide count in that order, then sizes the batch from the held stack. Sneaking makes it quick: `finishSteadily` then an immediate commit.
+
+`END_SERVER_TICK` validates every session, ticks its `TanningWork`, plays cues as vanilla sounds and particles at the vat and sends `TanningStatePacket.Work`. A session closes when the player is dead, a spectator, in another dimension or more than 8 blocks from the vat centre, when the vat is no longer a cauldron, or when it holds no water.
+
+### Stage phases
+
+`TanningWork` runs each stage as intro, active and outro. Smoking is skipped without a heat source; heat is read when smoking begins and climate when drying begins.
+
+| Phase | Ticks | Input |
+| --- | --- | --- |
+| `INTRO` | 14 (0.7 seconds) | Ignored; hold state is applied when the stage becomes active. |
+| `ACTIVE` | Until the stage finishes or times out | Judged. |
+| `OUTRO` | 12 (0.6 seconds) | Ignored. |
+| `DONE` | — | The session commits on the same tick. |
+
+### Packets
+
+| Channel | Direction | Payload |
+| --- | --- | --- |
+| `isekaiexpansion:tanning_action` | client → server | Session id, `WORK` / `LIFT` / `HOLD`, the stage tick the player saw, and the hold state. |
+| `isekaiexpansion:tanning_state` | server → client | Session id, a mode and a notice. `BEGIN` carries the vat, hide, pieces, tone, both grade limits, difficulty and finishing passes; `WORKING` carries the stage view, stage scores, workmanship, cues, heat and climate; `RESULT` carries the leather, grades and scores; `CLOSED` carries why. |
+
+Actions for another session id, or from another dimension, are ignored.
+
+### Timing
+
+Meters, blades and sweeps are pure functions of the stage's active ticks and seed in `TanningMotion`. The client draws them from the last server tick plus elapsed time, extrapolating at most 2 ticks, and reports that same fractional tick with `WORK` and `LIFT`.
+
+The server judges a timed action at the reported tick, bounded to `[now − lag, now]` where `lag = 2 + ceil(ping / 50)` ticks, capped at 12. The client sends a second work action only after the server has acknowledged the first through the stage's action sequence, or after 450 ms, and never within 140 ms of the last.
+
+### Input and overlay
+
+`TanningInputClient` intercepts the attack key with `ClientPreAttackCallback` while the crosshair is on the session's vat: a click count above zero sends one `WORK`, and holding never starts block breaking. The client `UseBlockCallback` sends `LIFT` on a fresh use press and returns `FAIL`, except with sneak, which lets the interaction reach the server's steady finish. The held use key is polled each client tick and sent as `HOLD` only when it changes. The server also returns `FAIL` from `AttackBlockCallback` for the owner's vat.
+
+`TanningHudOverlay` attaches one non-focusable ModernUI root, registers it with `HudAPI` and delivers a `TanningHudPresentation` per client tick: preview, working, result or hidden. Previews are computed on the client from synced recipes, the world and the player's inventory. A result stays on show for 5 seconds.
+
+## Contracts
+
+- **Nothing is taken before commit.** `TanningCommit` checks water and the round knife, then shrinks the batch to the hides and agents still carried, then takes them all or none. Agents outside `#minecraft:logs` are taken before logs.
+- **Commit order.** Hides and agents are taken, one water level is drawn, used tools wear by 1 outside creative mode, `ON_LEATHER_TANNED` runs, the leather is offered to the inventory or dropped, the quest trigger fires, then world effects play.
+- **Grade.** The lowest of the workmanship grade, the recipe's `max_grade` and the kit cap. The kit cap uses the tools carried at begin that are still carried at commit.
+- **Masterwork.** A total score of 97 or more adds one piece. The quest trigger credits the batch's pieces without it.
+- **One batch each.** A new batch abandons the player's previous one; a vat worked by another player refuses with `VAT_BUSY`.
+- **Reloads.** A session holds its recipe object, so a reload never changes a batch in progress.
+- **Event side.** `ON_LEATHER_TANNED` runs on the server thread with the player, the recipe, the final grade and the output stack, which callbacks may change in place.
+
+## Extending it
+
+New hides are recipes and new agents are tag entries. For internal behaviour on completion, register during common initialisation:
+
+```java
+PlayerTanningEvents.ON_LEATHER_TANNED.register((player, recipe, grade, output) -> {
+    if (grade == TanningGrade.LEGENDARY) {
+        output.getOrCreateNbt().putBoolean("example_royal", true);
+    }
+});
+```
+
+Keep the work package free of Minecraft types: the tuning harness compiles it without the game. After changing a stage run, `TanningDifficulty` or a grade threshold, run the harness and keep its table in the intended bands.
+
+## Verifying
+
+Run the bot harness from the repository root. It plays 1500 batches per bot and difficulty and fails if a flawless tanner misses Legendary, a steady finish is not Uncommon, an idle batch is not Common or any batch fails to end.
+
+```bash
+./gradlew.bat -I tools/tanning/verify.gradle checkTanningWork --offline
+```
+
+In game:
+
+- Start batches by holding hides, by sneaking for quick work and by holding only a tool; check the notices for a dry vat, a missing knife and missing agents.
+- Work each stage and confirm attack never breaks the vat, use lifts once per stage and the damper follows the held key.
+- Walk away, break the vat and empty it mid-batch; confirm nothing was consumed.
+- Put hides away mid-batch; confirm the batch shrinks instead of failing.
+- Finish with and without a fire, in rain and sun, and with each tool removed; compare the overlay's limits with the result.
+- Join a second player at the same vat and confirm `VAT_BUSY`.
+
+## Related
+
+[Forgery runtime](/en/dev/forgery-runtime/) is the anvil-based sibling. Quest crediting uses the `recipe_crafted` trigger documented in [quest objectives](/en/wiki/quest-objectives/).

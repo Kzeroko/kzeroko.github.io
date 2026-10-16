@@ -3,14 +3,14 @@ title: "Team protection"
 description: "Player anchors, follower ownership, damage attribution and non-beneficial effect filtering."
 category: systems
 order: 140
-updated: 2026-09-19
+updated: 2026-10-07
 ---
 
 Team protection compares the player behind each combatant. A live follower shares its owner's side, while damage attribution can resolve a projectile or owned entity to its immediate owner; this keeps the same rule available to damage, effects and targeting.
 
 ## What it does
 
-The internal `TeamAllegiance`, `TeamDamageGuard` and `TeamStatusEffectGuard` classes live under `internal.team`. They are not public API facades. Same-team membership delegates to IsekaiCore's `TeamLogic.server().areOnSameSide`; this checkout consumes `isekaicore_version=0.4.0-build61`.
+The internal `TeamAllegiance`, `TeamDamageGuard` and `TeamStatusEffectGuard` classes live under `internal.team`. They are not public API facades. Same-team membership delegates to IsekaiCore's `TeamLogic.server().areOnSameSide`; this checkout consumes `isekaicore_version=0.4.0-build65`.
 
 The integration does not define a second party roster or persist alliance state. NPC follower ownership remains governed by the live follower session, and formal team semantics belong to IsekaiCore.
 

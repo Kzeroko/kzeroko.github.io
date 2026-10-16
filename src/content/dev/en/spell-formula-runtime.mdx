@@ -1,0 +1,201 @@
+---
+title: "Spell formula runtime"
+description: "Formula schemas, forms and fusion, formation staging, rating, the stability guard, item storage and how a woven cast runs through Spell Engine."
+category: systems
+order: 32
+updated: 2026-10-16
+tags: ["Spells", "Formulas", "Spell Engine"]
+---
+
+Spell formulas are per-item programs layered over Spell Engine: a manuscript or vessel stores a formula under its lead spell's ID, and every hook that times, prices, admits or delivers that spell reads it back. The formula never registers a spell of its own, so cooldowns, the spell bar and binding all keep keying on the lead's existing ID. [Spell formulas](/en/wiki/spell-formulas/) is the player reference for the numbers.
+
+## What it does
+
+The authoring surface lives in `net.kzeroko.isekaiexpansion.spell.formula`: `FormulaSchema`, `SpellShape`, `FormulaKnob`, `FormulaKnobs`, `KnobKind`, `SpellForm`, `SpellStage` and `SpellTuning`. The fusion content interfaces `ICircleSummonSpell`, `IVolleySpell` and `IRainSpell`, plus `SpellFusion`, sit beside `IChannelBeamSpell` in `net.kzeroko.isekaiexpansion.spell`. The model, rating, guard, staging, storage, casting and editing live in `internal.spellformula` and are not API. `SpellFormulaAPI` is the public facade for reading formulas, validating them and writing a formula onto a new manuscript.
+
+A spell opts in by overriding `IIsekaiSpell.formula()`; the default is `FormulaSchema.SEALED`. Spells from other mods resolve to sealed schemas and are never tuned, chained or infused. The formula does not change a spell's registered definition, its targeting or its animation; it only changes the numbers each hook reads, what its cast fuses in, where it stands in a formation and what happens after the lead's delivery.
+
+## Runtime model
+
+### Storage
+
+A manuscript is an `isekaiexpansion:spell_scroll` stack whose container's first spell ID is the lead. A vessel keeps one formula per inscribed spell. A formula whose chain is only the lead, with no notches, no infused spell and no name, is never written; writing it removes the key instead.
+
+```text
+{IsekaiFormula:{Name:"Ember Hymn",Chain:[{Spell:"isekaiexpansion:fireball",Notches:{style:1b,potency:3b},Infused:["isekaiexpansion:flame_arrow"]},{Spell:"isekaiexpansion:fireball_rain",Delay:10b}]}}
+{IsekaiFormulas:{"isekaiexpansion:arcane_volley":{Chain:[{Spell:"isekaiexpansion:arcane_volley",Infused:["isekaiexpansion:shooting_star_volley"]}]}}}
+```
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `IsekaiFormula` | `compound` | absent | The manuscript's formula. Absent means the lead casts as authored. |
+| `IsekaiFormulas.<spell id>` | `compound` | absent | A vessel's formula for one inscribed spell, written by binding and re-inscription, erased by unbinding. |
+| `Name` | `string` | absent | Player-given title, cut to 32 characters on read. Blank reads as absent. |
+| `Chain[]` | `list<compound>` | required | The lead first, then followers. An empty list, or more than 16 entries, reads as no formula. |
+| `Chain[].Spell` | `string` | required | Spell ID. An unparsable ID reads as no formula; an unknown one fails the guard. |
+| `Chain[].Notches.<knob id>` | `byte` | absent | Chosen notch index; only notches that differ from the knob's base are stored. |
+| `Chain[].Delay` | `byte` | `0` | Ticks after the previous link fires. Negative values read as `0`; the lead's value is ignored. |
+| `Chain[].Infused[]` | `list<string>` | empty | Spell IDs fused into that link, in formula order. An unparsable ID reads as no formula. |
+
+This is save data written by the Weaver, the binding desk and `SpellFormulaAPI.manuscript`, not an authoring surface. A formula whose lead differs from the manuscript's spell is ignored, and the manuscript casts its spell plain.
+
+### Forms, fusion and formations
+
+`FormulaSchema` owns ordered `SpellShape` definitions. The authored shape is index 0; multiple shapes expose the `style` knob. Each shape owns its form, offered knobs, formation knob and weight, strain, cast, cooldown and energy multipliers. Authored multipliers must all be 1. `shape(link::notch)` selects the active shape; `fusible(shape)` checks its form and the schema’s opt-out. Changing Style through `FormulaEditing` removes arguments unavailable on the new shape. Infused partners lend their first compatible shape through `shapeOf(form)`.
+
+| `SpellForm` | Fusible | Fusion share | Formation | Content interface |
+| --- | --- | --- | --- | --- |
+| `DIRECT` | no | 0 | `NONE` | — |
+| `SUMMON` | yes | 0.75 | `FRONT` | `ICircleSummonSpell.circle()` |
+| `VOLLEY` | yes | 0.4 | `NONE` | `IVolleySpell.volleyShot()` |
+| `RAIN` | yes | 0.4 | `TARGET` | `IRainSpell.rain()` |
+| `SWEEP` | no | 0 | `BACK` | — |
+| `CHANNEL` | yes | 0.45 | `NONE` | `IChannelBeamSpell.beamProfile()` |
+| `RAY`, `PREPARED`, `AREA` | no | 0 | `NONE` | — |
+
+A fused cast resolves its contents with `SpellFusion.contents(this, tuning, Interface.class)`: the host first, then every infused spell the registry still knows in that content type. Partners lend their own registered deliveries; no per-partner variant is ever registered.
+
+| Form | Runtime |
+| --- | --- |
+| Summoning | `MagicProjectileAPI.summon` opens one circle per slot. `ChargedProjectileCasting` charges and launches each content's projectile in turn from the same circle; every second circle runs the contents reversed. |
+| Volley | Shot *i* fires `contents.get(i % n).volleyShot()` through the host's `ProjectilePatternAPI.Volley`. |
+| Rain | `RainCast` lists each content's projectile; shot *i* takes `ammunition.get(i % n)`, and the disk wears the partners' designs. |
+| Channel | `ChannelBeamAPI.pulse(caster, profile, modulation, cores)` keeps the host's beam and collision, synchronises the first core to the client, and gives damaging pulse *k* to content *k* mod *n*. |
+
+`FormulaStaging.stages` gives each link a `SpellStage(first, total, group)`. Links that fire on the same tick share one row per formation kind; each takes consecutive slots sized by its formation knob, and `side(k) = first + k − (total − 1) / 2` is a slot's offset from the row's centre. `FormulaCasting.Active` caches the stages, and `tuning(link, seed, group)` stamps the cast's seed as the group. `SpellStage.SOLO` is a lone cast; `spanning(count)` widens a stage for casts made without staging.
+
+`SpellFormation` turns slots into positions: `FRONT` stands circles on an arc at a radius of at least 1.9 blocks, stepping min(80°, 150° ÷ (total − 1)) and widening the radius until neighbours clear each other's rims; `BACK` spaces a row behind the shoulders by twice the rim plus 0.5 blocks; `TARGET` offsets rain disks across the caster's line of sight by twice the radius plus 1.5 blocks; `sweepDirection` keeps the authored left-to-right pass for slots on the caster's left and reverses it on the right. A lone slot keeps the spell's authored placement.
+
+### Rating and the guard
+
+`FormulaRater.rate` is pure arithmetic over `FormulaCatalog.Entry` records: tier, cast, cooldown, deliveries and authored energy from the world's spell registry, plus the cached schema. An infused spell lends its first compatible shape. Its tier weight and energy use that shape’s multipliers and the host’s notch ratio; its strain uses the shape’s base strain, and its cooldown uses the shape’s multiplier and the square root of the host’s notch ratio. Each contribution is scaled by the form’s fusion share. `FormulaGuard.validate` checks structure first, then content, then the rated weave, and returns every issue it finds with the rating.
+
+`SpellTiers` defines tiers 1–13, weight `2^((tier - 1) / 2)` and the inverse `1 + floor(2 × log₂(weight))`. `FormulaRules` delegates tier arithmetic to it. Values above tier 13 remain above the limit so the guard can reject overload. Each follower independently allows 0–60 ticks; there is no separate total-delay cap.
+
+| Constant in `FormulaRules` | Value |
+| --- | --- |
+| `MAX_SPELLS` | 6 |
+| `MAX_FOLLOWERS` | 4 |
+| `MAX_CONTENTS` | 2 |
+| `MAX_DIRECT` | 1 |
+| `MAX_TIER` | 13 (`SpellTiers.MAX`) |
+| `MAX_DELAY_TICKS` | 60 |
+| `STRAIN_LIMIT` | 100 |
+| `NAME_LENGTH` | 32 |
+| `TOGETHER` / `DELAYED` | 1.15 / 1 |
+| `WEAVE_STRAIN` | 1.1 |
+| `HARMONY` | 0.9 |
+| `MAJOR_REACTION` / `MINOR_REACTION` / `RESONANCE_LIMIT` | 1.12 / 1.06 / 1.3 |
+| `ENERGY_STRAIN` | 0.1 |
+| `CAST_TOGETHER` / `CAST_DELAYED` / `CAST_LIMIT` | 0.35 / 0.25 / 2.5 |
+| `COOLDOWN_SHARE` | 0.35 |
+
+| Issue code | Raised when |
+| --- | --- |
+| `UNKNOWN_SPELL` | A link or infused spell ID is not in the spell registry. |
+| `SEALED` | A sealed spell follows or is infused, or a sealed lead carries anything. |
+| `TOO_MANY_SPELLS` / `TOO_MANY_FOLLOWERS` | More than 6 spells, or more than 4 followers. |
+| `NOT_CHAINABLE` | The formula has followers and one of its links is not chainable. |
+| `INSTANT_LEAD` | An instant lead carries followers. |
+| `DELAY` | A follower’s delay is outside 0–60 ticks (0–3 seconds); every whole tick is valid. |
+| `UNKNOWN_KNOB` / `NOTCH` | A stored knob is not offered by the selected shape, or its notch is out of range or equal to the base. |
+| `NOT_FUSIBLE` | A link that cannot be infused carries an infused spell. |
+| `FUSION_FULL` / `FUSION_SAME` | A link holds more than 2 contents, or repeats a spell. |
+| `FORM` | An infused spell has no fusible shape matching the host's selected form. |
+| `DIRECT_PAIR` | The formula holds a second direct shot. |
+| `STRAIN` / `OVERLOADED` | Summed strain passes 100, or the tier passes 13. |
+| `NAME` | The name is longer than 32 characters. |
+
+Issue messages name spells by their translated names. `FormulaAffinity.check` then compares each part's tier and the formula's tier with the caster's school ranks. Its overload taking a rank function lets the Weaver run the same check against a snapshot.
+
+### Resolving a cast
+
+`FormulaCasting.active(player, spell)` asks Spell Engine's `SpellContainerSource.getFirstSourceOfSpell` for the stack that supplies the spell, reads that stack's formula compound and returns its appraisal. Appraisals are cached by compound identity in a weak-key cache of up to 512 entries, together with the world's spell registry and a generation counter. Every Weaver and binding write stores a new compound, which is what invalidates an entry; reloading `spell_energy` advances the generation.
+
+| Hook | Where | What the formula changes |
+| --- | --- | --- |
+| Admission | `SpellCastingRules`, Spell Engine `CASTING_ATTEMPT.PRE` | A woven spell must pass the guard and `FormulaAffinity`; a plain spell keeps the talent gate. The client shows the refusal on the action bar. |
+| Energy | `SpellCastingRules.energyCost` | The appraisal's energy replaces the authored entry before talent, origin and airborne multipliers. Admission, consumption and tooltips share it. |
+| Cast time | `SpellParametersMixin` around `getCastTimeDetails` and `getCastDuration` | `SpellCastTiming.castMultiplier`: school talent × haste powers × the appraisal's cast multiplier. The process length is multiplied and its animation speed divided. Held channels keep their duration. |
+| Cooldown | `SpellParametersMixin` around `getCooldownDuration` | × the appraisal's cooldown multiplier, after Spell Engine's own deductions. |
+| Delivery | `IsekaiSpellHandlerAdapter` | The lead receives link 0's `SpellTuning` with its stage; a successful non-channel delivery unfolds the followers through `FormulaChain`. |
+| Tooltips | `SpellTooltipMixin`, `FormulaTooltips`, `FormulaTooltipComponent` | A spell entry is named and described by its Style; description tokens use the hovered item's formula, or the equipped one, and details add the energy cost. An item carrying woven formulas, a manuscript or an inscribed vessel, draws each as a card: fused sigil, name and tier, every chain spell with its icon joined to the one before by a thread of light, its wait beside its name with an hourglass, tuned arguments as icon chips and infused spell, then stability on the first bar of `textures/gui/screen/spell/widgets/spell_bars.png` and costs. A card's layout is kept for at most 1 second while the same formulas stay hovered. Manuscripts add a line naming the Weaver key. |
+| Cast circle | `CircleRequests` | The cast circle of a woven spell composes its infused spells' designs. |
+| Spell rail, cast bar | `SpellRailSnapshotFactory`, `SpellCastHudOverlay` | Infused spells' icons are drawn cut together with the lead's. |
+
+Followers run on the server through `IEntitySpell.cast(caster, target, tuning)`. Those sharing the lead's tick fire before the adapter returns; later ones wait on one repeating task gated by world time and stop on death, a world change or Stagger. Each cast's seed comes from `FormulaCasting.seed`, using the cast process's start tick so a held channel keeps one seed across its deliveries; follower *n* adds *n* × `0x9E3779B97F4A7C15`, and every link shares the lead's seed as its formation group.
+
+### Delivery shaping
+
+Tuning reaches the shared delivery APIs as plain values, so the client effect contracts follow it without a per-spell rule.
+
+| Surface | Formula value |
+| --- | --- |
+| `MagicProjectileAPI.Flight` | Adds `scale`, 0.25–3. `Flight.tuned` applies velocity, potency and magnitude; `compose` layers them onto a pattern's own flight. |
+| `MagicProjectileAPI.Fan` | 1–8 copies, 0–45° apart, around the aim. |
+| `MagicProjectileAPI.summon` | Contents, circle count, stage and flight; every circle stands in a `FRONT` socket. |
+| `ChargedSpellProjectile` | Tracked `SCALE` grows the collision box and the native size input. Potency persists through `IAttachable.getSpellPotency`. |
+| `SpellProjectileImpact` | Splash radius × scale, capped at 8; impact cues grow through their size input, or raw scale when they have none. |
+| `ChannelBeamAPI.Modulation` | Beam radius × scale, synced as tracked data; pulse damage × potency through the `Damage` interface. Cores run their beam and contact effects inside the host's at 0.55 and 0.7 of its width. |
+| `CircleBeamAPI.Pattern` | One profile, 1–4 circles, a per-circle arc, a pace of 0.25–4 on the sweep speed, the stage and a modulation. Circles of one cast group pass the family lock together. |
+| `ProjectilePatternAPI.RainCast` | Ammunition taking turns, partner designs, shot count, radius up to 8 and the cast tuning, whose stage offsets the disk. Rain circles persist ammunition by impact ID. |
+| `MagicCircleRenderData` | `fused` names up to 2 partner designs. `CircleMaterials` composes one material: the host's outer ring, the first partner's inner glyph, the second partner's strokes and a blended effect colour. |
+
+## Contracts
+
+- **Schemas promise only what code delivers.** `IsekaiSpellRegistry.registerSpell` caches the schema and throws at start-up when a chainable spell is not an `IEntitySpell` or a fusible spell does not implement its form's content interface.
+- **The base notch is the authored spell.** Every knob's base notch has weight and strain 1, and `SpellTuning.BASE` answers every knob with its base value, infuses nothing and stands alone. NPC and script casts pass `BASE` and behave exactly as before formulas.
+- **Partners lend registered deliveries.** Summoning circles are registered by logic ID and saved fused circles store their contents' logic IDs; every rain's projectile is registered as ammunition. Restoring a circle whose saved logic state names something unknown, or is otherwise invalid, discards the circle with a warning instead of failing the tick.
+- **The lead never changes.** Edits cannot replace link 0. A vessel holds one formula per spell ID, and the lead's cooldown, hotbar slot and binding state are the formula's.
+- **Edits are server-authoritative.** `FormulaEditing.apply` re-runs the preview and the check on the server's stack. Additive edits must leave the formula valid; unravelling and extracting are always allowed. Weaving takes only a single-link manuscript, infusing only a plain one, and returned manuscripts go to `PlayerInventory.offerOrDrop`.
+- **Followers are prepaid.** They spend no energy, set no cooldown and run only on the server.
+- **Mutate through the writers.** `FormulaStorage.writeManuscript` and `inscribe` store a fresh compound; editing a stored compound in place leaves a stale cached appraisal.
+
+## Extending it
+
+A spell declares its schema beside its logic and reads every adjustable value from the `SpellTuning` it is cast with. This internal example tunes a single-target strike:
+
+```java
+public FormulaSchema formula() {
+    return FormulaSchema.builder(SpellForm.AREA, 2).chainable().mark(IsekaiMagicEffects.ELECTRIFIED)
+            .knobs(FormulaKnobs.POTENCY, FormulaKnobs.MAGNITUDE, FormulaKnobs.INCANTATION).build();
+}
+
+public boolean cast(LivingEntity caster, @Nullable Entity target, SpellTuning tuning) {
+    if (!(target instanceof LivingEntity living)) return false;
+    // Potency multiplies the whole hit; magnitude grows the strike effect
+    SpellDamageUtil.dealDamage(school(), caster, living, 4, 1, tuning.potency(), true, id(), null);
+    FxSyncUtil.spawnStaticEffekFx(caster.getWorld(), FX, living.getPos(), tuning.magnitude(), true);
+    return true;
+}
+```
+
+Spell-specific counts and angles come from `FormulaKnobs.multiplicity`, `count` and `angle`, read with `tuning.count(knob)` or `tuning.get(knob)`. A spell of a fusible form implements that form's content interface and resolves its contents with `SpellFusion.contents`. A spell that opens several circles declares `staged(knob)` and positions them from `tuning.stage()` through `SpellFormation` or the delivery API that takes a stage.
+
+| `SpellFormulaAPI` method | Side | What it does |
+| --- | --- | --- |
+| `schema(Identifier)` | both | The spell's schema; sealed for spells this mod does not own. |
+| `manuscript(ItemStack)` | both | The manuscript's formula, its plain lead when nothing is woven, or null for other items. |
+| `inscribed(ItemStack, Identifier)` | both | The formula an item stores for a spell, or null when it casts plain. |
+| `active(PlayerEntity, Identifier)` | both | The formula the player's equipment casts the spell with. |
+| `validate(SpellFormula, World)` | both | The guard's verdict and rating. |
+| `affinity(PlayerEntity, FormulaRating)` | both | Why the player cannot hold the formula, or null. |
+| `manuscript(RegistryEntry<Spell>, SpellFormula)` | server | A new manuscript of the lead carrying the formula; throws when the entry is not the lead. |
+
+`SpellDeliveryAPI.cast` and `launchFrom` also take a `SpellTuning`, for controllers that cast a spell as a follower would.
+
+### Screens
+
+`FormulaWeaverController` registers `key.isekaiexpansion.formula_weaver`, N by default, in the mod's key category. Pressed with no screen open, it opens the Weaver for the manuscript in either hand, main hand first, or names the missing manuscript on the action bar.
+
+The Formula Weaver and the binding desk share the arcana widget kit in `client.screen.arcana`, drawn over the `ArcanaBackdrop` shader sky: chamfered crystal frames with a title plate on each column, pointed plaque buttons lit only for the main action, a tab rail, spell medallions ringed in their school colour with a gilded arc on a woven spell, channel-and-orb argument sliders, the tier crest, the stability gauge, stat tiles, status plaques, section captions and a segmented capacity gauge. Medallions of 52 dp and larger also carry a tier numeral seal. No ornament is drawn against text. ModernUI clips only to rectangles, so every glow, sheen and wash is laid by `ArcanaLight` over a tessellated copy of its shape and never spills past a cut corner or a pointed end. An argument slider tells a tap from a drag by the touch slop: a tap glides the orb to the nearest allowed notch, a drag follows the pointer and springs onto the previewed notch on release, and the wheel turns only a focused slider. `ArcanaIcons` indexes `textures/spell` and `textures/gui/screen/spell/icons` once per resource reload, so widgets only load icons that exist. `FusedIconPainter` draws one icon, or a fused spell's icons cut along the diagonal, by painting chords with image shaders; the spell rail and the cast bar use it too. Tooltips appear only where they add information: a notch's effect, an action's predicted result or refusal, a verdict's reason.
+
+## Verifying
+
+Run `./gradlew.bat test --tests net.kzeroko.isekaiexpansion.internal.spellformula.FormulaRatingTest`. It checks the thirteen-tier scale, affinity and manuscript bands, Style transitions, arbitrary follower delays, authored tiers, notch tier shifts, weight-space sums, harmony and reactions, chain cast and cooldown sharing, the strain limit, structural refusals, the direct-shot limit, same-form infusion, formation staging, mirrored rows, NBT round trips and edit rules against a fixed catalog.
+
+In game, check a woven manuscript equipped in the Spell Book slot and a re-inscribed vessel; a refused edit leaving the screen unchanged; unravelling and extracting returning manuscripts; followers dispelled by Stagger; a fused volley alternating projectiles; a fused summoning launching both projectiles from each circle; two rains cast together opening side by side; two Astral Requiems sweeping toward each other; a fused channel showing its core; and magnitude visibly scaling projectile, impact, circle and beam art. These are procedures, not records of a test run.
+
+## Related
+
+[Spell formulas](/en/wiki/spell-formulas/) covers the player rules. [Spell integration](/en/dev/spell-integration/) covers registration and casting gates; [Projectile attachments and patterns](/en/dev/projectile-attachments/) covers the delivery APIs formulas shape.

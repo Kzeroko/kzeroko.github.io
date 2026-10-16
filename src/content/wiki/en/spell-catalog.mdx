@@ -1,0 +1,174 @@
+---
+title: "Spell catalog and combat roles"
+description: "Default spell costs, payloads, casting commitments and elemental roles."
+category: combat
+order: 24
+updated: 2026-10-15
+---
+
+These are the 49 registered IsekaiExpansion spells and their default combat budgets. Times are seconds before casting-speed or cooldown modifiers; energy is the configured base cost before player modifiers. Damage expressions are per hit or pulse, before defences, critical hits and elemental reactions. `P` means the relevant school’s spell power; they are not guaranteed health loss.
+
+Most baseline elemental shots cost 5 energy; Shooting Star costs 6 for its small impact area. Aqua Cutter, Flame Arrow and Thunder Lance share `2 + 1.2P`; Ice Needle trades some damage for frost control. Wind Blade has lower damage per hit and can pierce 3 targets. Shooting Star deals its astral damage once in a 1.75-block impact radius on entity or terrain contact, with no extra direct hit. Its volley and rain variants share that impact rule. Fireball, Fireball: Summon and Crimson Starfall also burst within 1.75 blocks on entity or terrain contact, applying fire damage and Ignite once with no extra direct-hit damage. Summoning is a Style on the same spell: the 7 summonable baseline shots take 1.26 seconds to cast, followed by circle reveal; Fireball keeps its 1.25-second cast in either Style.
+
+A bound magic scroll shows its spell tier and scroll grade directly below the item name, before the spell description and binding hint. The same tier and grade appear at the binding desk. Beams pass through grass, flowers and other blocks without collision; solid collision shapes still stop them.
+
+The tables give authored spell settings and named Styles. Summon and Trinity rows use the same registered ID as their base spell; the tier shown is the Style's rated tier, while its manuscript grade stays tied to the registered spell. [Spell formulas](/en/wiki/spell-formulas/) explains tuning and weaving. Search Magic, Summon Clone, Portal and Global Portal are sealed and always cast as listed.
+
+## Baseline shots
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Flame Arrow · `isekaiexpansion:flame_arrow` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.2P` |
+| Ice Needle · `isekaiexpansion:ice_needle` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.1P` |
+| Wind Blade · `isekaiexpansion:wind_blade` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 0.9P` |
+| Magic Missile · `isekaiexpansion:magic_missile` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.15P` |
+| Shooting Star · `isekaiexpansion:shooting_star` | 1 | 1 | 0.7 | 1.5 | 6 | `2 + 1.4P` |
+| Spirit Arrow · `isekaiexpansion:spirit_arrow` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.3P` |
+| Thunder Lance · `isekaiexpansion:thunder_lance` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.2P` |
+| Aqua Cutter · `isekaiexpansion:aqua_cutter` | 1 | 1 | 0.7 | 1.5 | 5 | `2 + 1.2P` |
+| Holy Ray · `isekaiexpansion:holy_ray` | 1 | 1 | 0.85 | 2 | 5 | `2 + 1.2P` |
+
+## Circle summons
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Flame Arrow: Summon · `isekaiexpansion:flame_arrow` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.2P` |
+| Ice Needle: Summon · `isekaiexpansion:ice_needle` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.1P` |
+| Wind Blade: Summon · `isekaiexpansion:wind_blade` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 0.9P` |
+| Magic Missile: Summon · `isekaiexpansion:magic_missile` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.15P` |
+| Spirit Arrow: Summon · `isekaiexpansion:spirit_arrow` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.3P` |
+| Thunder Lance: Summon · `isekaiexpansion:thunder_lance` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.2P` |
+| Aqua Cutter: Summon · `isekaiexpansion:aqua_cutter` | 1 | 1 | 1.26 | 1.5 | 5 | `2 + 1.2P` |
+
+## Prepared ammunition
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Thunder Sigil · `isekaiexpansion:thunder_lance_attach` | 3 | 1 | 0.5 | 0.6 | 4 | `1 + 0.96P` |
+| Thunder Trinity · `isekaiexpansion:thunder_lance_attach` | 5 | 1 | 1.2 | 4 | 12 | `1 + 0.96P` |
+| Frost Sigil · `isekaiexpansion:ice_needle_attach` | 3 | 1 | 0.5 | 0.6 | 4 | `1 + 0.88P` |
+| Frost Trinity · `isekaiexpansion:ice_needle_attach` | 5 | 1 | 1.2 | 4 | 12 | `1 + 0.88P` |
+| Ember Sigil · `isekaiexpansion:flame_arrow_attach` | 3 | 1 | 0.5 | 0.6 | 4 | `1 + 0.96P` |
+| Ember Trinity · `isekaiexpansion:flame_arrow_attach` | 5 | 1 | 1.2 | 4 | 12 | `1 + 0.96P` |
+
+## Volleys, rain and sweep
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Arcane Volley · `isekaiexpansion:arcane_volley` | 5 | 2 | 1.2 | 8 | 2 | `0.7 + 0.38P` |
+| Starlight Salvo · `isekaiexpansion:shooting_star_volley` | 5 | 2 | 1.2 | 8 | 2 | `0.7 + 0.38P` |
+| Meteor Rain · `isekaiexpansion:meteor_rain` | 7 | 2 | 1.5 | 14 | 30 | `1 + 0.7P` |
+| Crimson Starfall · `isekaiexpansion:fireball_rain` | 7 | 2 | 1.5 | 14 | 30 | `1 + 0.6P` |
+| Astral Requiem · `isekaiexpansion:astral_sweep` | 9 | 3 | 1.5 | 18 | 48 | `4 + 0.7P` |
+
+## Held channels
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Astral Comet · `isekaiexpansion:astral_comet` | 11 | 3 | 12 | 12 | 4 | `1.5 + 0.65P` |
+| Ignis Aeterna · `isekaiexpansion:ignis_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Glacies Aeterna · `isekaiexpansion:glacies_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Fulgur Aeterna · `isekaiexpansion:fulgur_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Maris Aeterna · `isekaiexpansion:maris_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Ventus Aeterna · `isekaiexpansion:ventus_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.38P` |
+| Terra Aeterna · `isekaiexpansion:terra_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.38P` |
+| Arcanum Aeterna · `isekaiexpansion:arcanum_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.38P` |
+| Umbra Aeterna · `isekaiexpansion:umbra_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Anima Aeterna · `isekaiexpansion:anima_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.38P` |
+| Lux Aeterna · `isekaiexpansion:lux_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.3P` |
+| Vita Aeterna · `isekaiexpansion:vita_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.28P` |
+| Astral Art: Sylvaris Aeterna · `isekaiexpansion:sylvaris_aeterna` | 9 | 3 | 12 | 12 | 2 | `0.5 + 0.38P` |
+
+## Other combat and utility spells
+
+| Spell and ID | Tier | Scroll grade | Cast / hold (s) | Cooldown (s) | Energy | Per hit / pulse |
+| --- | --- | --- | --- | --- | --- | --- |
+| Shadow Bind · `isekaiexpansion:shadow_bind` | 1 | 1 | 1 | 5 | 8 | `2 + 0.8P` |
+| Chain Lightning · `isekaiexpansion:chain_lightning` | 5 | 2 | 1.25 | 6 | 12 | `2 + 1.2P` |
+| Fireball · `isekaiexpansion:fireball` | 3 | 1 | 1.25 | 4 | 10 | `4 + 1.6P` |
+| Fireball: Summon · `isekaiexpansion:fireball` | 3 | 1 | 1.25 | 4 | 10 | `4 + 1.6P` |
+| Flame Eruption · `isekaiexpansion:flame_eruption` | 5 | 2 | 1.5 | 7 | 18 | `3 + 0.55P` |
+| Ice Burst · `isekaiexpansion:ice_burst` | 5 | 2 | 1.75 | 8 | 20 | `8 + P` |
+| Icicle Lance · `isekaiexpansion:icicle_lance` | 3 | 1 | 1.25 | 5 | 12 | `6 + 1.25P` |
+| Lightning Strike · `isekaiexpansion:lightning_strike` | 1 | 1 | 2.75 | 2 | 7 | `4 + P` |
+| Summon Lightning · `isekaiexpansion:summon_lightning` | 5 | 2 | 1.75 | 6 | 16 | `6 + 1.15P` |
+| Summon Soulfire · `isekaiexpansion:summon_soul_fire` | 3 | 1 | 1.5 | 6 | 16 | `2 + 0.75P` |
+| Summon Spectral Swords · `isekaiexpansion:summon_spectral_sword` | 5 | 2 | 2 | 8 | 20 | `2 + 0.6P` |
+| Gravity Well · `isekaiexpansion:gravity_well` | 5 | 2 | 2 | 14 | 28 | `1 + 0.35P` |
+| Spectral Judgment · `isekaiexpansion:spectral_judgement` | 7 | 2 | 2.5 | 18 | 40 | `2 + 0.45P` |
+| Fallen Down · `isekaiexpansion:fallen_down` | 11 | 3 | 8 | 45 | 72 | `65 + P` |
+| Clarity · `isekaiexpansion:clarity` | 1 | 1 | 0.75 | 4 | 6 | `—` |
+| Healing · `isekaiexpansion:healing` | 1 | 1 | 1.25 | 4 | 8 | `—` |
+| Search Magic · `isekaiexpansion:search_magic` | 1 | 1 | 1 | 8 | 6 | `—` |
+| Summon Clone · `isekaiexpansion:summon_clone` | 5 | 2 | 2 | 30 | 30 | `—` |
+| Portal · `isekaiexpansion:portal` | 3 | 1 | 2 | 6 | 12 | `—` |
+| Global Portal · `isekaiexpansion:global_portal` | 7 | 2 | 2 | 8 | 24 | `—` |
+
+## Delivery and commitment
+
+Volleys deliver 12 paid shots, 2 ticks (0.1 seconds) apart, at 2 energy each. Shots appear in a randomized radial formation behind the caster with radius 2.4 blocks. Each waits 5 ticks (0.25 seconds) before high-speed homing flight. The damage multiplier starts at 1 and loses 0.025 per shot, ending at 0.725. Releasing early stops new shots and scales the 8-second full-channel cooldown by held duration. Listed damage is per first shot.
+
+Rain pays 30 energy once for 12 projectiles. A 4-block circle appears at a preferred height of 16 blocks and can lower to 6 blocks; insufficient clear space fails the cast. After 20 ticks (1 second) of reveal, shots leave 3 ticks (0.15 seconds) apart on a 45-degree descent. Crimson Starfall preserves the ordinary fireball intro and ground impacts, but uses its own smaller per-shot payload.
+
+Prepared spells add 1 shot in their Sigil Style or 3 in their Trinity Style to the same elemental set, capped at 3. Thunder Lance, Ice Needle and Flame Arrow sets coexist. A Trinity needs 3 free slots; a full set fails the cast. Shots wait up to 600 ticks (30 seconds), then expire. Swing the main hand with any item or empty-handed to aim at the cursor. The first shot releases after 3 ticks (0.15 seconds), the others 2 ticks (0.1 seconds) apart, remaining attached until their turn. A selected enemy can be tracked; a miss fires toward the cursor point. Shots do not fire automatically. Each hit bypasses hurt cooldown. A Sigil costs 4 and a Trinity 12; damage is per projectile.
+
+Astral Requiem pays 48 energy for a circle with a 20-tick (1-second) reveal and 97-tick (4.85-second) active window. The beam charges for 12 ticks (0.6 seconds), extends for 4 ticks (0.2 seconds), then accepts damage pulses every 5 ticks (0.25 seconds). It tracks during charge, commits its aim, and sweeps across 48 degrees at 0.6 degrees per tick for 80 ticks (4 seconds), keeping the same pitch before ending. Aiming at the ground keeps the pass at that ground distance. The beam pierces eligible entities and stops at terrain. Moving more than 64 blocks from the circle ends it.
+
+Held channels have a 12-second maximum and 48 paid deliveries, costing 2 energy per delivery, or 4 for Astral Comet, including charge deliveries. The table’s cast column is the maximum hold. Damage starts after charge and extension, so 48 deliveries do not mean 48 damaging hits. Astral Comet charges for 30 ticks (1.5 seconds); other channels charge for 20 ticks (1 second); extension is 4 ticks (0.2 seconds). All beams pierce entities up to terrain; each eligible target receives one hit per paid damage pulse. Astral Comet has a 1.4-block collision radius and Astral Requiem 2.1 blocks; ordinary channels use 0.7 blocks. Vita Aeterna’s formula is healing per pulse. Status-bearing beams use `0.5 + 0.3P`, ordinary direct-damage beams use `0.5 + 0.38P`, Astral Comet uses `1.5 + 0.65P`, and the healing beam uses `0.5 + 0.28P`.
+
+## Repeated hits and support
+
+Flame Eruption requests 5 pulses, Spectral Judgment 15 strikes, Soul Fire 3 projectiles and Spectral Sword 5 projectiles. Their table values are per pulse or projectile. Chain Lightning visits up to 3 different targets. Gravity Well pulls within 5 blocks for 120 ticks (6 seconds), dealing damage every 20 ticks (1 second); its damage column is per pulse. Ice Burst’s column is its detonation; trail hits use 0.25 of the detonation’s base and power contribution.
+
+Healing restores 20% of maximum health plus `0.35P`, capped at 45% of maximum health per application. Clarity removes one eligible harmful effect. Search Magic reveals enemies; Portal and Global Portal provide travel; Summon Clone creates a temporary ally. These spells are not comparable by a direct damage column.
+
+Elemental effects retain both their major and minor reactions, each capped at 3 contributing stacks. A major reaction reaches +30% power and a minor reaction +15%; see [status effects](/en/wiki/status-effects/) for schools and critical bonuses. These bonuses affect the power contribution, not the fixed base damage.
+
+## Learning and manuscripts
+
+All 49 spells are learnable on the 1–13 tier scale. School affinity advances one rank per two tiers, with S+ required for tier 13.
+
+| Spell tiers | Required affinity |
+| --- | --- |
+| 1–2 | E |
+| 3–4 | D |
+| 5–6 | C |
+| 7–8 | B |
+| 9–10 | A |
+| 11–12 | S |
+| 13 | S+ |
+
+| Manuscript | Grade | Spell tiers |
+| --- | --- | --- |
+| Initiate’s Manuscript | 1 | 1–4 |
+| Adept’s Manuscript | 2 | 5–8 |
+| Sovereign’s Manuscript | 3 | 9–13 |
+
+The art identifies both school and grade; unsupported schools use the neutral manuscript design.
+
+At a binding table, open the vessel and manuscript dropdowns to choose compatible items from your satchel, sorted by tier and name. Select a spell, read its effects, combat values and affinity requirement, then inscribe using the fixed action below the dossier. Binding consumes one manuscript and requires no experience levels. Talent, capacity and vessel-pool rules still apply. Miku accepts spells from any installed Spell Engine namespace, including Wizards, when supplied on a manuscript. Other vessels keep their own pools. Removing a bound spell does not refund its manuscript; unbinding follows the server setting. A woven manuscript inscribes its formula together with the spell; the [spell formulas](/en/wiki/spell-formulas/) page covers re-inscribing.
+
+Manuscripts appear in the creative item group with registered learnable spells. Survival loot adds one chance per chest: dungeon 35% and mineshaft 25% for grade 1; stronghold library 100% and bastion treasure 50% for grade 2; End city treasure 35% for grade 3. These rolls choose an IsekaiExpansion spell in the grade. Native Spell Engine scroll loot also receives the school and grade artwork.
+
+IsekaiExpansion manuscripts can be equipped in the Spell Book slot, and in the optional Spell Scroll slot when that slot is enabled. They supply their bound spell to Spell Engine’s equipped-spell collection, using the same casting rules as native scrolls; a manuscript carrying a formula casts that formula. Hold the manuscript and press the Formula Weaver key, N by default, to open the Formula Weaver. Native and Expansion scroll items remain separate; their shared artwork does not merge their registry identities.
+
+## Energy and progression
+
+Base maximum astral energy is 30, with 0.5 energy restored per second after a 20-tick (1-second) spending delay. Astral reserve starts from the rolled talent multiplier and grows through reservoir practice; school affinity controls spell cost. [Talents](/en/wiki/talents/) gives the reservoir and S+ growth rules. Equipment, origins and other applicable modifiers still apply, and the final cost is rounded.
+
+| Talent rank | Base capacity multiplier | School cost multiplier |
+| --- | --- | --- |
+| E | ×0.6 | ×1.4 |
+| D | ×0.8 | ×1.1 |
+| C | ×1 | ×1 |
+| B | ×1.3 | ×0.85 |
+| A | ×1.6 | ×0.75 |
+| S | ×2 | ×0.5 |
+
+A complete barrage costs 24 base energy. A full ordinary beam costs 96, and Astral Comet 192, including paid charge deliveries; these maxima need a sufficiently large reserve or replenishment. Short channels are intended, and their cooldown scales with held duration. Rain spends 30 once; the autonomous sweep spends 48 once. High tiers buy range, area or sustained pressure rather than making every single hit equally efficient. External spells without an authored energy entry receive a tier-based budget; see [Spell integration](/en/dev/spell-integration/).
+
+## Testing and data
+
+The Miku Staff starts empty with 8 spell slots, including multiple spells of the same tier. Evelina channels Astral Comet with live target tracking and can cast both barrages, both rain patterns and Astral Requiem. She holds position inside her 16-block combat range and approaches only outside it. When an enemy closes within 5.6 blocks, Evelina prioritises a powerful escape leap before her next cast, seeking separation toward a 14.4-block radius. Successful leaps have a 40-tick (2-second) cooldown. She also uses quick counters, ground sidesteps and magical guard; started volleys do not yield to tactical counter-selection. Blocked movement leaves her free to cast, and short knockups pause her windup without allowing airborne attacks. She can cast while swimming underwater, but does not attack while flying or leaping. See [NPC combat](/en/dev/npc-combat/) for tactical tuning.
+
+Base energy entries live in `data/isekaiexpansion/spell_energy/energy_entries.json`; tier pools use `tier1` through `tier13`. [Spell data](/en/wiki/spell-data/) describes the integration surface. [Projectile attachments and patterns](/en/dev/projectile-attachments/) documents reusable delivery APIs and the in-game verification cases.

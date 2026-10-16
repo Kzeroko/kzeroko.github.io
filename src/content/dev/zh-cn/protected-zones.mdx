@@ -1,0 +1,152 @@
+---
+title: "保护区域"
+description: "地标、受保护建筑及其中住所共用的保护层：玩家规则、破坏防护与客户端预测。"
+category: systems
+order: 96
+updated: 2026-10-10
+tags: []
+---
+
+所有受保护的地方共用`internal.protection`里的同一层：Atelier地标，以及`protectedStructures`选项列出的每一种建筑，比如冒险者公会。玩家的每次改动，服务器和客户端都用同一张判定表来回答。区域内的方块不会被生物、爆炸、火、流体、活塞或发射器改动，`doMobGriefing`游戏规则开着也一样。
+
+## 它做什么
+
+这一层负责三件事。区域来源说明保护在哪里生效；玩家权限根据区域和家园判定每一次玩家操作；破坏作用域标出方块写入的起因，让写入守卫拒绝环境破坏。
+
+它有意止步于以下边界：
+
+- **家园仍归结构空间管**。 成员、租期、授权和访客都属于[结构空间](/zh-cn/dev/structure-spaces/)，这一层只读取授权位。
+- **刷怪是另一套规则**。 地标内抑制自然刷怪属于Atelier的刷怪策略，与区域无关。
+- **普通实体不会被冻结**。 生物在区域里照常走动、战斗、受伤，陈设实体与受保护的公会接待员会受到保护。
+- **地牢世界用自己的规则**。 `DungeonWorldPolicy`保留它的放置限制，区域不覆盖地牢世界。
+
+## 运行时模型
+
+### 区域来源
+
+`ProtectionZones`用数组保存已注册的来源，并取它们的并集。客户端世界里永远没有区域。
+
+| 来源 | 注册位置 | 范围 | 生命周期 |
+| --- | --- | --- | --- |
+| `LandmarkZoneSource` | `AtelierSystem.init` | 地标占地加留空区，覆盖整个高度 | 世界绑定地标后就不再变化 |
+| `StructureZoneSource` | `ProtectionSystem.init` | 列出建筑每个起点的边界，水平方向和下方各扩展`protectedStructureMargin`格，向上直到建筑高度上限 | 从第一个引用它的区块被扫描起，到世界卸载为止 |
+
+建筑来源会把每个已加载区块扫描一次，找出对列出建筑的引用。区块加载先排队，在世界刻末尾统一处理，这时可以按原版方式加载区块来读取被引用的起点。在这之间的查询只扫描自己所在的区块，从不加载区块。修改任一选项都会重建所有区域，并重新扫描已加载区块。列表里没有注册为建筑的ID会记一条警告，然后跳过。
+
+| 选项 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `protectedStructures` | list of identifiers | `isekaiexpansion:respawn_temple`、`isekaiexpansion:adventurers_guild` | 这些建筑的每个起点都会成为区域。 |
+| `protectedStructureMargin` | integer | `4` | 每个起点在水平四周和下方额外保护的格数，`0–16`，超出范围会被截断。 |
+
+### 判定表
+
+权限等级`2`以上的创造模式玩家绕过所有规则。其他人一律交给`ProtectionRules.allows`，按这个顺序检查：先看不可破坏标签，再看占有该位置的家园授权，最后看区域。
+
+| 操作 | 家园权限 | 区域内、家园外 | 限制标签 |
+| --- | --- | --- | --- |
+| `BREAK` | `BREAK` | 拒绝 | `isekaiexpansion:protection/unbreakable`在任何地方都拒绝，自己的家园也不例外 |
+| `BUILD` | `BUILD` | 拒绝 | 无 |
+| `USE` | `USE` | 允许，受限方块除外 | `isekaiexpansion:protection/restricted_use` |
+| `SLEEP` | `SLEEP` | 允许 | 无 |
+| `ENTITY` | `ENTITIES` | 允许，受限实体除外 | `isekaiexpansion:protection/fixtures` |
+
+区域内的家园用自己的授权代替区域的玩家规则，包括使用受限方块。在所有区域之外，家园照样按授权判定，空地则什么都允许。
+
+### 玩家钩子
+
+| 玩家输入 | 钩子 | 检查的操作 |
+| --- | --- | --- |
+| 挖掘 | `ServerPlayerInteractionManager`在收到动作时和移除方块前各查一次；客户端在攻击、挖掘进度和移除时也查 | `BREAK` |
+| 放置方块 | 两端的`BlockItem.canPlace`；床还检查床头格，两格高的方块检查另一半 | `BUILD` |
+| `isekaiexpansion:protection/restricted_items`中的工具 | 两端的`ItemStack.useOnBlock`，检查点击的方块和点击面前方的一格 | `BUILD` |
+| 用桶放置、用桶舀起 | `BucketItem.placeFluid`，以及舀起前的`BucketItem.use` | `BUILD`、`BREAK` |
+| 使用方块 | `UseBlockCallback`，在默认监听器之前的`isekaiexpansion:protection`阶段 | `USE`，床则是`SLEEP` |
+| 攻击或使用实体 | `AttackEntityCallback`、`UseEntityCallback`，同一阶段 | `ENTITY` |
+| 编辑、染色、发光或涂蜡告示牌 | `AbstractSignBlock` | `BUILD` |
+| 落在耕地上 | `FarmlandBlock.onLandedUpon` | `BUILD` |
+
+任一只手拿着物品潜行时，原版本来就跳过方块自己的使用，所以这里也跳过使用检查。命令告示牌照常可以点击。服务器上玩家使用的每件物品都在玩家作用域里运行，模组物品自己改动的方块同样会被判定。
+
+### 破坏作用域
+
+`ProtectionScope`按线程记录一个起因。起因生效期间，`World.setBlockState`和`WorldChunk.setBlockState`会拒绝该起因在区域里不能做的写入。作用域可以嵌套，结束时恢复外层，被包住的调用抛出异常也一样。
+
+| 起因 | 开启位置 | 在区域内拒绝 |
+| --- | --- | --- |
+| `MOB` | 每个生物、弹射物和闪电的刻 | 除了不改`age`的同方块变化（比如门）之外的一切改动；作物的变化一律算破坏 |
+| `EXPLOSION` | `Explosion.affectWorld` | 一切改动；受保护的格子会先从受影响列表里移除 |
+| `FIRE` | `FireBlock.scheduledTick` | 除了改动已有火方块之外的一切改动，所以火会照常老化、熄灭 |
+| `MECHANISM` | `DispenserBlock.dispense` | 一切改动 |
+| `PLAYER` | 物品使用、铁砧取出产物 | 同方块切换放行；其他改动在结果为空气时需要`BREAK`，否则需要`BUILD` |
+
+作用域另有几条在写入前生效的规则：
+
+- **生物破坏规则读作关闭**：正在计算刻的生物，碰撞箱向外扩`2`格后碰到区域时就是这样。破门、末影人搬方块、踩坏作物都不会开始。游戏规则本身不变。
+- **不是玩家的执行者**在区域内会被`World.breakBlock`和`canModifyAt`拒绝。玩家射出的弹射物按射手的`BREAK`权限判定。
+- **陈设实体**在区域内不受任何伤害，有权限的玩家和移出世界类伤害除外。
+- **火势蔓延**到区域格子时，在格子燃烧前就被拒绝，所以区域里的TNT不会被点燃。
+- **活塞**的推动只要会移动、破坏或填入区域格子，就会失败。
+- **流体**不会从区域外或另一个家园流进区域，也不会冲掉区域里的方块。已有的流体和含水方块照常可用。
+
+### 客户端预测
+
+客户端用快照来预测，被拒绝的方块不会先在本地放下或挖掉。进入服务器时，如果服务器公开了`isekaiexpansion:protection_request`，客户端就发出这个空包并等待快照；这个请求不授予任何权限。服务器在`isekaiexpansion:protection`上回复。
+
+| 字段 | 类型 | 默认值 | 作用 |
+| --- | --- | --- | --- |
+| `protocol` | VarInt | 必填 | 必须是`1`，其他值会被拒绝。 |
+| `dimension` | identifier | 必填 | 这份快照替换的维度。 |
+| `editor` | boolean | 必填 | 服务器计算的创造模式管理员绕过标记。 |
+| `zoneCount` | VarInt | 必填 | `0–256`个区域。 |
+| `zones` | `zoneCount × 6` signed integers | 必填 | 闭区间的`minX`、`minY`、`minZ`、`maxX`、`maxY`、`maxZ`。 |
+| `claimCount` | VarInt | 必填 | 发送的区域内`0–1024`个家园范围。 |
+| `claims` | `claimCount × 7` signed integers | 必填 | 一个范围的六个边界，再加上它授予这名玩家的家园权限位，`0–31`。 |
+
+服务器发送快照中心`256`格内的区域，符合条件的太多时优先保留最近的。维度、管理员状态、区域版本或家园版本变化时，玩家离中心超过`64`格时，以及每`100`刻（按玩家错开）都会重建快照。重建后内容没变就不发送。
+
+当前维度的快照到达之前，客户端拒绝`BREAK`和`BUILD`，允许`USE`、`SLEEP`和`ENTITY`。绕过需要服务器的标记和本地的创造模式管理员状态同时成立。被拒绝时，动作栏显示`message.isekaiexpansion.protection.denied`，等待快照期间显示`message.isekaiexpansion.protection.syncing`，每秒最多一次。
+
+## 约定
+
+- **建筑区域只在服务器线程上回答**。 `StructureZoneSource`只在服务器线程上应答，其他线程看不到建筑区域。地标区域不可变，任何线程都安全。
+- **来源必须便宜**。 这一层在方块更新路径里查询区域来源，来源必须从内存直接回答，不能等待区块加载。
+- **没有作用域的写入照旧**。 命令、Atelier任务、网络包和普通方块刻都没有破坏作用域。
+- **家园只代替玩家规则**。 环境防护覆盖整个区域，家园也在其中。区域外的家园只有玩家规则。
+- **拒绝后会修正客户端**。 挖掘被拒绝时，先重发目标、它的`6`个相邻格及方块实体，再确认动作。放置、工具或桶被拒绝时，会重新同步当前界面的物品栏。
+- **读包是严格的**。 反向边界、超范围的授权位、超出索引预算和多余的字节都会被拒绝。
+
+## 扩展方式
+
+在模组初始化时注册区域来源。接口在`api.protection`里：
+
+```java
+ProtectionAPI.registerZoneSource(new ProtectionZoneSource() {
+    @Override public boolean contains(ServerWorld world, BlockPos pos) { return ARENA.contains(pos); }
+    @Override public boolean intersects(ServerWorld world, BlockBox box) { return ARENA.intersects(box); }
+    @Override public void collect(ServerWorld world, BlockBox area, Consumer<BlockBox> sink) {
+        if (ARENA.intersects(area)) sink.accept(ARENA);
+    }
+    @Override public long revision(ServerWorld world) { return 0; }
+});
+```
+
+用自己的代码路径改方块的工具，动手前先问一声。`ProtectionAPI.allows`、`canBreak`、`canBuild`和`canInteract`在客户端做预测，在服务器做判定。`canEntityModify`用于实体自己发起的改动。客户端的挖掘或放置输入改查`api.client.protection.ProtectionClientAPI`。
+
+`GuildReceptionistEntity` 在服务器上按当前位置查询 `ProtectionAPI.isProtected`，并将结果同步给客户端的攻击判定。受保护时拒绝攻击、所有伤害、有害状态、推挤、击退及爆炸。基础服务大脑不安装平民威胁传感器与逃跑任务。实体仍可被准星选中以便右键交谈，移除标记仍会撤下接待员。这套服务规则独立于也会限制交互的陈设标签。
+
+## 验证
+
+先跑离线检查，再对重映射后的jar跑生产环境钩子检查：
+
+```bash
+./gradlew.bat -I tools/atelier/verify.gradle checkAtelier --offline --console=plain
+./gradlew.bat -I tools/atelier/verify.gradle checkProtectionRemap -PatelierMinecraftIntermediary=<minecraft-merged-intermediary.jar> --offline
+```
+
+`ProtectionCheck`会在地标、建筑和家园格子上比对客户端预测与判定表，并覆盖读包拒绝、权限切换、作用域起因与嵌套，以及两格方块的放置。重映射检查证明每个钩子都恰好对准一个原版方法或调用。
+
+然后在有公会和地标的世界里实测。用生存玩家试着挖掘，放床、树苗和门，用骨粉、锄头和桶，编辑告示牌，打物品展示框，踩耕地。打开`doMobGriefing`，让僵尸走到门前、苦力怕在边界爆炸、末影人穿过区域。再在自己拥有的家园里、重新连接后、切换维度后、离开创造模式后各试一遍。
+
+## 相关页面
+
+地标范围见[Atelier结构](/zh-cn/dev/atelier-structures/)，家园授权见[结构空间](/zh-cn/dev/structure-spaces/)。玩家看的家园说明在[我的家园](/zh-cn/wiki/my-home/)。

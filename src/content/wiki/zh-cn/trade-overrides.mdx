@@ -3,7 +3,7 @@ title: "商人交易覆盖"
 description: "职业目录、报价选取、物品堆叠与严格重载校验。"
 category: data
 order: 20
-updated: 2026-09-30
+updated: 2026-10-14
 ---
 
 交易覆盖接管一个商人职业的完整目录。初次来访时，就会从所有货品层级选出库存。村民与NPC共用这套定义；每位玩家的生意交情单独决定照拂服务。
@@ -12,7 +12,7 @@ updated: 2026-09-30
 
 使用`data/<namespace>/trade_overrides/<path>.json`，每个文件对应一个职业。不同资源ID指向同一职业时，`isekaiexpansion`命名空间优先于其他所有命名空间，然后比较较高的`priority`，最后取资源ID字符串字典序较大的定义。整个定义一起选中，不逐级合并。替换内置内容时，覆盖其准确资源路径，或在`isekaiexpansion`下使用合适优先级的资源。
 
-内置文件按`vanilla/`、`compat/<provider>_<profession>.json`、`npc/unique/`和`npc/common/`组织。NPC预设通过`trade_profession`选目录。伊芙琳娜等唯一角色使用`isekaiexpansion:mahoutsukai_evelina`这类专属键；普通NPC也能使用`minecraft:farmer`等已有目录。普通NPC可用实体的`TradeProfession`覆盖预设职业，并随存档保存；唯一NPC始终使用预设绑定。
+内置文件按`vanilla/`、`compat/<provider>_<profession>.json`、`npc/unique/`和`npc/common/`组织。每个NPC都随自身声明出售所用的目录，即其交易职业。伊芙琳娜等唯一角色使用`isekaiexpansion:mahoutsukai_evelina`这类专属键；普通NPC也能使用`minecraft:farmer`等已有目录。普通NPC可用实体的`TradeProfession`覆盖声明的职业，并随存档保存；唯一NPC始终使用其声明的绑定。
 
 ## 最小示例
 
@@ -174,7 +174,9 @@ updated: 2026-09-30
 
 REI预览读取内置目录，不读取服务端重载后的覆盖表。它按模组条件展示可用候选，数量范围使用最小值；预览不代表某个村民的加权选取、类型或维度。数据包修改应通过实际村民交易验证。
 
-内置目录生成器与校验器排除Donner、Schlag、悬赏契约与悬赏板，也排除开发工具、测试物品、内部图标和世界制作所用的锚点或结构方块。这些物品不得成为商店货品；校验覆盖每个候选物品，也包括NPC目录。
+内置目录生成器与校验器排除Donner、Schlag、悬赏契约与悬赏板，也排除开发工具、测试物品、内部图标和世界制作所用的锚点或结构方块。这些物品不得成为商店货品；校验覆盖支付、产物、物品数组中的每个候选以及NPC目录。所有模组命名空间都会排除名称含creative、debug、placeholder或testing独立词段的物品，以及刷怪蛋和内部弹射物。SaintsDragons的创造模式性别魔杖、驯龙餐和变种刷因此被排除；普通龙鳞刷、龙食与可收集的龙蛋不受影响。出现在注册物品导出表中，并不代表可以进入交易。
+
+指令方块、指令方块矿车及所有音乐唱片都不得作为成本或产物。任一物品数组候选被禁用时，运行时可用性、构造和 REI 预览都会拒绝整个物品定义。检查覆盖指令方块及唱片 ID、已注册的唱片物品类型和音乐唱片物品标签。生成器与验证器也排除异界扩展的全部 `disc_*` 物品，唱片不再有收藏品上交例外。
 
 ## 相关页面
 

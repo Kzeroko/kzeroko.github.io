@@ -3,7 +3,7 @@ title: "魔法阵"
 description: "分层魔法阵的绘制、施法序列与独立渲染。"
 category: client
 order: 55
-updated: 2026-09-25
+updated: 2026-10-15
 ---
 
 魔法阵通过不可变序列组合可独立选择的法印图层、纯描边圆环、发光线和立体施法光幕。`MagicCircleAPI`是客户端门面；动画图和服务端魔法阵构建器仍属于项目内部实现。
@@ -62,7 +62,7 @@ updated: 2026-09-25
 
 ### 序列与图层
 
-`MagicCircleSequences`一次性构建并注册内置动画图。`SpellClientData.registerCircleSequence(Identifier, CircleSequence)`直接接收序列。未指定时，持续光束选择`PULSE_SINGLE`，阶位低于3选择`FACE_SINGLE`，其他阶位选择`FACE_TRIPLE`。
+`MagicCircleSequences`一次性构建并注册内置动画图。`SpellClientData.registerCircle(Identifier, Circle)`为每个法术显式注册设计、序列与成形模式。未注册时不显示施法魔法阵，阶位和学派不提供默认值。
 
 当前内置动画图和ID以`MagicCircleSequences`为准。自定义序列须在两端的公共初始化阶段注册。重复ID或未知查询ID会抛出异常；渲染数据必须引用已注册的对象。
 
@@ -93,7 +93,7 @@ updated: 2026-09-25
 
 `CircleColorRef.resolve(int reference, int automaticRgb)`返回显式颜色，或将`AUTO`替换为`automaticRgb`。解析结果必须为24-bit RGB，否则抛出异常。Alpha仍由节点的独立参数控制。
 
-渲染器使用当前材质外圈引导图的平均墨色。在资源重载的编译阶段，从alpha至少为128的源像素采集颜色，并缓存在材质中。施法与元素弓魔法阵共用学派ID到设计名的映射：`magic_water`、`magic_wind`、`magic_earth`、`magic_light`和`magic_dark`分别选择`water`、`wind`、`earth`、`light`和`dark`，`magic_astral`选择`astra`。其余学派以ID路径作为设计名；独立魔法阵使用显式的`Design`。因此`AUTO`跟随法术魔法阵颜色和资源包改色，也支持自定义设计。每条可见线或光幕在提交顶点前只解析一次颜色，不修改不可变序列，并发施法可安全共享同一序列。
+渲染器使用当前材质外圈引导图的平均墨色。在资源重载的编译阶段，从alpha至少为128的源像素采集颜色，并缓存在材质中。法术使用显式注册的设计；元素弓魔法阵使用学派ID到设计名的映射：`magic_water`、`magic_wind`、`magic_earth`、`magic_light`和`magic_dark`分别选择`water`、`wind`、`earth`、`light`和`dark`，`magic_astral`选择`astra`。其余学派以ID路径作为设计名；独立魔法阵使用显式的`Design`。因此`AUTO`跟随法术魔法阵颜色和资源包改色，也支持自定义设计。每条可见线或光幕在提交顶点前只解析一次颜色，不修改不可变序列，并发施法可安全共享同一序列。
 
 | 颜色常量 | RGB |
 | --- | --- |
@@ -124,6 +124,7 @@ updated: 2026-09-25
 | `Scale` | `number` | 必填 | 正缩放倍率，最大×16。 |
 | `Speed` | `number` | 必填 | 有符号旋转倍率，−16–16；零停止旋转。 |
 | `YOffset` | `number` | 必填 | 世界空间竖直偏移，−64–64格。 |
+| `Fused` | `identifier` 组成的 `list` | 缺省 | 注入此法阵所属法术的法术图案，按术式顺序排列。缺省或为空时只绘制本图案；超过前 2 项的条目被忽略，无效标识符会抛出异常。客户端以宿主外环框住第一个伙伴的内圈纹样，采用第二个伙伴的笔画，并混合所有效果颜色；每种组合只合成一次。仅在非空时写出。 |
 
 ## 扩展方式
 
@@ -155,3 +156,7 @@ MagicCircleBuilder.create(caster)
 
 - [着色器与材质](/zh-cn/dev/shaders-and-materials/)
 - [法术集成](/zh-cn/dev/spell-integration/)
+
+### 弹体发射器
+
+`MagicProjectileAPI.Placement`通过有界间距搜索，将独立魔法阵放在施法者前方、侧面或背后。`ProjectilePatternAPI.Rain`使用`RAIN_DISK`，半径与随机发射圆盘一致，原点位于魔法阵的世界坐标。高度、角度、数量与间隔约定见[附着弹体与发射模式](/zh-cn/dev/projectile-attachments/)。

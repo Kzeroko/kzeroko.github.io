@@ -3,7 +3,7 @@ title: "人形部件制作"
 description: "共享骨架、模型、目录字段、染色遮罩、附加动画与资源验证。"
 category: assets
 order: 100
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
 人形部件由服务端目录条目与客户端模型、纹理共同组成。本指南说明共享骨架约定，以及让部件可选、可渲染所需的资源。
@@ -111,7 +111,7 @@ Blockbench 验证器检查名称、唯一根骨骼、必需锚点及锚点旋转
 | `slot` | `string` | `folder slot` | 可选断言，必须与路径首段相同；未知或不匹配的槽位导致文件失败。 |
 | `enabled` | `boolean` | `true` | false 在验证槽位后跳过该条目。 |
 | `styles` | `array<string>` | `[default]` | 去除首尾空格并转为小写，按顺序去重；空列表恢复 `default`。首个样式作为目录回退值。 |
-| `channels` | `object` | `by slot kind` | 显式对象替换全部默认通道绑定；缺失的成员不绑定。 |
+| `channels` | `object` | `by slot` | 显式对象替换全部默认通道绑定；缺失的成员不绑定。默认值见下表。 |
 | `channels.r` | `palette channel` | `unbound` | 遮罩红色权重；未知通道不绑定。 |
 | `channels.g` | `palette channel` | `unbound` | 遮罩绿色权重；未知通道不绑定。 |
 | `channels.b` | `palette channel` | `unbound` | 遮罩蓝色权重；未知通道不绑定。 |
@@ -120,31 +120,53 @@ Blockbench 验证器检查名称、唯一根骨骼、必需锚点及锚点旋转
 | `chain` | `string` | `none` | 部件链 ID，由跨槽位作为一件衣物穿戴的部件共用；不带命名空间时取部件自身的命名空间。无法解析的 ID 会让文件失败。部件链规则见下文。 |
 | `origins` | `array<identifier>` | `[]` | 允许的种族；空列表允许全部。无效 ID 被丢弃，因此全部无效的列表等同于不限制。 |
 | `suppressed_by` | `array<string>` | `slot defaults` | 装备槽位；识别 `head`、`chest`、`legs`、`feet`、`mainhand`、`offhand`，渲染只检查护甲。空列表或全部无效时恢复槽位默认值。 |
-| `unlock` | `object` | `always` | 共享解锁规则，完整字段见预设参考。 |
+| `audience` | `enum(player, npc)` | `player` | 谁可以选择该部件。`npc` 表示专供 NPC，见[专属部件](#专属部件)。忽略首尾空格与大小写；其他值会让文件失败。 |
+| `unlock` | `object` | `always` | 玩家何时可以选择该部件，完整字段见预设参考。`type` 为未知值时文件失败。 |
 | `sort` | `integer` | `1000` | 升序排列，再按完整部件 ID 排序。 |
 | `tags` | `array<string>` | `[]` | 去除首尾空格并转为小写、去重。市民生成时优先选用与市民身份共享标签的部件；性别由 `gender` 表示，不再写进标签。每项网络限制为 48 个字符。 |
 | `hides_slots` | `array<string>` | `[]` | 引用该部件时隐藏的槽位。忽略未知值；隐藏计算先于该部件自身的可见性和资源检查。 |
-| `default_for` | `string` | `none` | `any`（别名 `both`、`true`）、`male`、`female`；未知值为 `none`。自动补充还要求 `always` 解锁、匹配的种族，以及对 `gender_locked` 部件而言被锁定的性别。 |
+| `default_for` | `string` | `none` | `any`（别名 `both`、`true`）、`male`、`female`；未知值为 `none`。自动补充还要求 `player` 受众、`always` 规则、匹配的种族，以及对 `gender_locked` 部件而言被锁定的性别。 |
 | `requires` | `object` | `{}` | 所有指定槽位条件须同时满足；反复移除不满足依赖的部件，直到稳定。 |
 | `requires.<slot>` | `identifier / array<identifier> / null` | `absent` | 字符串或列表限定该槽位允许的部件 ID。空列表、null 或全无效 ID 仅要求存在非空引用。未知槽位导致文件失败。 |
 
-解锁字段与全部配色通道 ID 见[预设数据](/zh-cn/wiki/humanoid-presets/)，本目录共用这些格式。玩家选择会检查解锁条件；NPC 手工指定的外观仍可引用锁定部件。
+解锁字段与全部配色通道 ID 见[预设数据](/zh-cn/wiki/humanoid-presets/)，本目录共用这些格式。玩家验证会检查 `audience` 与 `unlock`；NPC 的角色外观与服装两者都不检查。
 
 显示名称使用 `humanoid_part.<namespace>.<path-with-dots>`，样式名称追加 `.style.<style>`。在 `language_assemble/categories/humanoid/` 添加两种语言，再运行 `./gradlew.bat assembleLanguageFiles`。翻译源应保留在语言组装输入中。[Blockbench 插件](/zh-cn/dev/blockbench-plugin/)只生成起始目录条目，不生成显示名称翻译。
 
 ### 默认染色绑定
 
-| 槽位类别 | 红 | 绿 | 蓝 |
+| 槽位 | 红 | 绿 | 蓝 |
 | --- | --- | --- | --- |
 | `body` | `skin` | `blush` | `lip` |
-| `hair` | `hair_base` | `hair_tip` | — |
-| `trait` | `trait_primary` | `trait_secondary` | — |
-| `outfit` | `outfit_primary` | `outfit_secondary` | `outfit_accent` |
-| `underwear` | `underwear_primary` | `underwear_secondary` | — |
-| `accessory` | `accessory_primary` | `accessory_secondary` | `accessory_accent` |
-| `face (face, eyes, eyebrows, facial_hair)` | — | — | — |
+| `face` | — | — | — |
+| `eyes` | `eye_left` | `eye_right` | `eye_sclera` |
+| `eyebrows` | `eyebrow` | — | — |
+| `facial_hair`, `hair` | `hair_base` | `hair_tip` | — |
+| `trait_ear` | `skin` | — | — |
+| `trait_horn`, `trait_tail`, `trait_wing`, `trait_other` | `trait_primary` | `trait_secondary` | — |
+| `underwear_top`, `underwear_bottom` | `underwear_primary` | `underwear_secondary` | — |
+| `socks`, `outfit_top`, `outfit_bottom`, `gloves`, `shoes` | `outfit_primary` | `outfit_secondary` | `outfit_accent` |
+| `ear_accessory`, `face_accessory`, `neck_accessory`, `head_accessory`, `back_accessory` | `accessory_primary` | `accessory_secondary` | `accessory_accent` |
 
-所有面部类别槽位默认都不绑定通道，包括眼睛、眉毛和胡须。插件会为这些具体槽位显式写入常用通道，手写文件也需自行声明。例如，眼睛通常将红绑定为 `eye_left`、绿绑定为 `eye_right`、蓝绑定为 `eye_sclera`。
+默认绑定按槽位而非槽位类别决定。耳朵本身就是皮肤，因此 `trait_ear` 只绑定 `skin`，随身体肤色变化；角、尾巴、翅膀和其他特征则独占 `trait_primary` 与 `trait_secondary`，给龙人的角和尾巴换色不会波及耳朵。部件文件可以覆盖所在槽位的默认值。随模组提供的恶魔、龙人、矮人与精灵耳朵声明 `"r": "skin"`；猫、狐、机械与鱼人耳朵声明 `"r": "trait_primary"` 与 `"g": "trait_secondary"`，因此会随该种族的其他特征一起换色。Blockbench 插件写出的是槽位默认值。
+
+### 专属部件
+
+为某个 NPC 制作的部件声明 `"audience": "npc"`。玩家永远不会在选项中看到它，在玩家权限下角色每次接受验证时都会失去它；生成角色不会抽到它，初始部件与种族特征也不会取自它。NPC 的角色外观与服装不受受众筛选，因此拥有该部件的 NPC 可以正常穿戴。设计者权限会列出专属部件并标上 NPC 标记，详见[人形运行时](/zh-cn/dev/humanoid-runtime/)。随模组提供的伊芙琳娜礼装就是这样声明的：
+
+```json
+{
+  "audience": "npc",
+  "gender": "female",
+  "gender_locked": true,
+  "sort": 200,
+  "tags": ["evelina", "mage"]
+}
+```
+
+五件礼装部件为 `outfit_top/evelina_mage_robe`、`outfit_bottom/evelina_mage_skirt`、`shoes/evelina_mage_boots`、`head_accessory/evelina_mage_hat` 与 `back_accessory/evelina_mage_cape`，命名空间均为 `isekaiexpansion`。
+
+受众决定玩家能否获得部件；`unlock` 决定面向玩家的部件何时可用。奖励使用 `granted` 或其他规则，不应由任何玩家持有的部件使用 `npc`。
 
 ### 可见性与兼容关系
 
@@ -176,14 +198,14 @@ Blockbench 验证器检查名称、唯一根骨骼、必需锚点及锚点旋转
 同一份内容分别放在 `humanoid_parts/underwear_top/default_male.json` 和 `humanoid_parts/underwear_bottom/default_male.json`，组成部件链 `isekaiexpansion:default_male_underwear`。
 
 - **穿戴**：在角色界面、生成的 NPC 或 NPC 服装中穿上任意成员，都会穿上全部成员。已穿着的成员保留自己的样式和绘制；被挤出成员槽位的部件会连同它所在的部件链一起卸下。
-- **移除或替换**：移除或替换任意成员，其他成员随之卸下。NPC 服装里对一个成员写 `none` 会清空整条链。
+- **移除或替换**：移除或替换任意成员，其他成员随之卸下。NPC 服装里用 `clear(slot)` 清空一个成员会清空整条链。
 - **验证**：部件链只穿了一部分时，如果每个缺少成员的槽位都为空、角色也能穿戴该成员，验证流程会补齐整条链；否则卸下已穿的成员。成员因 `requires` 不满足而被移除时，整条链随之移除，此后不会再补齐。
 
-目录加载时，一条部件链至少要有两个成员，同一槽位不能有两个成员，所有成员的性别锁定、`origins` 与 `unlock` 必须相同。违反任一规则的部件链会被解散并记录警告，其部件按普通部件加载。
+目录加载时，一条部件链至少要有两个成员，同一槽位不能有两个成员，所有成员的性别锁定、`origins`、`audience` 与 `unlock` 必须相同。违反任一规则的部件链会被解散并记录警告，其部件按普通部件加载。
 
 ### 失败与重载行为
 
-未知根字段被忽略。错误的槽位路径、含 `.` 的部件名称、冲突的 `slot`、未知的 `gender`、没有 `gender` 的 `gender_locked`、无法解析的 `chain`、错误 JSON 结构或未知的依赖槽位会导致整个定义失败，并记录逐文件错误。成功定义替换目录；无效定义不保留上一版本。
+未知根字段被忽略。错误的槽位路径、含 `.` 的部件名称、冲突的 `slot`、未知的 `gender`、`audience` 或 `unlock.type`、没有 `gender` 的 `gender_locked`、无法解析的 `chain`、错误 JSON 结构或未知的依赖槽位会导致整个定义失败，并记录逐文件错误。成功定义替换目录；无效定义不保留上一版本。
 
 目录会将样式转为小写并去除首尾空格，但不会在此执行部件引用所用的更严格字符验证。样式应只用 `a-z`、`0-9`、`_` 和 `-`，最多 64 个字符；标签须在 48 个字符以内。这些是网络限制，不是目录解析器的长度检查。
 
@@ -198,6 +220,7 @@ Blockbench 验证器检查名称、唯一根骨骼、必需锚点及锚点旋转
 - 穿戴、替换和移除部件链的每个成员，再切换性别，并检查两种性别的生成 NPC。
 - 分别调整各绑定颜色，测试黑色遮罩区域、混合 RGB 权重与透明原图。
 - 测试护甲遮挡、`hides_slots`、依赖部件、种族筛选和解锁失败。
+- 对于 `npc` 部件，确认它不出现在 `/ise humanoid edit` 中，在 `/ise humanoid design` 中带标记列出，并在重新登录后从你的角色上消失。
 - 检查待机、疾跑、第一人称手臂及使用同一部件的 NPC。
 - 重载服务端数据与客户端资源，检查日志和已保存角色。
 

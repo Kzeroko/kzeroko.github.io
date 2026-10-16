@@ -3,7 +3,7 @@ title: "Terrain and landmarks"
 description: "KTM2's terrain families, the unique World Tree, atmosphere and operator location commands."
 category: world
 order: 176
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 KTM2 combines a bundled ReTerraForged landscape with `20` custom terrain families. Mountains, settlement plains, a saved World Tree and exotic districts share the Overworld, with placement constrained by the original geography.
@@ -37,6 +37,8 @@ The exotic family IDs are category identities for location commands. Generated e
 
 The additional default palette IDs are `isekaiexpansion:abyssal_volcano_basalt`, `isekaiexpansion:garden_of_the_firmament_verdant`, `isekaiexpansion:giant_stone_valley_weathered`, `isekaiexpansion:riftborne_monolith_riftstone`, `isekaiexpansion:infernal_deep_cavern_basalt`, `isekaiexpansion:sunken_azure_grotto_azure`, `isekaiexpansion:viridian_toxic_depths_viridian`, `isekaiexpansion:worldroot_hollow_ancient`.
 
+The bundled landscape favours plains and steppe over mountain terrain, uses gentler mountain height scales and includes warm, dry climate regions for deserts. Mixed terrain keeps the elevation scale of each contributing terrain. These generation changes affect new terrain; existing generated chunks keep their saved blocks and biomes.
+
 ## World creation and placement
 
 The default world preset uses KTM2 automatically; the customisation screen is a read-only view, not an activation step. Dedicated-server dimension creation also selects this default. Turning off custom terrain does not restore an unrelated world preset.
@@ -44,6 +46,8 @@ The default world preset uses KTM2 automatically; the customisation screen is a 
 District selection is deterministic for a seed and configuration, but a placement roll is not a promise that every grid cell contains a landmark. Complete shapes must fit permitted geography and available height without colliding with reserved plains or the World Tree. Sentinel Isles seek oceans, Verdant Knives seek mountains, and Amber Basin seeks high ground; most surface exotic districts require comparatively level inland sites. Abyssal Volcano also accepts inland highlands, subject to the full-caldera and build-height checks. Underground families instead seek high ground, keep the original surface height and carve sealed chambers beneath continuous rock cover.
 
 Skyreach, Firmament and Riftborne keep the underlying ground-height system intact. Riftborne’s detached rock stays at its own altitude during biome blending, above its shaped valley and pedestal. Firmament has grassy caps over soil, with complete waterfalls descending to receiving pools. Exotic lakes vary in orientation, shoreline and depth. Within owned exotic terrain, vanilla cave biomes such as Deep Dark give way to the exotic biome; underground ownership is limited to the chamber and its surrounding buffer. Outside owned terrain, biome selection falls back to the original source.
+
+Important structures reserve ground of their own. The Adventurers' Guild and the Respawn Temple level a pad under the building and blend it back into the surrounding land, and the pad never overlaps a district or the World Tree. See [Structure placement data](/en/wiki/structure-placement/).
 
 ## The World Tree and Great Plains
 

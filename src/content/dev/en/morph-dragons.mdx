@@ -3,10 +3,10 @@ title: "Saints Dragons morph bridge"
 description: "Native species simulation, rider bindings, damage scaling, transport and replicated presentation for dragon forms."
 category: systems
 order: 116
-updated: 2026-09-30
+updated: 2026-10-06
 ---
 
-The Saints Dragons bridge runs selected native controllers on the unspawned morph form while the player remains the world entity. This page describes the integration in this repository, checked against the pinned dependency `maven.modrinth:saints-dragons:fe97xyOc`; native ability timings, seat offsets, variants and flight configuration remain owned by Saints Dragons.
+The Saints Dragons bridge runs selected native controllers on the unspawned morph form while the player remains the world entity. This page describes the integration in this repository, checked against the pinned dependency `maven.modrinth:saints-dragons:4LGtJIwV`; native ability timings, seat offsets, variants and flight configuration remain owned by Saints Dragons.
 
 ## What it does
 
@@ -183,7 +183,7 @@ A mismatched registered local ability with more than 40 ticks (2 seconds) left, 
 
 The bridge accepts one real passenger on an adult form when host and rider are alive, nonspectating and not already riding, and the host has no passenger. The synthetic controlling rider remains a separate identity.
 
-Client `passengerLocator` can supply an animated seat; the server uses native species seat offsets, with a separate Nulljaw height path. Dismount probes radii 2.5, 3.5 and 1.8 at angles 0, 30, −30, 60, −60, 90, −90 and 180, passing search depth 10 and clearance parameter 2 to the native radial helper. Carried riders are considered native allies. Passenger orientation uses the native cached rider matrix/spec and seat offsets; absent/stale native data can leave the pose unapplied.
+Client `passengerLocator` can supply an animated seat; the server uses native species seat offsets, with a separate Nulljaw height path. Dismount probes radii 2.5, 3.5 and 1.8 at angles 0, 30, −30, 60, −60, 90, −90 and 180, passing search depth 10 and clearance parameter 2 to the native radial helper. Carried riders are considered native allies. Passenger orientation uses the seat pose Saints resolves once per frame (`DragonRiderAttachments.resolve`), which already carries the species seat offset and seat yaw. The form qualifies for that cache because its host sits in its own passenger list. A seat index Saints does not define leaves vanilla placement.
 
 The camera samples the native ride-camera controller only during active morphs. Native client configuration can suppress banking lateral shift; zoom, vertical shift and pitch still come from its output. Generic clipping/perspective rules remain in [morph client presentation](/en/dev/morph-client/).
 
@@ -199,7 +199,7 @@ The visual packet appends `SaintsDragonMorphEffectState`: breathing (boolean), b
 
 Morph controller lookup also works outside the ability tick, so breath particles use the wearer’s interpolated aim. The client retains the rendered mouth in body-local space and resolves it against the current interpolated position and body yaw. It continues to follow the wearer when the model is culled or the camera enters first person. Portrait and shadow passes cannot replace this world sample; native particle travel and collision stay unchanged.
 
-The emission injections specify full overload descriptors. Run `./gradlew.bat -I tools/compat/verify.gradle checkCompat checkPackagedCompat` for dependency signatures, held-input decisions, effect packet round trips and mouth-anchor continuity. The packaged check builds the remapped JAR and checks Saints Dragons injection selectors and invocation targets against the original dependency JAR. It catches selectors that resolve to an overload without the required call. These checks do not start Minecraft or render particles.
+The emission injections specify full overload descriptors. Run `./gradlew.bat compileJava`. Check breath origin and continuity while turning, changing perspective and moving out of view in game.
 
 ## Verifying
 

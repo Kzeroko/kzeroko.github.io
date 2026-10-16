@@ -3,7 +3,7 @@ title: "Shaders and materials"
 description: "Portal material generation and the status-driven entity aura pipeline."
 category: client
 order: 50
-updated: 2026-09-26
+updated: 2026-10-15
 ---
 
 Portal materials render generated textures onto entities; status auras capture an entity silhouette and composite it over the scene. Both use Satin-managed effects, but they own separate clocks, targets and lifecycle state. `ShaderFXAPI` is the client facade for aura render hooks; portal helpers remain internal rendering machinery.
@@ -23,7 +23,7 @@ Portal materials render generated textures onto entities; status auras capture a
 | Atlas size | 1536 × 512 | Local and global targets each hold 3 horizontal tiles. |
 | Tile width | 512 | Body, energy and highlighted crest use successive thirds. |
 | Appearance | 12 ticks (0.60 seconds) | Smoothstep scale during spawn. |
-| Height/width | 1.25 | Width derives from entity height. |
+| Default width × height | 1.6 × 2 blocks | Width and height are independent tracked values. |
 | Default colour | `0xFF18DFFF` | Stored in the entity's tracked colour. |
 
 `PortalAnimationClock` advances on unpaused client ticks and freezes its partial tick while paused. A world identity change resets it. Texture generation primes an uninitialised target, then skips work when no portal was submitted within the last 2 frames or the sampled time is unchanged. Generation saves and restores read/draw framebuffers, viewport, depth/blend settings and texture matrix. Disconnect releases the effect.
@@ -32,12 +32,16 @@ Call `PortalEntity.setPortalColor` on the server; it forces opaque alpha. Colour
 
 | NBT key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `PortalColor` | `integer` | `0xFF18DFFF` | Packed colour. Legacy `0xFFFFFFFF` becomes the default when the version key is absent. |
-| `PortalPaletteVersion` | `integer` | absent | Its presence suppresses legacy white conversion; saves write `1`. Newly saved explicit white stays white. |
+| `PortalColor` | `integer` | `0xFF18DFFF` | Packed opaque colour; explicit white remains white. |
+| `Width` | `number` | `1.6` | Independent aperture width in blocks. |
+| `Height` | `number` | `2` | Independent aperture height in blocks. |
+| `Ambient` | `boolean` | `false` | Enables the existing portal ambient sound. |
 
 `DungeonGatewayDistortionController` samples gateway overlap on client ticks and fades out over 4 ticks (0.20 seconds) after leaving. Spectators do not charge it. It initialises the shader before setting uniforms and blits only colour from `swap` to the main target, preserving scene depth. It uses the portal clock while paused; this visual probe does not decide teleport eligibility.
 
 `SwordProjectileModel` selects the texture-cached `IsekaiRenderLayers.projectileEmissive` material. It keeps the ordinary translucent-emissive program and source-alpha blending, with `LEQUAL`, colour/depth writes, disabled culling and `ITEM_ENTITY_TARGET`. Foreground terrain and water retain their normal depth order. This material does not change projectile movement or attachment placement.
+
+Portal planes use entity yaw instead of camera rotation. Native entity rotation persists facing. `setPortalSize` accepts finite dimensions from 0.5–32 blocks; World Gate authoring imposes its narrower lower limits. Energy and crest offsets switch sides with the observer so both faces preserve the same material order. The textures, shader programs and spawn/shutdown envelopes are unchanged. Dungeon entrance anchors also carry horizontal `facing`. See [World Gates](/en/dev/world-gates/) for permanent anchors.
 
 ### Status auras
 

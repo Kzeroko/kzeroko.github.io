@@ -1,9 +1,9 @@
 ---
 title: "Tutorials"
-description: "Client tutorial definitions, progress, input handling, targets and the bounds editor."
+description: "Client tutorial definitions, progress, input handling, element-tracking targets and the target editor."
 category: systems
 order: 145
-updated: 2026-09-19
+updated: 2026-10-01
 ---
 
 Tutorials combine guided steps, screen-specific guidance and short popups. Completion is versioned in one local file, so the same installation remembers a tutorial across worlds and servers; the server can request playback but does not own that progress.
@@ -21,18 +21,18 @@ Definitions are registered in Java during client initialisation. There is no tut
 | Kind | Trigger and completion |
 | --- | --- |
 | `GuidedTutorialDefinition` | Requested explicitly; a different active tutorial causes normal requests to queue. Finishing or skipping saves completion. |
-| `ScreenTutorialDefinition` | Discovered when its screen opens, provided no tutorial, queued request or bounds editor is active. Closing or changing away cancels without completion. |
+| `ScreenTutorialDefinition` | Discovered when its screen opens, provided no tutorial, queued request or target editor is active. Closing or changing away cancels without completion. |
 | `ShortTutorialDefinition` | Displays a popup immediately and records completion immediately, without waiting for its duration. |
 
 | Built-in identifier | Version | Content |
 | --- | --- | --- |
 | `isekaiexpansion:adventurer_basics` | 2 | 12 steps: welcome, forward movement, jump, vitals, level, comfort, active skills, skill selection, skill screen, quests, emoji and completion. Movement holds for 1200 ms; skill selection holds for 700 ms. Requested on joined data-pack synchronisation, not every reload. |
-| `isekaiexpansion:inventory_playerex_tabs` | 1 | 4 inventory steps: primary tabs, expansion tabs, purse and team. Tab bounds are reported; purse and team use relative rectangles. |
+| `isekaiexpansion:inventory_playerex_tabs` | 1 | 4 inventory steps: primary tabs, expansion tabs, purse and team. Tab bounds are reported; the purse and team buttons are located as elements. |
 | `isekaiexpansion:tutorial_restart_hint` | 1 | 5200 ms popup requested after a guided tutorial finishes, if unseen. |
 
 Only one interactive tutorial is active. Queued guided IDs are deduplicated; an already active ID is not queued again. A forced guided replay interrupts the active tutorial but does not clear the existing queue. An unknown ID logs a warning. A normal request for a screen tutorial is ignored; replay clears its completion and starts it immediately only if its screen is already open, a player exists and no other tutorial is active.
 
-The client ticks the manager at end tick. Losing focus, a cinematic input lock, an unavailable target context or the bounds editor hides guidance and resets held progress. HUD steps require no open screen; screen targets require a matching screen. A scheduled advance is processed before most context gates, after the bounds editor check; it is not a second validation of the original action.
+The client ticks the manager at end tick. Losing focus, a cinematic input lock, an unavailable target context or the target editor hides guidance and resets held progress. HUD steps require no open screen; screen targets require a matching screen. A scheduled advance is processed before most context gates, after the target editor check; it is not a second validation of the original action.
 
 ### Progress storage
 
@@ -61,7 +61,7 @@ Blank lines, comments beginning with `#`, malformed records, invalid IDs and inv
 | `id` | Identifier | Required, non-null | Unique registry key. Duplicate IDs throw. |
 | `version` | Integer | Required, positive | Increase when previously completed clients should see the tutorial again. |
 | `steps` | List of steps | Required for interactive definitions | Non-empty immutable copy; null elements are rejected. |
-| `screenClassName` | String | Required for screen definitions | Nonblank fully qualified class name. Every step must have a screen target with exactly this class-name string. Duplicate screen triggers throw and roll back the new ID registration. |
+| `screenClassName` | String | Required for screen definitions | Nonblank fully qualified class name, in the intermediary or the runtime namespace. Every step must have a screen target with exactly this class-name string. Duplicate screen triggers, compared in intermediary, throw and roll back the new ID registration. |
 | `titleKey`, `bodyKey` | Translation-key strings | Required for steps and short definitions | Non-null and nonblank; translations are resolved at presentation time. |
 | `durationMs` | Long | Required for short definitions | At least 1 ms. |
 | `advanceMode` | Enum | Required for steps | `HOLD_CONFIRM`, `KEY_PRESS`, `KEY_HOLD` or `ACTION`. |
@@ -87,15 +87,43 @@ At runtime screen matching walks the actual class's superclass chain. Registrati
 
 E and Escape are consumed during guidance, including release protection across transitions. Resolved non-E bindings and matching mouse buttons can still reach gameplay after scheduling advancement. Holding Escape cancels pending advancement and other hold progress. An action step has no E fallback. Releasing a held binding resets its timer.
 
-### Targets and illustrations
+### Targets
+
+A target is a context and a locator. `TutorialTarget.hud` and `reportedHud` targets show while no screen is open; `element`, `reportedScreen` and `region` targets name a screen class and show while that screen or a subclass of it is open. Bounds are resolved every frame in scaled GUI pixels, so a highlight follows what it points at through window resizes, GUI scale changes and layouts other mods impose. A locator that finds nothing shows the step without a highlight; it never completes the step.
+
+| Locator | Contexts | What it highlights |
+| --- | --- | --- |
+| `TutorialLocator.Reported` | HUD, screen | Bounds a renderer reports under the identifier for the current frame. |
+| `TutorialElement` | Screen | A live element of the screen, found by what it is. |
+| `TutorialRegion` | HUD, screen | A fixed rectangle pinned to an anchor of a frame. HUD regions accept only the `WINDOW` frame. |
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `reporterId` | Nullable identifier | Null for fixed rectangles | Requests current-frame bounds. At least this or fallback bounds must be supplied. |
-| `fallbackBounds` | Nullable relative rectangle | Null for reported-only targets | Used when no matching report exists. No report and no fallback means no highlight, not automatic completion. |
 | `screenClassName` | String | Required for screen targets | Nonblank; also controls when the step is available. |
-| `x`, `y` | Finite floats | Required for relative rectangles | Nonnegative fractions of the entire scaled screen. |
-| `width`, `height` | Finite floats | Required for relative rectangles | Positive; right and bottom edges must not exceed 1 + 0.00001. Pixel conversion rounds and clamps to at least 1 pixel. |
+| `reporterId` | Identifier | Required for reported locators | Report key requested for the current frame. |
+| `kind` | `enum(WIDGET, COMPONENT, SLOT)` | Required for elements | Element tree to search; see below. |
+| `type` | String | Required for elements | Nonblank fully qualified class name of the element, in the intermediary or the runtime namespace. |
+| `key` | Nullable string | Null | Widget: translation key of its label, or of its tooltip when the label has none. Component: its id. Blank is rejected; slots reject any key. |
+| `ordinal` | Integer | Required for elements | At least 0. Which of the elements sharing kind, type and key, counted in traversal order; for a slot, its index in the screen handler. |
+| `frame` | `enum(WINDOW, CONTAINER)` | Required for regions | `WINDOW` is the scaled window. `CONTAINER` is a handled screen's background panel, and the window on any other screen. |
+| `anchor` | `enum(TOP_LEFT, TOP, TOP_RIGHT, LEFT, CENTER, RIGHT, BOTTOM_LEFT, BOTTOM, BOTTOM_RIGHT)` | Required for regions | Frame point the matching point of the rectangle is pinned to. |
+| `x`, `y` | Integers | Required for regions | Offset from the anchor in scaled pixels, right and down positive. |
+| `width`, `height` | Integers | Required for regions | At least 1 scaled pixel. |
+
+| Element kind | Where it is searched |
+| --- | --- |
+| `WIDGET` | Every widget among the screen's children, descending through nested parents. A hidden clickable widget still counts toward ordinals but highlights nothing. |
+| `COMPONENT` | owo-ui components under an owo adapter among the children, then under every owo layer instance on the screen. Components with no area highlight nothing. |
+| `SLOT` | The handled screen's slot at that handler index, when it is enabled and of the named class: 16 × 16 at the slot position inside the container panel. |
+
+Hidden elements counting toward ordinals keeps an ordinal stable while a sibling shows or hides. Class names are compared in the intermediary namespace: a production client names Minecraft's inventory screen `net.minecraft.class_490`, a development client `net.minecraft.client.gui.screen.ingame.InventoryScreen`, and both forms match. Mod classes are not remapped and compare as written.
+
+A region is placed at `frame left + floor((frame width − width) × column / 2) + x`, where `column` is 0, 1 or 2 for left, centre and right anchors; the vertical position uses rows the same way.
+
+### Illustrations
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
 | `texture` | Identifier | Required for images | Non-null texture resource. |
 | `aspectRatio` | Finite float | Required for full images | Positive; controls reserved layout size before the image loads. A region factory derives it from region dimensions. |
 | `maxHeightDp` | Integer | 92 in image factories | At least 8 dp. |
@@ -131,13 +159,13 @@ public static void registerExampleTutorial() {
 
 All facade arguments above are non-null. Playback and action calls mutate the client manager directly: invoke them on the client thread, using `MinecraftClient.execute` when dispatching from another thread. Register definitions before requesting them. Keep client definitions and classes out of dedicated-server initialisation; server code only needs the identifier and server facade.
 
-For relative targets, press Control + the restart binding to open the bounds editor, drag with the left mouse button, and press Enter to copy a Java target expression to the clipboard and chat. Escape cancels. Selections must be at least 4 × 4 scaled pixels. Screen mode captures the current screen's class and closes if that exact screen changes; HUD mode closes when a screen opens. Resizing preserves the normalised selection and ends a drag. The tool emits 6 decimal places and never edits source files.
+To author a target, press Control + the restart binding to open the target editor. On a screen the element under the cursor is outlined; the scroll wheel cycles between the elements stacked there, smallest first, and a left click captures the outlined one. A left drag of more than 3 scaled pixels marks a free region instead, at least 4 × 4, pinned to the anchor of the container panel on a handled screen, or of the window elsewhere, whose third of the frame holds the region's centre on each axis. The HUD has no elements, so there only regions exist. A right click clears the selection, Enter copies the Java target expression to the clipboard and posts it to chat, and Escape cancels. Screen and element classes are written in the intermediary namespace, so an expression copied from a production client matches in development too. Screen mode closes if that exact screen changes; HUD mode closes when a screen opens. A resize keeps a captured element or a pinned region and ends a drag in progress. The tool never edits source files.
 
 ## Verifying
 
 Use permission level 2 commands `/ise dev tutorial show <id> [targets]` and `/ise dev tutorial replay <id> [targets]`. Omitted targets require a player source. Suggestions contain only the 3 built-in IDs, but any identifier can be typed; success counts packet recipients, not actual displays.
 
-Check normal versus forced playback, a version increase, skipping, disconnect, and a new world on the same installation. Check screen close/reopen, subclass trigger ordering, an absent bounds reporter, GUI scaling, unavailable key bindings and an action notification delivered before its step. Confirm E/Escape releases do not open inventory or pause immediately after guidance. Test a dedicated server with definitions registered only on clients, and inspect the progress file after completion or restart.
+Check normal versus forced playback, a version increase, skipping, disconnect, and a new world on the same installation. Check screen close/reopen, subclass trigger ordering, an absent bounds reporter, an element target at several window sizes and GUI scales, an element whose owning mod is absent, GUI scaling, unavailable key bindings and an action notification delivered before its step. Confirm E/Escape releases do not open inventory or pause immediately after guidance. Test a dedicated server with definitions registered only on clients, and inspect the progress file after completion or restart.
 
 ## Related
 

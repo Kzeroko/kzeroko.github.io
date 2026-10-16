@@ -3,7 +3,7 @@ title: "战斗属性与状态运行时"
 description: "属性元数据、伤害阶段、星能与盾势存储，以及状态施加和生命周期约定。"
 category: systems
 order: 35
-updated: 2026-09-26
+updated: 2026-10-15
 ---
 
 本系统连接属性注册、Data Attributes 映射、PlayerEx 伤害函数和状态生命周期钩子。相关辅助类属于内部实现；[玩家属性指南](/zh-cn/wiki/attributes-and-effects/)与[效果目录](/zh-cn/wiki/status-effects/)说明玩法结果。
@@ -147,11 +147,13 @@ JSON 层次为 `values → source attribute → target attribute`；每个目标
 | 盾势 · `lockGauge` | boolean | false | 消耗后的恢复暂停。 |
 | 盾势 · `lockGaugeTimer` | int | 0 | 已经过的锁定 ticks。 |
 
-星能每 `(int)(20 / regen)` ticks 恢复 1 点，每 tick 至多一次。移除能量会将当前值限制到至少 0，启动 20-tick 锁定并同步。直接 `setEnergy` 不限制数值；`addEnergy` 只限制结果上限，不拒绝调用者传入负值。锁定计时器只在低于上限时推进，因此储量已满时锁定可能继续保留。
+玩家属性就绪后，能量每 `max(1, (int)(20 / regen))` ticks 恢复 1 点。扣除后最低为 0，并启动 20-tick 恢复锁且同步。`setEnergy` 将余量限制到 0 与当前容量之间；`addEnergy` 使用防溢出的加法，增加量与消耗量均拒绝负数。NBT 读取保留非负的存储余量，等待最终容量就绪后再夹取。重生先恢复持久容量与天赋修饰符，再协调余量。锁计时器只在未满时推进，因此满能量时可能仍保留恢复锁。
 
 盾势上限为 `max(0, round(baseGauge × shieldPowerMultiplier))`，每次恢复量为 `max(1, round(5 × shieldPowerMultiplier))`，间隔为 `max(1, round(20 / regen))`，回复非正时为 20。格挡后暂停恢复 40 ticks。恢复可能暂时超出上限，直到下一 tick 修正。冷却分支提前返回，不恢复盾势。
 
 格挡伤害超过普通阈值但不超过最大阈值时，按比例额外增加最多一份基础消耗，再除以护盾强效、四舍五入，并保证至少消耗 1。严格超过最大阈值会立即破防，盾势耗尽同样破防。盾牌参数和回退常量由 IsekaiCore 提供，本组件不硬编码通用盾牌方案。
+
+盾势本体是 `ShieldGauge`，所有能举盾的实体共用。`ShieldingComponent` 承载玩家的盾势，负责同步并发送破防与恢复提示；召唤出的分身通过 `ShieldGuards.Holder` 持有一份不发提示的盾势。`ShieldGuards.applyGuard` 在 should-damage 伤害阶段对任何生物生效：正在使用类盾物品且盾势仍可防御的目标，会把这次伤害交给 IsekaiCore 的 `ICShieldUtil.tryBlockDamage`，并按被吸收的伤害扣减盾势。破盾效能使用同一个 `isGuarding` 判断，因此对举盾的分身与举盾的玩家同样生效。破防音效使用举盾实体自身的声音类别。
 
 ## 约定
 
@@ -206,7 +208,7 @@ JSON 层次为 `values → source attribute → target attribute`；每个目标
 
 `DamageOverTimeEffect` 仅对服务端存活实体触发，并要求剩余时长是间隔的正整数倍。其结算方法至少执行 1 次、最多执行调用者指定次数，可归属给指定攻击者；返回成功调用所请求的伤害总和，而非实际生命损失。该方法不会移除状态实例。
 
-法术易伤定义当前连续调用两次单学派设置器。已检验的 Spell Power 源码保留最后一次调用，其法强倍率与 1 相加。[效果目录](/zh-cn/wiki/status-effects/)记录最终数值与检验的依赖修订。修复或升级集成时，应明确这一差异，不能把被丢弃的首个学派参数直接写成生效行为。
+`ElementalVulnerabilityEffect` 通过按学派索引的映射实现 Spell Power 的 `VulnerabilityEffect`。`ElementalReactionBonus` 将每个效果的有效叠层限制为 3，并提供逐层相加的增益。主要反应最高提供 +30% 法强、+5 个百分点暴击率及 +0.20 暴击伤害；次要反应对应为 +15%、0 及 +0.10。声明的两个学派均保留。详见[效果目录](/zh-cn/wiki/status-effects/)。
 
 `IsekaiSpellSchools` 遇到同 ID 学派时复用已有对象。新建自定义学派属性的基础值和下限为 0，上限为 2048；近战物理学派绑定 `isekaiexpansion:physical_melee`，其他自定义学派使用对应 Spell Power 伤害 ID。`IsekaiMagicAttribute` 依据模组 ID、学派 ID 与运算生成 UUID，因此同一学派/运算的多个数值不是独立修饰符身份。
 
@@ -230,3 +232,5 @@ JSON 层次为 `values → source attribute → target attribute`；每个目标
 - [状态效果](/zh-cn/wiki/status-effects/)
 - [法术集成](/zh-cn/dev/spell-integration/)
 - [成长运行时](/zh-cn/dev/leveling/)
+
+附着物挥动按准星瞄准，距离取配置范围与“15格加魔剑感知”的较大值，上限64格。主手持任意物品或空手均可触发释放；关系与可见性检查决定准星下的有效目标，没有选中实体时仍向瞄准点发射。见[附着弹体与发射模式](/zh-cn/dev/projectile-attachments/)。

@@ -3,7 +3,7 @@ title: "Status effects"
 description: "The complete registered effect catalogue, removal rules, periodic damage and spell vulnerability behaviour."
 category: combat
 order: 15
-updated: 2026-09-26
+updated: 2026-10-09
 ---
 
 Status effects can modify attributes, control actions, carry a combat stack or run their own update. Their removal rules matter as much as their bonuses: milk, harmful-effect cleansing and ordinary expiry do not all use the same contract.
@@ -116,20 +116,18 @@ The shift halves the base interval once per step before the minimum applies. Upd
 
 ## Magic vulnerabilities and exhaustion
 
-These additional registered effects use Spell Power's vulnerability implementation. The dependency behaviour below was checked in the local official-source snapshot `9cdd503`, whose build declares `1.6.0` for Minecraft `1.20.1`, corresponding to the configured `1.6.0+1.20.1` dependency. This is source verification, not a binary-equivalence check.
+Each elemental effect retains a major and a minor school reaction. Both are active; each effect contributes at most 3 stacks, even if another source supplies a higher amplifier.
 
-Each current definition calls the vulnerability setter twice. In that source, the setter stores a single school and replaces the earlier call. Therefore only the **last** school survives:
-
-| Effect and ID | Surviving school | Replaced school |
+| Effect and ID | Major school | Minor school |
 | --- | --- | --- |
-| Electrified · `isekaiexpansion:electrified` | Water | Frost |
-| Iced · `isekaiexpansion:iced` | Lightning | Water |
-| Ignite · `isekaiexpansion:ignite` | Lightning | Wind |
-| Wet · `isekaiexpansion:wet` | Frost | Earth |
-| Luminous · `isekaiexpansion:luminous` | Arcane | Dark |
-| Shadowed · `isekaiexpansion:shadowed` | Arcane | Light |
+| Electrified · `isekaiexpansion:electrified` | Frost | Water |
+| Iced · `isekaiexpansion:iced` | Water | Lightning |
+| Ignite · `isekaiexpansion:ignite` | Wind | Lightning |
+| Wet · `isekaiexpansion:wet` | Earth | Frost |
+| Luminous · `isekaiexpansion:luminous` | Dark | Arcane |
+| Shadowed · `isekaiexpansion:shadowed` | Light | Arcane |
 
-The surviving tuple is `(1.15, 0, 0.10)`: added base-power multiplier, added critical chance and added critical damage. Spell Power multiplies it by `amplifier + 1`, adds contributions from applicable effects, and uses `base × (1 + added multiplier)`. At amplifier 0, an isolated matching effect therefore yields `2.15 × base`, not `1.15 × base`; it adds 0 critical chance and 0.10 critical damage. The replaced `(1.30, 5, 0.20)` tuple is not a second active school bonus. Iced also carries movement speed -10% total at level I.
+A major reaction adds +10% spell power per stack, up to +30%; at 3 stacks it also adds 5 percentage points of critical chance and 0.20 critical damage. A minor reaction adds +5% spell power per stack, up to +15%, with 0 extra critical chance and 0.10 critical damage at 3 stacks. These are additive bonuses to spell power, not total damage multipliers. Contributions from different applicable effects can add together. Iced also applies movement speed -10% total at level I.
 
 Energy Inefficiency · `isekaiexpansion:energy_inefficiency` applies movement speed -15% total and Aether Power -25% total at level I. It also blocks normal energy checks and sprint starts, and multiplies incoming damage by 1.3 in the registered damage pipeline. It is unclearable and persistent.
 

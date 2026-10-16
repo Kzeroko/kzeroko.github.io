@@ -3,7 +3,7 @@ title: "技能树数据"
 description: "为 Puffish 技能节点添加解锁条件，并通过奖励授予本地可习得能力。"
 category: data
 order: 84
-updated: 2026-09-19
+updated: 2026-10-15
 ---
 
 技能条件为现有技能树节点增加一项解锁检查。独立的奖励桥接会在 Puffish Skills 更新该定义的解锁数量时授予 Origins 能力；这两种格式本身都不创建技能图。
@@ -54,7 +54,7 @@ Puffish Skills 管理 `data/<namespace>/puffish_skills/categories/<category>/` �
 | `destiny` | 整数命运值 | 不使用 | 当前命运值达到门槛。 |
 | `adventurer_rank` | 整数阶级值 | 不使用 | IsekaiCore 的阶级检查接受该门槛。 |
 | `attribute` | 数值属性门槛 | 必填属性 ID | 当前属性值达到门槛；实体没有该属性时失败。 |
-| `talent` | 整数天赋阶级 | 必填天赋 ID | 当前天赋阶级达到门槛。 |
+| `talent` | 整数天赋阶级，E 为 0 至 S 为 5，S+ 为 6 | 必填天赋 ID | 当前有效天赋阶级达到门槛。 |
 
 条件不会消耗经验、命运或属性。它限制新的解锁，不限制已解锁节点的持续持有。每个条目只包含一项条件；不能通过重复条目表达 AND 或 OR。
 

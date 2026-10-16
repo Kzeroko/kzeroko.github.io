@@ -3,14 +3,14 @@ title: "队伍保护"
 description: "玩家归属、随从所有权、伤害来源归因与非增益效果过滤。"
 category: systems
 order: 140
-updated: 2026-09-19
+updated: 2026-10-07
 ---
 
 队伍保护比较每个战斗实体背后的玩家。有效随从与其主人属于同一方；伤害来源可将投射物或带所有者的实体解析到直接所有者，使伤害、效果和目标筛选共用同一判断。
 
 ## 它做什么
 
-内部类 `TeamAllegiance`、`TeamDamageGuard`、`TeamStatusEffectGuard` 位于 `internal.team`，不是公共 API 门面。同队关系委托给 IsekaiCore 的 `TeamLogic.server().areOnSameSide`；当前仓库使用 `isekaicore_version=0.4.0-build61`。
+内部类 `TeamAllegiance`、`TeamDamageGuard`、`TeamStatusEffectGuard` 位于 `internal.team`，不是公共 API 门面。同队关系委托给 IsekaiCore 的 `TeamLogic.server().areOnSameSide`；当前仓库使用 `isekaicore_version=0.4.0-build65`。
 
 集成不维护另一套队伍名册，也不保存联盟状态。NPC 跟随归属仍由有效随从会话管理，正式队伍语义归 IsekaiCore 所有。
 

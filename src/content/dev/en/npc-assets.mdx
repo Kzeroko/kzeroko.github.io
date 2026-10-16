@@ -3,17 +3,17 @@ title: "NPC models, outfits and citizen assets"
 description: "Wire NPC presentation into shared humanoid parts, wardrobe overlays and animation sets."
 category: assets
 order: 40
-updated: 2026-09-27
+updated: 2026-10-14
 ---
 
-NPC bodies and worn layers use the shared humanoid part system. The NPC-specific asset is its animation set; its character and wardrobe are supplied by a preset. Citizens use the same renderer with a generated profile.
+NPC bodies and worn layers use the shared humanoid part system. The NPC-specific asset is its animation set; its character and wardrobe are a preset declared in its own class. Citizens use the same renderer with a generated profile.
 
 ## What you are making
 
 | Resource | Location |
 | --- | --- |
 | Part catalogue | `data/<namespace>/humanoid_parts/<slot>/<part>.json` |
-| NPC character and wardrobe | `data/<namespace>/npc_presets/<entity-type-path>.json` |
+| NPC character and wardrobe | The NPC class: `getNpcPreset()` returns its `NpcPreset` |
 | Part mesh | `assets/<namespace>/geo/entity/humanoid/<slot>/<part>.geo.json` |
 | Optional gender mesh | Same part path ending in `.male.geo.json` or `.female.geo.json` |
 | Texture style | `assets/<namespace>/textures/entity/humanoid/<slot>/<part>/<style>.png` |
@@ -22,7 +22,7 @@ NPC bodies and worn layers use the shared humanoid part system. The NPC-specific
 | NPC animation set | `assets/<namespace>/animations/entity/npc/<entity-type-path>.animation.json` |
 | Shared animation fallback | `assets/isekaiexpansion/animations/entity/npc/base.animation.json` |
 
-The default NPC preset ID is its entity type ID. A subclass can override `getNpcPresetId()` to share another preset. The body model and texture come from the selected `body` part through `HumanoidRenderResolver`, not from an old NPC-specific mesh directory.
+The preset ID is the entity type ID. It scopes outfit names and every player's wardrobe rewards; override `getNpcPresetId()` only when several entity types must share them. The body model and texture come from the selected `body` part through `HumanoidRenderResolver`, not from an old NPC-specific mesh directory.
 
 ## Requirements
 
@@ -61,17 +61,20 @@ Player-part deltas map to Gecko as position `(x, -y, z)` and rotation `(-pitch, 
 
 1. Create the body and worn pieces as shared humanoid parts. Keep swappable clothes in their own slots so the character can retain its base profile.
 2. Export meshes and texture styles to the resource paths above. Check that the selected style exists, including `default` where fallback is needed.
-3. Declare each part in the humanoid catalogue and reference it from the NPC preset. The bundled `data/isekaiexpansion/npc_presets/mahoutsukai_evelina.json` is a complete named-character example; `citizen.json` supplies a wardrobe without an authored profile.
-4. Add an entity animation file only for clips you want to override or add. Keep their names identical to the requested keys; all omitted base clips fall back individually.
-5. Reload data packs for definitions and client resources for meshes/textures/animations. These are separate reload paths. Confirm the loaded NPC's displayed parts, active outfit and attributes in-game.
+3. Declare each part in the humanoid catalogue. Give a part made for this NPC alone `"audience": "npc"`, as the bundled Evelina regalia does, so no player is offered it.
+4. Design the look under designer access, export it and declare the preset in the NPC class, as described in [declaring the preset](#declaring-the-preset). `MahoutsukaiEvelina` is the complete named-character example.
+5. Add an entity animation file only for clips you want to override or add. Keep their names identical to the requested keys; all omitted base clips fall back individually.
+6. Reload data packs for part definitions and client resources for meshes/textures/animations. A preset change is code and needs a rebuild. Confirm the loaded NPC's displayed parts, active outfit and attributes in-game.
 
 ### Citizens
 
-`CitizenNpcEntity` calls `HumanoidProfileGenerator` with entity UUID, resolved gender, identity origin and identity generation tags. This override generates the initial profile even if the preset declares profile fields; it does not adopt an authored profile through the base implementation. Its wardrobe still comes from the NPC preset. `setCitizenIdentity` regenerates the profile on the server. Generated gender uses the entity UUID, independently of displayed names. [Naming API](/en/dev/naming/) assigns unnamed non-unique NPCs from the resulting race, gender and citizen culture when the entity loads; configure citizen identity before spawning it.
+`CitizenNpcEntity` calls `HumanoidProfileGenerator` with entity UUID, resolved gender, identity origin and identity generation tags. This override generates the initial profile even if the preset declares a character; it does not adopt an authored profile through the base implementation. Citizens declare no preset, so they wear the fallback `default` outfit. `setCitizenIdentity` regenerates the profile on the server. Generated gender uses the entity UUID, independently of displayed names. [Naming API](/en/dev/naming/) assigns unnamed non-unique NPCs from the resulting race, gender and citizen culture when the entity loads; configure citizen identity before spawning it.
 
-Generation tags include town, culture, profession and origin path when present. Gender is not a tag. The generator selects BODY, EYES, EYEBROWS, HAIR, UNDERWEAR_TOP, UNDERWEAR_BOTTOM, OUTFIT_TOP, OUTFIT_BOTTOM and SHOES. It filters by gender lock and origin, keeps always-unlocked candidates whose catalogue `gender` is the citizen's or unisex, and prefers those sharing any requested tag. If no such candidate exists, a mandatory slot takes the first catalogue candidate; optional slots remain empty. Tag matching is preference, not a requirement; the `gender` match is a requirement. A chained part picked for one slot also fills the slots of its other members, and the generator skips a slot that is already filled.
+Generation tags include town, culture, profession and origin path when present. Gender is not a tag. The generator selects BODY, EYES, EYEBROWS, HAIR, UNDERWEAR_TOP, UNDERWEAR_BOTTOM, OUTFIT_TOP, OUTFIT_BOTTOM and SHOES. It filters by gender lock and origin, keeps freely available candidates (`player` audience and `always` rule) whose catalogue `gender` is the citizen's or unisex, and prefers those sharing any requested tag. Parts reserved for NPCs are never rolled. If no such candidate exists, a mandatory slot takes the catalogue's default for that slot; optional slots remain empty. Tag matching is preference, not a requirement; the `gender` match is a requirement. A chained part picked for one slot also fills the slots of its other members, and the generator skips a slot that is already filled.
 
 The random seed uses UUID, gender and origin. The candidate catalogue and tags also influence the result, so the same UUID does not guarantee the same appearance after catalogue edits. There is no separate citizen variant catalogue to author.
+
+The generator does not roll trait slots. The NPC fills them from its origin when it takes the profile on, the same way a player's origin grants them; see [humanoid architecture](/en/dev/humanoid/). The skin tone comes from 8 human tones, or from 6 slime tones when the origin is `isekaiorigins:slime`, whose translucent body is tinted by that skin.
 
 ## Declaring it
 
@@ -100,32 +103,130 @@ The shared NPC renderer installs `HumanoidPartGeoLayer` and held-item rendering 
 
 Continuous weapon melee is driven by Better Mob Combat outside the Gecko action timeline; it requires no per-action Gecko attack clip. See [NPC combat](/en/dev/npc-combat/) for admission and timing. Optional per-part secondary animation discovers `idle` and `run`, accepting exact names or case-insensitive names ending in `.idle`/`_idle` and `.run`/`_run`; invalid or absent animation resources leave secondary animation disabled.
 
+### Declaring the preset
+
+An NPC's look is code in its own class. Override `BaseNpcEntity.getNpcPreset()` to return one `NpcPreset` constant; the default is `NpcPreset.EMPTY`, an unauthored mannequin with the fallback wardrobe and no shop. The example is an abbreviated form of `MahoutsukaiEvelina`, whose class holds the complete preset:
+
+```java
+private static final NpcPreset PRESET = NpcPreset.builder()
+        .character(HumanoidProfile.builder(HumanoidGender.FEMALE)
+                .age(17)
+                .origin("isekaiorigins:human")
+                .shape(shape -> shape.withArmThickness(0.901F).withLegThickness(0.901F))
+                .color(HumanoidColorChannel.SKIN, 0xFFF2F5)
+                .color(HumanoidColorChannel.HAIR_BASE, 0xFDF5FF)
+                .part(HumanoidSlot.BODY, "isekaiexpansion:body/feminine")
+                .part(HumanoidSlot.HAIR, "isekaiexpansion:hair/long_wavy")
+                .build())
+        .fixedGender()
+        .outfit(NpcOutfit.builder("default")
+                .asDefault()
+                .sort(0)
+                .attribute("minecraft:generic.armor", 12.0)
+                .part(HumanoidSlot.OUTFIT_TOP, "isekaiexpansion:outfit_top/evelina_mage_robe")
+                .build())
+        .outfit(NpcOutfit.builder("casual")
+                .sort(10)
+                .attribute("minecraft:generic.armor", 1.0)
+                .part(HumanoidSlot.OUTFIT_TOP, "isekaiexpansion:outfit_top/evelina_casual_blouse")
+                .clear(HumanoidSlot.SHOES)
+                .build())
+        .tradeProfession("isekaiexpansion:mahoutsukai_evelina")
+        .build();
+
+@Override
+public NpcPreset getNpcPreset() {
+    return PRESET;
+}
+```
+
+Part, origin and profession IDs are parsed when the class initialises, so a malformed ID fails at class load rather than as a part that never appears. An ID that parses but names nothing in the catalogue is dropped when the NPC takes the character on.
+
+| Call | Default | What it does |
+| --- | --- | --- |
+| `NpcPreset.builder().character(profile)` | `no character` | The look the NPC is born with. Without one, the base implementation leaves the bare mannequin and generated NPCs roll their own. |
+| `.fixedGender()` | `off` | The character's gender is never switched at runtime. Unique NPCs fix their gender regardless. |
+| `.outfit(outfit)` | `fallback default` | Adds a wardrobe entry in declaration order. Without any, the NPC has an always-available `default` outfit with no overlay or grants. |
+| `.tradeProfession(id)` | `none` | [Trade override](/en/wiki/trade-overrides/) profession this NPC sells under. |
+| `.tradeAccess(access)` | `TRUSTED` | `PUBLIC` opens the shop to every player; `TRUSTED` requires Trust. |
+
+`HumanoidProfile.builder(gender)` declares the character:
+
+| Call | Default | What it does |
+| --- | --- | --- |
+| `.age(years)` | `18` | Clamped to 12–400. |
+| `.nickname(name)` | `none` | Typed display name, sanitised as in the character screen; enables name display. |
+| `.presetName(id)` | `none` | Translated full name from the name pools; replaces a nickname and enables name display. |
+| `.origin(id)` | `none` | The NPC's race. Its racial features fill empty trait slots and parts it may not wear are dropped, as for a player of that origin. |
+| `.shape(edit)` | `neutral` | Applies `HumanoidBuild` withers, such as `withHeight`, with the ranges in [preset data](/en/wiki/humanoid-presets/). |
+| `.face(edit)` | `neutral` | Applies `HumanoidFace` withers, such as `withEyeScale`. |
+| `.color(channel, rgb)` | `channel default` | Palette colour as `0xRRGGBB`. |
+| `.part(slot, id)` / `.part(slot, id, style)` | `empty` | Wears a catalogue part in its `default` or named style. |
+
+`NpcOutfit.builder(id)` declares one wardrobe entry:
+
+| Call | Default | What it does |
+| --- | --- | --- |
+| `.asDefault()` | `off` | What the NPC wears before anyone chooses. Forces the `PLAYER` audience and the `ALWAYS` rule. |
+| `.audience(audience)` | `PLAYER` | `NPC` keeps the outfit out of every wardrobe; only code calling `setOutfitId` puts it on. |
+| `.unlock(rule)` | `granted` | When a player may choose it, as in [preset data](/en/wiki/humanoid-presets/). `granted` is answered by the player's wardrobe rewards. |
+| `.category(category)` | `OUTFIT` | Wardrobe tab: `OUTFIT`, `HAIR` or `ACCESSORY`. |
+| `.sort(order)` | `1000` | Order within the tab, then ID. Does not select the initial outfit. |
+| `.attribute(id, value)` / `.attribute(id, value, operation)` | `none` | Attribute modifier while worn, by registry ID; operation defaults to `ADDITION`. |
+| `.part(slot, id)` / `.part(slot, id, style)` | `inherit` | Wears a part over the character in that slot. |
+| `.clear(slot)` | `inherit` | Empties the slot while the outfit is worn. |
+
+Outfit IDs are trimmed and lowercased and must be unique: a duplicate throws when the class loads. Only the first outfit declared as default keeps the flag. With no remaining default, the initial outfit is the first `ALWAYS` outfit, then the first player-facing one, then the first declared.
+
+Attribute IDs resolve when a grant is applied, not when the class loads, so a grant may name an attribute another mod registers later. An unregistered ID, or an attribute the NPC does not have, is skipped with a logged warning. Name each attribute once per outfit: the modifier identity covers preset, outfit and attribute but not operation.
+
+### Designing and exporting a look
+
+Build the look in game and let the export write the constant:
+
+1. Run `/ise humanoid design` to open the full character screen under designer access. It lists every part, NPC-reserved ones marked with an NPC badge, and evaluates no unlock rule.
+2. Build the character and confirm. The server keeps reserved parts on your character while you hold designer access.
+3. Run `/ise humanoid export npc <name>` to write `config/isekaiseries/npc_presets/<name>.java`, then paste the constant into the class.
+
+| Command | What it does |
+| --- | --- |
+| `/ise humanoid design [targets]` | Opens the creation screen for you or the target players under designer access. |
+| `/ise humanoid export npc <name>` | Exports your own character as a preset. |
+| `/ise humanoid export npc <name> <target>` | Exports a player's character, or an NPC's current base character with its declared wardrobe, profession and access. |
+
+Exporting a player splits the character the way a wardrobe overlays it. Outfit and accessory slots become a `default` outfit declared with `asDefault()` and `sort(0)`; body, face, hair, trait and underwear slots, identity, shape, face, palette and origin become the character. Exporting an NPC keeps its own split.
+
+The file starts with comment lines naming the source, the paste instruction and the imports the constant uses. Only values that differ from defaults are written: shape and face values rounded to 3 decimal places, colours as `0xRRGGBB`, and a name only while name display is enabled. Painted overlays are omitted. Names follow the rules in [humanoid runtime](/en/dev/humanoid-runtime/), and an existing file is overwritten.
+
+Designer access ends when you log out or a player screen is granted to you; your character is then validated under player rules again, which drops every reserved part. Export before either.
+
 ### Wardrobe composition and reload
 
-The entity stores a base profile separately from the displayed profile. An outfit overlays its declared slots in slot order, with `none` removing a slot for that outfit. Overlaid slots follow [part chains](/en/dev/humanoid-parts/): naming one member wears the whole chain, and replacing or clearing a member removes the others. **All slots can be overlaid, including body.** The underlying base profile survives the swap; the displayed body is not guaranteed to remain unchanged.
+The entity stores a base profile separately from the displayed profile. An outfit overlays its declared slots in slot order, with `clear(slot)` removing a slot for that outfit. Overlaid slots follow [part chains](/en/dev/humanoid-parts/): naming one member wears the whole chain, and replacing or clearing a member removes the others. **All slots can be overlaid, including body.** The underlying base profile survives the swap. The dressed result is then sanitised like the base: a cleared trait slot regains its race's trait, parts the NPC's gender or race may not wear are dropped, and a cleared body stays empty, leaving the bare rig mannequin.
 
-Outfit selection through `tryEquipOutfit` checks selectability and the requesting player's unlock rule. Direct `setOutfitId` resolves the ID and refreshes appearance/attributes without those player admission checks. Outfit grants are keyed per player by preset ID plus normalised outfit ID. Unlocking one named NPC instance's preset/outfit therefore also applies to another instance using that same preset.
+Outfit selection through `tryEquipOutfit` checks that the outfit is player-facing and that the requesting player meets its unlock rule. Direct `setOutfitId` resolves the ID and refreshes appearance/attributes without those player admission checks. Outfit grants are keyed per player by preset ID plus normalised outfit ID. Unlocking one named NPC instance's preset/outfit therefore also applies to another instance using that same preset.
 
-On successful data-pack reload, loaded NPCs re-resolve their preset. The base implementation replaces an authored base profile; generated profiles are retained unless a subclass's resolution path regenerates them. Removed active outfit IDs resolve to the new default. Attribute refresh removes modifier IDs declared in the **current** catalogue and adds the active grants, then clamps health to the new maximum.
-
-A reload that deletes an old outfit/attribute grant can leave that old temporary modifier on an already loaded NPC: the cleanup only enumerates the new declarations. Do not describe this path as an unconditional removal of every old grant. Check attribute removal explicitly when reviewing wardrobe reload changes.
+On successful data-pack reload, loaded NPCs revalidate against the reloaded part catalogue. An authored NPC re-resolves the character its class declares, so a part that now exists appears on it. A generated profile is kept and sanitised again, so a trait newly added for its race appears on it. The outfit is re-resolved and its grants rebuilt: modifiers declared by every outfit in the preset are removed, the active grants are added, and health is clamped to the new maximum.
 
 Outfit display keys are `npc_outfit.<namespace>.<preset-path-with-dots>.<outfit-id>`. Grants are temporary modifiers keyed by preset/outfit/attribute; repeated grants for the same attribute in one outfit share a modifier UUID, so they are not independent stackable entries.
 
 ## Checklist
 
 - Confirm preset and part IDs resolve, and verify each selected texture style and gender variant.
+- Export the NPC with `/ise humanoid export npc` and compare the output with its class to confirm the round trip.
 - Check body, head, limb and item anchors with idle, walk, run, swimming, climbing, sleep and combat.
 - Remove `walk` from an entity file and verify the shared walk still plays; keep a custom `idle` to verify override precedence.
 - Switch between outfits that add, clear and replace slots, then restore the base look.
 - Check player-specific unlocks and a second NPC sharing the same preset.
-- Reload after changing and removing grants; inspect actual attributes as well as the outfit menu.
+- Switch outfits with grants and inspect actual attributes as well as the outfit menu.
 - Verify generated citizens with different identities and catalogue tags; do not infer strict tag filtering.
+- Generate citizens of a race with traits and of the slime race; confirm the traits appear and the slime uses a slime skin tone.
 - Observe base and layered geometry from another client, including held stacks, masks and missing-resource cases.
 
 ## Related
 
-- [Player and NPC preset data](/en/wiki/humanoid-presets/)
+- [Humanoid preset data](/en/wiki/humanoid-presets/)
+- [Humanoid runtime](/en/dev/humanoid-runtime/)
 - [Humanoid parts](/en/dev/humanoid-parts/)
 - [Blockbench plugin](/en/dev/blockbench-plugin/)
 - [NPC foundations](/en/dev/npc/)

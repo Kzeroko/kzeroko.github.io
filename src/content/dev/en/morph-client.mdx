@@ -3,7 +3,7 @@ title: "Morph client presentation and compatibility"
 description: "Pulse-driven model swaps, first-person arms, cameras, input, HUD, textures and client extension hooks."
 category: client
 order: 115
-updated: 2026-09-30
+updated: 2026-10-06
 ---
 
 Morph presentation is a client state machine layered over the server component. It coordinates the visible form with Particlize coverage while input, collision dimensions and native species simulation retain their own authority.
@@ -66,7 +66,7 @@ On exit to `NONE` or disconnect, the controller restores the old perspective onl
 
 `MorphCameraSubject` prefers the viewer's own dimension-active form, otherwise a mounted player's supported carrier form. Providers are sampled only in third person. `MorphCameraPose` contains backward distance, lateral shift, vertical shift and pitch offset; the record itself performs no numeric validation.
 
-The backward distance enters vanilla collision clipping. Lateral/vertical offsets apply afterward without that same clip call, and final pitch clamps to −90…90. Cutscene camera blending runs after the morph camera adjustment. A provider must not assume it has exclusive camera ownership.
+The backward distance enters vanilla collision clipping. Lateral/vertical offsets apply afterward without that same clip call, and final pitch clamps to −90…90. Every directed camera, from cutscenes and dialogue framing to editor viewports and shot reels, is applied after the morph camera adjustment. A provider must not assume it has exclusive camera ownership.
 
 ### Client extension hooks
 
@@ -77,11 +77,11 @@ These are client implementation registries, not `api.client` facades. Register d
 | `MorphClientAbilityPreviewRegistry` / `handle(player, morph, form, slot, action)` | exact entity type | Duplicate throws. Runtime callback failure logs and removes the preview. Built-in warden activation sends status 4 for melee or 62 for sonic charge. |
 | `MorphClientFormSkillPreviewRegistry` / `handle(player, morph, form, actionId, inputAction)` | entity type + action ID | Duplicate throws; failing callback is removed for that pair. |
 | `MorphCameraRegistry` / `sample(player, morph, form, tickDelta)` | exact entity type | Duplicate throws. Null sample deactivates that provider; sample failure removes it. Switching provider resets the previous provider. |
-| `MorphPassengerPoseRegistry` / `apply(host, form, passenger, seatIndex, matrices, tickDelta)` | exact entity type | Requires active carrier, mount handler and real passenger index. Duplicate throws; failure removes the pose. |
+| `MorphPassengerPoseRegistry` / `seatTransform(host, form, passenger, seatIndex, tickDelta)` | exact entity type | Returns the seat transform from the form's render origin, or null for vanilla placement. Requires active carrier, mount handler and real passenger index. Duplicate throws; failure removes the pose. |
 
 Ability and form-skill preview packets go to tracking players plus the host, then execute on the client thread only while that player's form is active. They carry a host entity ID and slot/action information, not a form revision; do not treat a preview packet as proof of the originating session after a rapid form switch.
 
-`MorphCameraRegistry.reset` clears the active provider and calls its reset hook without a general exception guard. Keep reset safe even after partial initialisation or failed sampling. Passenger pose hooks should restore any temporary matrix changes they own when they return or fail.
+`MorphCameraRegistry.reset` clears the active provider and calls its reset hook without a general exception guard. Keep reset safe even after partial initialisation or failed sampling. A passenger pose provider only returns a transform. The registry owns the matrix stack: it moves the passenger onto the host's render origin, which is where the form is drawn, then applies the transform and its normal matrix.
 
 ### Compatibility boundaries
 
@@ -108,11 +108,11 @@ UI updates belong on ModernUI's UI thread; gameplay input sampling remains on th
 
 `FirstPersonArmor` restores the registered armour feature after Player Animator filters the first-person feature list. The normal renderer then invokes it at the native feature stage, with Player Animator's own per-feature matrix handling. It delegates to the original chest-slot render, so vanilla materials, Fabric callbacks and GeckoLib providers keep their normal pose copying and render lifecycle. Helmet, leggings and boots are skipped for this pass. The visible arms in the player model determine which sleeves are shown.
 
-This bridge changes visibility only. The native slot-selection step is followed by an arm-only mask; final biped draws restore their prior visibility after completion or failure. GeckoLib retains its native bone transforms, buffers and render layers. `GeoArmorSleeveGeometryMixin` rejects cubes outside the requested arm branches while allowing traversal through a torso parent. Ordinary player draws reapply slot visibility. Morph bodies retain their equipment policy.
+The bridge scopes sleeve visibility, arm poses and render buffers to the active draw. Biped draws restore prior visibility after completion or failure. `FirstPersonArmor.renderGeo` uses the current pass's buffers for GeckoLib's render lifecycle, while `poseGeoArm` attaches sleeve roots to the skin-arm pose. `GeoArmorSleeveGeometryMixin` filters cubes to the requested arm branches and permits traversal through their parents without changing shared bone visibility. The previous sleeve frame and Gecko pass are restored when the draw ends; morph bodies retain their equipment policy.
 
-Punchy's built-in sleeve pass owns idle armour. The bridge neither replaces that pass nor adds a second idle armour draw. The retired matrix replay and direct armour-draw invokers are absent from the packaged mod. Humanoid skin replacement preserves the native model traversal; see [humanoid runtime](/en/dev/humanoid-runtime/).
+`PunchyArmorSleeveMixin` wraps Punchy's sleeve pass. `PunchyArmorSleeves` dispatches custom chest armour through its Fabric or GeckoLib renderer using Punchy's posed arm. The fallback calls Punchy's original draw with a sleeve mask and restores its previous explicit arm transform afterward. Humanoid skin replacement preserves native model traversal; see [humanoid runtime](/en/dev/humanoid-runtime/).
 
-In-game acceptance must cover idle and attacking arms, both hands, slim and standard players, dyed/trimmed vanilla armour, Fabric custom armour, GeckoLib sleeves, shaders and return to third person. Automated checks cover feature selection, visibility restoration and packaged hook targets; they do not establish visual alignment.
+In-game acceptance must cover idle and attacking arms, both hands, slim and standard players, dyed/trimmed vanilla armour, Fabric custom armour, GeckoLib sleeves, shaders and return to third person. Verify sleeve alignment in each view.
 
 ## Verifying
 

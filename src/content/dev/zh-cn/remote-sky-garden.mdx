@@ -1,0 +1,76 @@
+---
+title: "遥空庭院运行机制"
+description: "每个世界一次的庭院准备、建筑高度扩展、标记抵达平面与常驻传送目的地。"
+category: systems
+order: 96
+updated: 2026-10-14
+---
+
+遥空庭院在玩家进入前于主世界准备完成。启动服务属于内部实现，不是公开 API。玩法和管理员选项分别见[世界出生点](/zh-cn/wiki/world-spawn/)与[世界出生点配置](/zh-cn/wiki/world-spawn-configuration/)。
+
+## 它做什么
+
+现有半随机地面搜索先确定区域，再由独立的海上勘察选择枢纽原点。勘察检查整个占地下方已生成的列，必要时整体抬升建筑，避开已有物体。找不到能完整容纳庭院的位置时，加载停止并报告原因。该流程不挖除地形，也不关闭光照；海上位置可使正下方阴影落在水面，斜向阴影仍由光影包决定。
+
+`OverworldHeight`在地形注册表引导阶段扩展主世界维度类型，保留预设中更大的高度、最低Y及其余维度属性。扩展的是建筑空间，地形噪声高度和海平面不变。KTM2已有较高的维度；独立配置用于明确最低建筑上限。
+
+## 运行时模型
+
+`SkyGardenStartupMixin`在`MinecraftServer.prepareStartRegion`开始时执行。服务端读取描述文件，验证所有原生分片，保存原点及资源摘要，再依次写入地形、建筑和抵达标记。显式空气清除前层方块，未列出的格子保留前层内容。分片按需解码；世界写入保留普通光照语义。全部层完成后，最后一遍处理邻接形状并安排流体刻。
+
+标记在放置结束后才消耗。区块刷盘完成后，持久状态才记为就绪。重开已完成的世界只读取原庭院，不会再次粘贴。首次准备中断时，会在玩家进入前重放同一预留位置。资源摘要变化或维度高度不足会报错，不迁移原型数据。准备在加载阶段同步执行，首次耗时仍需在完整整合包中测量。
+
+`isekaiexpansion_sky_garden`保存原点、摘要、边界、抵达参数与就绪状态；`isekaiexpansion_world_spawn`保存当前标记平面。两者版本均为`1`。庭院的精确三维边界加入保护区域、装饰保护及非受控生物生成保护，下方海域不在该范围内。重连玩家保留退出位置，个人重生点仍有优先权。
+
+转移名录采用版本`1`，目的地类型为`none`、`sky_garden`、`anchor`或`companion`。新名录默认选中庭院；可用状态和坐标同步给所属玩家，选择与落点仍由服务端决定。庭院不占锚点名额，也不能被遗忘。没有已准备庭院时，首次共鸣的锚点成为目的地。旧原型名录格式会被拒绝。
+
+## 约定
+
+### 有序结构包描述
+
+资源路径为`data/isekaiexpansion/spawn/remote_sky_garden.json`。资源优先级决定采用哪一份完整描述，不跨包合并层。内置层依次为`remote_sky_garden` / `terrain-v4-fit1`、`remote_sky_garden_architecture` / `architecture-v10`和`remote_sky_garden_arrival` / `spawn-v1`，命名空间均为`isekaiexpansion`。共`254`个原生分片、`6002797`个列出的格子，包含清除空气与标记。
+
+| 字段 | 类型 | 默认值 | 契约 |
+| --- | --- | --- | --- |
+| `schema` | integer | 必填 | 必须为`1`。 |
+| `layers` | array of objects | 必填 | `1–8`个有序原生结构包引用。 |
+| `layers[].id` | identifier string | 必填 | 已存在的内置清单ID。 |
+| `layers[].revision` | string | 必填 | 已存在的不可变结构包版本。 |
+| `spawnMarker` | integer array | 必填 | 公共局部坐标系中的`3`个整数，必须位于合并边界内。 |
+
+描述或层中的未知键、小数坐标、缺失资源、错误哈希、未知状态及无效分片都会使准备失败。指定坐标必须有且仅有一个世界出生点标记。原生结构包格式和限制见[Atelier结构](/zh-cn/dev/atelier-structures/)。
+
+### 世界出生点标记
+
+`isekaiexpansion:world_spawn_point`是管理员创作方块，脚底平面位于其上方一格。内置标记替换已标注的局部金块`(0, -1, 183)`；叠加世界原点之前，脚底Y为`0`。
+
+| 字段 | 类型 | 默认值 | 契约 |
+| --- | --- | --- | --- |
+| `Radius` | NBT int | `10` | 水平圆形半径，`0–64`格。 |
+| `Yaw` | NBT float | `180` | 有限角度值；配置命令接受`-180–180`。旋转和镜像会同步变换。 |
+| `FinalState` | NBT compound | 金块 | 消耗标记后恢复的原生方块状态。必须无流体、非空气且不带方块实体。 |
+| `FinalState.Name` | NBT string | 提供FinalState时必填 | 已注册的方块ID。 |
+| `FinalState.Properties` | NBT compound of strings | 省略 | 精确有效的状态属性，遵循原生状态验证。 |
+
+省略标记字段时使用默认值；字段存在但类型错误则失败。应用时还要求中心地板完整安全、身体空间畅通；不安全时恢复标记，世界出生点不变。抵达只在保存的平面上抽取安全格，优先选择无人占据的位置；没有安全位置则失败。该流程不查高度图，不读取地面抵达设置或`spawnRadius`游戏规则。
+
+开发方块没有自动刻逻辑。庭院准备和手动Atelier后处理会消耗它；普通模板放置需要显式应用。放置日志改为版本`3`，记录出生点前后快照。撤销时仅当当前出生点仍与该任务结果一致，才恢复旧出生点，因此不会覆盖管理员后续调整。结构包、草稿和自然地标仍为版本`2`，不保留旧日志读取器。
+
+## 扩展方式
+
+创造模式管理员用`/ise dev world_spawn block`获取标记，用`/ise dev world_spawn configure <pos> <radius> <yaw>`设置平面，再用`/ise dev world_spawn apply <pos>`消耗标记。命令要求权限等级`2`。如果恢复地板不应是金块，通过带类型的方块实体NBT指定`FinalState`。标记应嵌在可通行地板内，而非屋顶。
+
+Studio用不同实体图标区分开发方块。庭院查看器的标记和半径叠层读取伴生导出工具生成的部署元数据，属于创作辅助显示，不是额外打包的建筑。安装注册了新方块的版本后，需要刷新实时方块目录。
+
+## 验证
+
+运行`gradlew.bat compileJava`、`SpawnAnchorTest`与`TravelHubTest`，以及`gradlew.bat -I tools/atelier/verify.gradle checkSkyGarden`。原生检查验证全部分片哈希、边界、数量、带类型标记的旋转，以及`317`个有地板且身体空间畅通的露台格子；它不实例化Conquest运行时碰撞形状。
+
+使用全新原型世界验收：确认庭院在进入前完成，首次抵达面向圣所，多人抵达能安全分散，个人重生点与重连位置保留，名录显示庭院，重开世界不会生成第二座岛。测量启动耗时，并检查普通光照与所选光影包。Conquest实际放置、流体行为及光影外观仍需要这一步游戏内验收。
+
+## 相关
+
+- [世界出生点](/zh-cn/wiki/world-spawn/)
+- [世界出生点配置](/zh-cn/wiki/world-spawn-configuration/)
+- [Atelier结构](/zh-cn/dev/atelier-structures/)
+- [转移之石](/zh-cn/wiki/teleport-stones/)

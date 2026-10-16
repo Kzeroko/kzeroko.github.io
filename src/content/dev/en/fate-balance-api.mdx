@@ -3,7 +3,7 @@ title: "Fate Balance API"
 description: "Register choices and effects, evaluate drafts, and commit authoritative Fate Balance profiles."
 category: api
 order: 145
-updated: 2026-09-27
+updated: 2026-10-07
 ---
 
 `FateBalanceAPI` is the public facade for Fate Balance registration, queries and validated server commits. Definitions are common-side content shared by preview and validation; effects are separately registered and reconciled through the runtime.
@@ -150,7 +150,7 @@ Experience uses `ICPlayerExpEvents.MODIFY_GRANT`; Expansion's `XpRewardLogic` an
 
 ### Icon composition
 
-`iconItem` resolves an item GUI model. `FateBalanceItemIcons` captures a still at 64 × 64 pixels on the Minecraft render thread through `ModernUiCapture`, with an independent colour/depth target and restored render state. ModernUI uploads the bitmap on its UI thread and composes it as an ordinary image: scrolling, ancestor clipping, alpha and modal ordering all follow Canvas. Models are not live animated previews.
+`iconItem` resolves an item GUI model. The shared `ModernUiItemIcons` cache captures a still at 128 × 128 pixels on the Minecraft render thread through `ModernUiCapture`, with an independent colour/depth target and restored render state, and keys each capture by item and NBT. ModernUI uploads the bitmap on its UI thread and composes it as an ordinary image: scrolling, ancestor clipping, alpha and modal ordering all follow Canvas. Models are not live animated previews.
 
 The cache holds at most 128 entries. Views own image clones and release them when detached. Resource reload invalidates the cache and refreshes attached views. Missing captures use the default texture. Verify beds, generated items and custom item models while scrolling and opening confirmation overlays.
 

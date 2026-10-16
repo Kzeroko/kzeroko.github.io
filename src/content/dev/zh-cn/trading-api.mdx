@@ -3,7 +3,7 @@ title: "交易 API"
 description: "在现有对话中打开权威商人目录，并查询玩家个人的生意交情。"
 category: api
 order: 145
-updated: 2026-09-30
+updated: 2026-10-14
 ---
 
 `TradingAPI`在已有的Blabber交谈中打开商人目录，并提供个人交情阶段查询。村民与NPC共用目录生成、支付、库存记录和照拂服务。玩家规则见[交易](/zh-cn/wiki/trading/)。
@@ -25,11 +25,11 @@ Blabber.getActiveDialogueEntity(player)
 
 ### 绑定NPC职业
 
-在NPC预设中，将`trade_profession`设为`minecraft:farmer`等目录ID。相应目录写在`data/<namespace>/trade_overrides/`，格式版本3见[交易覆盖](/zh-cn/wiki/trade-overrides/)。自定义职业不必注册为村民职业；可选来源模组通过`requires_mods`限制。
+在NPC类的预设中声明职业，例如`NpcPreset.builder().tradeProfession("minecraft:farmer")`，见[NPC资源](/zh-cn/dev/npc-assets/)。相应目录写在`data/<namespace>/trade_overrides/`，格式版本3见[交易覆盖](/zh-cn/wiki/trade-overrides/)。自定义职业不必注册为村民职业；可选来源模组通过`requires_mods`限制。
 
-`BaseNpcEntity.getTradeProfession()`优先读取普通NPC已保存的个体职业，再读取预设。`setTradeProfession(identifier)`为普通NPC指定职业，传入null恢复使用预设。唯一NPC拒绝个体赋值，始终使用预设；伊芙琳娜使用`isekaiexpansion:mahoutsukai_evelina`。`canTradeWith`要求目录已启用，并满足预设的`trade_access`：默认`trusted`要求信任，`public`允许公开买卖。菜单锁定和服务端准入使用同一谓词。唯一NPC在展示和执行端均排除照拂、换货与议价，自动补货仍保留。
+`BaseNpcEntity.getTradeProfession()`优先读取普通NPC已保存的个体职业，再读取预设。`setTradeProfession(identifier)`为普通NPC指定职业，传入null恢复使用预设。唯一NPC拒绝个体赋值，始终使用预设；伊芙琳娜使用`isekaiexpansion:mahoutsukai_evelina`。`canTradeWith`要求目录已启用，并满足预设的交易准入：默认`TRUSTED`要求信任，`PUBLIC`允许公开买卖，隶属契约经纪人即如此声明。菜单锁定和服务端准入使用同一谓词。唯一NPC在展示和执行端均排除照拂、换货与议价，自动补货仍保留。
 
-这些实体方法是内部集成入口。预设字段可省略，默认没有交易职业；标识符格式错误会拒绝该预设。对应实体NBT可选字符串为`TradeProfession`。人形导出命令会保留当前生效的职业。
+这些实体方法是内部集成入口。预设调用可省略，默认没有交易职业；标识符格式错误会在NPC类加载时失败。对应实体NBT可选字符串为`TradeProfession`。`/ise humanoid export npc`会保留当前生效的职业与声明的准入。
 
 ### 查询熟客阶段
 
@@ -52,6 +52,8 @@ int rank = TradingAPI.rapportRank(player, merchant);
 `TradeTransaction`通过`TradePricing`从基础货币值计算声望价格，再议价；检查两份材料、货币与输出空间后，使用异界核心`NumismaticCompat`支付。界面交换项来自同一份报价。找零可能占据空间，余下输出通过`offerOrDrop`交付。村民的`Merchant.trade`只在同步回调内设置顾客，并在`finally`清除。村民经验不再推进商品资格；NPC直接使用共享的权威报价列表。
 
 支付完成后，服务记录库存使用和个人交情。`MerchantCourtesies`在赠送或保养前复核目录定义、对话、阶段、次数及物品。保养再次比较已选择的主手快照，只改变损伤；赠品在消耗次数前检查背包空间。
+
+货币购买成功后，`DialogueTrading`仅调用一次`QuestTradePurchaseTrigger.completed`，传入实际交付的物品堆及实付金额。任务桥接只接纳权威目录，并使用活跃`TRADE_PURCHASE`索引；失败、取消或玩家卖货不发出事件。贵重物兑换与公会魔晶回收共用`InventorySale`：先核对报价槽位及完整物品快照，再规划全部付款空间，成功后才写入背包。
 
 ### 注册照拂动作
 
@@ -95,7 +97,7 @@ int rank = TradingAPI.rapportRank(player, merchant);
 
 ## 验证
 
-运行`./gradlew.bat -I tools/trading/verify.gradle checkCommerce processResources`及`python tools/trading/validate_coverage.py`。JVM检查直接使用生产解析器，覆盖交情限额、收款预算、存取及库存转换。覆盖检查将配置的职业导出表与目录、场景和双语文本逐项比对。
+运行`./gradlew.bat compileJava processResources`。修改职业内容时，一并核对目录、对话和双语文本资源。
 
 游戏内检查新生的1级村民、两名不同交情的玩家、全部5个货品层级、重复交易、重启、补货及轮换。测试满背包赠品、更换主手后的保养、NPC职业变化及报价打开时重载。分别在有货和无货时打开新制图师的服务菜单。REI显示内置货品层级及初访即可购买的提示。这些交互检查需要运行整合包。
 

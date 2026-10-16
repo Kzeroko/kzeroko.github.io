@@ -3,7 +3,7 @@ title: "NPC 战斗"
 description: "目标意图、动作选择、攻击时序、武器近战、伤害限制与战斗状态。"
 category: systems
 order: 63
-updated: 2026-09-26
+updated: 2026-10-10
 ---
 
 NPC 战斗由 `entity.CombatNpcEntity` 与内部的 `internal.ai.action` 实现负责。这些类型供项目内部扩展，不是公开战斗门面。本页说明自主行动的 NPC；玩家控制的变身仍使用玩家的战斗输入。
@@ -53,7 +53,7 @@ Better Combat 与 Better Mob Combat 是外部依赖。本模组调用它们的�
 
 每次控制器 tick 先递减各动作冷却与正值全局冷却。NPC 死亡、睡眠、使用物品、忙于 POI 或播放表情动作时，会停止导航，并以 `BLOCKED` 结束当前动作。目标效果接管大脑时改为调用 `interrupt()`，不执行控制器 tick，因此该路径不会推进这些冷却。
 
-空闲且全局冷却结束时，控制器逐个评估未冷却动作：满足最低已完成挥击数，选择同世界的存活目标，调用 `isInRange`、`canStart`，并要求评分为有限正数。先比较优先级，再比较评分；完全相同则保留先注册的动作。`rangeOverride()` 为正时替代 `attackRange`，否则使用配置范围。选中的动作预留下一个允许衔接的近战时点：等待期间不发起新挥击，每 tick 重新检查动作资格。
+空闲且全局冷却结束时，控制器逐个评估未冷却动作：满足最低已完成挥击数，选择同世界的存活目标，调用 `isInRange`、`canStart`，并要求评分为有限正数。未启用远程战术时，先比较优先级，再比较评分；完全相同则保留先注册的动作。`rangeOverride()` 为正时替代 `attackRange`，否则使用配置范围。选中的动作预留下一个允许衔接的近战时点：等待期间不发起新挥击，每 tick 重新检查动作资格。
 
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
@@ -63,11 +63,87 @@ Better Combat 与 Better Mob Combat 是外部依赖。本模组调用它们的�
 
 `NpcActionTiming.instant()` 为 `(0, 1, 0)`。开始动作时立即调用 `onStart`，执行阶段的处理要等后续控制器 tick。施法的最后一个 tick 切换阶段后直接返回，不在同 tick 触发执行。执行期间，`onTrigger` 在指定 tick 仅调用一次；ATTACK 还会向情绪管理器报告攻击。动作冷却在触发后开始，全局冷却在动作完成或停止时开始。触发前停止也会施加动作冷却，避免被取消的施法每 tick 重试。
 
-控制器保存选定目标的 UUID 与引用。动作进行中检查目标存活、移除状态及世界，以 `45` 度转向限值注视目标并推进时序。它**不会**逐 tick 重新执行当前动作的 `selectTarget`、`canStart`、距离、可见性或评分检查。当前动作的 `interruptible()` 为 true 且全局冷却已结束时，更高优先级的合格动作可以在其允许的近战衔接时点抢占；同优先级不能抢占。阻塞、显式中断和目标丢失仍可停止不可抢占动作。
+控制器保存选定目标的 UUID 与引用。动作进行中检查目标存活、移除状态及世界，以每刻15度的有界转向同步身体、头部和俯仰并追踪目标并推进时序。它**不会**逐 tick 重新执行当前动作的 `selectTarget`、`canStart`、距离、可见性或评分检查。未启用远程战术时，当前动作的 `interruptible()` 为 true 且全局冷却已结束时，更高优先级的合格动作可以在其允许的近战衔接时点抢占；同优先级不能抢占。阻塞、显式中断和目标丢失仍可停止不可抢占动作。
 
-导航锁在开始及施法、执行阶段生效。移动锁只在执行阶段将前进和侧向输入清零，不会重置速度。停止原因为 `FINISHED`、`TARGET_LOST`、`INTERRUPTED`、`BLOCKED`。`onStop` 收到保存的目标（可能为空），随后清除跟踪状态。触发前停止会消耗编写的动作冷却；已施加的动作冷却保留。这些动作计时器不会延迟基础武器攻击。
+导航锁在开始及施法、执行阶段生效。移动锁只在执行阶段将前进和侧向输入清零，不会重置速度。停止原因为 `FINISHED`、`TARGET_LOST`、`INTERRUPTED`、`BLOCKED`。`onStop` 收到保存的目标（可能为空），随后清除跟踪状态。未启用远程战术时，触发前停止会消耗编写的动作冷却；已施加的动作冷却保留。这些动作计时器不会延迟基础武器攻击。
 
-没有动作启动时，接近逻辑处理敌对目标。武器命中框已能触及目标时，即使特殊动作仍在冷却也会停留；针对该敌人的 ATTACK、DEBUFF 已入选且正在等待近战衔接时点时也会停留，否则继续接近。HEAL、BUFF、CLEANSE、SHIELD 不影响攻击接近停距。可见目标路径的目标容差为零，每 `4–6` 个控制器 tick 刷新一次，期间继续更新导航速度；法术的长射程不会让近战者停在武器范围外。
+### 远程战术
+
+`NpcConfig.rangedCombat`启用由战斗控制器统一管理的人形战术，不再设置逃离任务或独占后撤阶段。NPC仅在`attackRange`外接近目标，范围内会先在空闲动作衔接点尝试配置的跃退，再开始下一动作；短促侧步仍可在动作之间进行。未锁定移动的施法可与短促的地面侧步同时进行；路线受阻不会阻塞攻击。伊芙莉娜采用`MAGE`配置，交战范围为16格。
+
+内部实现由`NpcRangedTactics`协调：`NpcTacticalMemory`记录敌方攻击尝试，`NpcTacticalDecision`决定动作排序与时序，`NpcCombatFootwork`处理短促侧步，`NpcCombatLeap`通过共享的`NpcCombatTerrain`几何检查验证跃退轨迹。来袭攻击会刷新压力记忆，但不会延长正在生效的防护或重置防御冷却。目标过近也会形成压力。受压或调整站位时，自动使用物品会等待。
+
+通过动作构建器的`.role(NpcActionRole.QUICK)`指定战术职责，与学派、目标策略和优先级相互独立。远程选择先比较战术评分，再比较编写的优先级与动作评分；进攻候选还须可见。`RECOVERY`的目标生命不高于45%时评分为60，其余情况如下：
+
+| 职责 | 受压 | 平稳且达到偏好距离 | 平稳但距离更近 |
+| --- | --- | --- | --- |
+| `GENERAL` | 20 | 20 | 20 |
+| `QUICK` | 50 | 20 | 20 |
+| `CONTROL` | 45 | 15 | 15 |
+| `PRESSURE` | 25 | 30 | 30 |
+| `COMMITMENT` | 0 | 40 | 5 |
+| `RECOVERY` | 10 | 10 | 10 |
+
+默认为`GENERAL`。`QUICK`、`CONTROL`与`RECOVERY`在反击窗口内或敌人过近时使用响应起手与恢复上限，独立法术冷却保持原值。受压时，可中断的非响应动作若仍处于最后承诺刻之前，可让位给已就绪的响应动作；正在执行的`COMMITMENT`则须先达到配置的最低引导时间。远程战术替代仅按优先级抢占的规则，较高优先级的长施法不会挤掉快速施法。伊芙莉娜将火焰与雷击标为`QUICK`、冰系标为`CONTROL`、连射与幽魂剑标为`PRESSURE`、降雨/横扫/光束/终结技标为`COMMITMENT`、治疗标为`RECOVERY`。治疗要求选中目标的生命不高于45%。
+
+允许闪避的远程NPC受击时先尝试安全地面侧步，但锁定移动、起手末段或执行阶段不会闪避。只有找到安全路线，才获得现有战斗翻滚系统提供的短暂伤害规避窗口；否则法师防护可减轻可规避的战斗伤害，并临时增加击退抗性。防护具有固定时长与独立冷却，生效期间不能再开启闪避。环境与穿透伤害遵循共享规避规则。失去控制、死亡或移除时清除当前防御效果；失控与换目标不会清空其恢复成本。防护开启时播放附魔粒子与紫水晶铃音。
+
+侧步尝试六个方向，仅在规划成功后交替偏好侧。近处斜向拉开距离，远处侧移。每条候选走廊按0.35格间距检查已加载区块、世界边界、干燥支撑、身体净空与四角支撑，高差限制为0.6格。不接受缩短敌我距离的落点；从交战范围内出发时，终点也不能超出范围。能看见目标的终点评分更高。每刻移动都会复查下一段并面向目标，同步的侧步标记使客户端躯干保持战斗朝向；失败或超时即释放移动。移动使用速度与碰撞，不瞬移或飞行。近战接近逻辑保持原样，可见目标的路径每4–6个控制器刻刷新。
+
+`NpcRangedCombat`是传给`NpcConfig`构建器的不可变Java配置，不是可重载JSON。省略时使用`DISABLED`，明确使用`MAGE`才会启用。四个配置组均必填且不得为空。下表列出`MAGE`值，`DISABLED`关闭战术及跃退。
+
+| 字段 | 类型 | 默认值 | 范围、单位与用途 |
+| --- | --- | --- | --- |
+| `enabled` | boolean | true | 启用战术。 |
+| `positioning` | Positioning | 必填 | 移动与压力距离。 |
+| `defense` | Defense | 必填 | 独立的闪避与防护窗口。 |
+| `casting` | Casting | 必填 | 响应节奏与中断处理。 |
+| `escape` | Escape | INTENSE | 在空闲选动作前尝试强力拉开距离。 |
+| `positioning.dangerDistance` | double | 4 | 正数，单位为格；更近的敌人触发压力与响应节奏。 |
+| `positioning.preferredDistance` | double | 9 | 不低于dangerDistance，启用时不得高于attackRange；仅用于评分，不是必须退到的位置。 |
+| `positioning.stepDistance` | double | 3.5 | 每条候选路线1–6格。 |
+| `positioning.stepSpeed` | double | 0.55 | 大于0且不超过1格/刻。 |
+| `positioning.stepTicks` | integer | 12 | 1–30刻，单次移动最长时间。 |
+| `positioning.repositionCooldownTicks` | integer | 32 | 不低于stepTicks，规划成功后的冷却。 |
+| `positioning.blockedRetryTicks` | integer | 12 | 至少1刻，搜索失败后的重试间隔。 |
+| `defense.evadeCooldownTicks` | integer | 36 | 大于evadeInvulnerabilityTicks，成功闪避后的恢复时间。 |
+| `defense.evadeInvulnerabilityTicks` | integer | 6 | 非负刻数，可规避伤害的保护窗口。 |
+| `defense.guardCooldownTicks` | integer | 65 | 大于guardTicks，从防护开启时计时。 |
+| `defense.guardTicks` | integer | 18 | 至少1刻，防护固定持续时间。 |
+| `defense.guardedDamageMultiplier` | float | 0.55 | 大于0且不超过1，可规避来袭战斗伤害的倍率。 |
+| `defense.guardKnockbackResistance` | double | 0.85 | 0–1，临时加算击退抗性。 |
+| `defense.pressureMemoryTicks` | integer | 60 | 至少1刻，敌方攻击后的战术压力记忆。 |
+| `defense.counterWindowTicks` | integer | 36 | 1至pressureMemoryTicks，来袭攻击后的响应节奏窗口。 |
+| `casting.responseCastTicks` | integer | 10 | 至少1刻，响应动作起手上限。 |
+| `casting.responseRecoveryTicks` | integer | 6 | 至少1刻，响应动作全局恢复上限。 |
+| `casting.groundGraceTicks` | integer | 10 | 连续离地0–20刻内保留地面起手进度，0关闭宽限。 |
+| `casting.interruptedRetryTicks` | integer | 12 | 至少1刻，尚未释放便中断时的动作冷却上限。 |
+| `casting.interruptedRecoveryTicks` | integer | 6 | 至少1刻，中断后的全局冷却上限。 |
+| `casting.commitmentTicks` | integer | 8 | 非负刻数，起手末段禁止战术抢占与闪避。 |
+| `casting.pressureChannelTicks` | integer | 30 | 至少执行1刻，承诺型引导让位前的最低时间。 |
+
+非有限数值和越界值均抛出异常。分别构造四个记录，再传给`new NpcRangedCombat(true, positioning, defense, casting, escape)`，即可独立调整移动、防御与施法。`rangedStatus()`提供压力、响应、防护和移动标记，供调试读取，不暴露可变状态。远程动作未触发便中断时使用短重试冷却；已经释放的法术保留已支付冷却。敌方来袭攻击可将剩余全局恢复缩短到响应上限。
+
+
+### 跃退强度
+
+原远程任务采用40刻冷却、每扇区8个角度样本、0.35触发比例、0.90偏好半径比例，以及水平1.45、垂直0.28的跃退初速度。现在的`Escape.INTENSE`保留这些触发、半径、初速度和冷却数值，以有界轨迹搜索取代争夺控制权的大脑任务。伊芙莉娜的16格交战范围对应低于5.6格时触发，落点评分偏好14.4格距离。跃退触地后恢复正常地面施法，不会创建飞行或悬停状态。
+
+`NpcCombatLeap`尝试八个均匀方向，每条真实离散轨迹最多追踪24刻，使用0.91水平阻力、0.98垂直阻力和0.08重力。身体沿途每四分之一格检查已加载空间、边界与碰撞；落点复用`NpcCombatTerrain`的支撑检查，至少增加1格敌我距离、保持在交战范围内，高差不超过1.75格。可见性与接近偏好半径的程度决定选择。规划失败时可回退到短促侧步，并立即继续选法术；成功时只设置一次初速度，触地或超时结束。没有独占导航或传送循环，也不会为了跃退取消已开始的动作。
+
+`Escape.MEASURED`使用0.25/0.75比例、0.95水平速度、0.28上抛速度、60刻冷却及15刻重试。`Escape.DISABLED`只关闭强力跃退，保留其他战术。也可直接构造`Escape`，为各NPC调整强度：
+
+| 字段 | 类型 | 默认值 | 范围与含义 |
+| --- | --- | --- | --- |
+| `escape.enabled` | boolean | true | 在空闲动作衔接点尝试跃退。 |
+| `escape.triggerRangeRatio` | double | 0.35 | 大于0且小于desiredRangeRatio，是attackRange的比例。 |
+| `escape.desiredRangeRatio` | double | 0.90 | 大于triggerRangeRatio且不超过1，落点评分半径占attackRange的比例。 |
+| `escape.horizontalSpeed` | double | 1.45 | 大于0且不超过2格/刻，水平初速度。 |
+| `escape.verticalSpeed` | double | 0.28 | 大于0且不超过0.6格/刻，向上初速度。 |
+| `escape.cooldownTicks` | integer | 40 | 至少20刻，成功跃退后开始。 |
+| `escape.blockedRetryTicks` | integer | 10 | 至少1刻，路线失败后的重试间隔。 |
+
+非有限数值会抛出异常。防护、闪避、短促侧步与跃退各自保留冷却。`rangedStatus()`快照还包含`escaping`标记。
 
 ### 支援动作
 
@@ -126,7 +202,7 @@ Better Combat 与 Better Mob Combat 是外部依赖。本模组调用它们的�
 
 对玩家造成的伤害仅允许命中保存的战斗目标，或与该目标玩家同阵营的玩家。没有保存目标时，普通目标必须为玩家，再采用同样规则。创造模式、旁观模式、死亡及其他不可被选中的玩家均被拒绝。`NpcTargetDamageGuard` 会同时检查攻击者与直接来源所归属的 NPC；此限制独立于队伍友军伤害保护。
 
-闪避是通过 `setDodgeableNpc` 明确启用的实体能力。默认闪避要求实体存活、清醒、未使用物品、未骑乘，伤害来源可回避，并符合依赖的空中翻滚许可。它朝远离来源的方向移动，无法确定时向后，叠加翻滚速度并授予翻滚回避窗口。成功闪避设置 `dodgeCooldownTick`，再用刚授予的窗口检查当前伤害。
+闪避是通过 `setDodgeableNpc` 明确启用的实体能力。未启用远程战术时，默认闪避要求实体存活、清醒、未使用物品、未骑乘，伤害来源可回避，并符合依赖的空中翻滚许可。它朝远离来源的方向移动，无法确定时向后，叠加翻滚速度并授予翻滚回避窗口。成功闪避设置 `dodgeCooldownTick`，再用刚授予的窗口检查当前伤害。
 
 | 本地闪避计算 | 数值或行为 |
 | --- | --- |
@@ -148,12 +224,12 @@ Better Combat 与 Better Mob Combat 是外部依赖。本模组调用它们的�
 | 字段 | 类型 | 默认值 | 作用 |
 | --- | --- | --- | --- |
 | `normalMeleeAttacks` | boolean | true | 仅对具备战斗能力的 NPC 开启持续武器近战。 |
-| `attackRange` | double | 2.4 | 默认动作范围，单位为方块；构造器不限制。 |
+| `attackRange` | double | 2.4 | 默认动作射程及远程站位外边界，单位为格；启用远程配置时不得小于危险距离。 |
 | `protectRange` | double | 12 | 保护和支援半径，单位为方块；构造器不限制。 |
 | `aggroRange` | double | 12 | 普通敌对及不可见目标范围，单位为方块；构造器不限制。 |
-| `dodgeCooldownTick` | integer | 30 | 成功闪避后的冷却；限制为非负。 |
+| `dodgeCooldownTick` | integer | 30 | 非远程成功闪避后的冷却；限制为非负。远程闪避使用defense组。 |
 
-这些范围是配置输入，不是经过安全校验的半径；平方计算不会拒绝负值。表中列出 `NpcConfig` 默认值，具体 NPC 可以覆盖。
+多数范围仍是未经校验的配置输入；启用远程战术时，还要求preferredDistance不超过attackRange。表中列出 `NpcConfig` 默认值，具体 NPC 可以覆盖。
 
 战斗冷却字段直接存入实体 NBT：
 
@@ -174,13 +250,17 @@ Better Combat 与 Better Mob Combat 是外部依赖。本模组调用它们的�
 
 手持物品偏移通过矩阵施加：位置除以 `16`，再按 Z/Y/X 顺序旋转，不累积到物品骨骼上。变身的 body 通道使用独立外层矩阵；应用宿主各部位前，桥接器会恢复 Gecko `body` 的绑定变换。扩展渲染器时，应分别处理动画归属与服务器命中权限。
 
+### 地面与空中动作要求
+
+`NpcAction.environment()`与`NpcActions.Builder.environment(...)`选择`GROUND`、`GROUND_OR_WATER`、`WATER`、`AIR`或`ANY`。默认GROUND_OR_WATER要求不在飞行或岩浆中，并且触地或接触水；GROUND严格要求触地且无飞行；WATER要求接触水、无岩浆及飞行；AIR要求离地且不在水或岩浆中；ANY明确允许所有环境。因此伊芙莉娜可在水下施法，而不会启用空中攻击；冰爆仍要求目标站在表面上。选择与执行阶段都检查环境。短暂位移可在配置宽限内暂停远程地面起手，但已经执行的地面/水下法术一旦环境失效仍会停止。连射不可被战术选择抢占，准备反击不会取消其蓄力或射击序列。死亡、失控、目标丢失或环境失效仍会停止动作。
+
 ## 扩展方式
 
 在 NPC 子类覆盖 `registerNpcActions(NpcActionSet.Builder)`，保持 ID 稳定、唯一，注册顺序确定。实现 `NpcAction`，或在目标策略合适时使用 `NpcActions.builder`。
 
 | 成员组 | 职责 |
 | --- | --- |
-| `id`、`type`、`priority`、`score` | 标识、动作类别及空闲选择顺序 |
+| `id`、`type`、`role`、`priority`、`score` | 标识、动作类别及空闲选择顺序 |
 | `selectTarget`、`canStart`、`rangeOverride` | 启动许可；命中阶段特有条件须在触发时重查 |
 | `timing`、`cooldownTicks`、`globalCooldownTicks` | 时序与两种冷却生命周期 |
 | `locksNavigation`、`locksMovement`、`interruptible` | 导航与移动锁，以及是否允许更高优先级动作抢占 |
@@ -205,9 +285,11 @@ builder.add(NpcActions.builder("short_cast_lightning", NpcActionType.ATTACK)
         .build());
 ```
 
-伊芙莉娜的定义已采用此构造器，保留原有法术时序、伤害以及禁用普通近战的设定。新原型自行选择循环策略，构造器不会自动将施法者变成近战者。
+伊芙莉娜采用此构造器并禁用普通近战；除既有动作外，还使用`NpcPatternActions`施放两种连射、两种降雨与星界终曲，复用玩家弹体和光束逻辑。新原型自行选择循环策略，构造器不会自动将施法者变成近战者。
 
 ## 验证
+
+持续受压回归检查覆盖固定防护时长、独立防御冷却、响应职责排序、有界地面起手宽限与释放前中断的重试成本。游戏内应让伊芙莉娜在空地、墙边与悬崖附近面对监守者及多个敌人，核对实际命中节奏、地面释放与可见防御窗口。单元检查不能证明这些遭遇的实战结果。
 
 运行`./gradlew.bat compileJava`。在多人游戏中验证属性存档加载、持久修饰符、武器切换、动作取消和各 NPC 状态独立。
 

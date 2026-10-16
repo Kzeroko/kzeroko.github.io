@@ -1,0 +1,201 @@
+---
+title: "术式运行机制"
+description: "术式结构、形态与融合、阵列站位、评级、稳定防护、物品存储，以及编织后的施法如何经由 Spell Engine 运行。"
+category: systems
+order: 32
+updated: 2026-10-16
+tags: ["法术", "术式", "Spell Engine"]
+---
+
+术式是叠加在 Spell Engine 之上的物品级程序：卷轴或法器把术式存放在主导法术的 ID 名下，凡是为这个法术计时、定价、准入或投放的钩子都会读回它。术式从不注册属于自己的法术，所以冷却、法术栏和铭刻仍然沿用主导原有的 ID。数值规则面向玩家的说明见[术式](/zh-cn/wiki/spell-formulas/)。
+
+## 它做什么
+
+编写用的类型位于 `net.kzeroko.isekaiexpansion.spell.formula`：`FormulaSchema`、`SpellShape`、`FormulaKnob`、`FormulaKnobs`、`KnobKind`、`SpellForm`、`SpellStage` 和 `SpellTuning`。融合内容接口 `ICircleSummonSpell`、`IVolleySpell`、`IRainSpell` 以及 `SpellFusion` 与 `IChannelBeamSpell` 一起位于 `net.kzeroko.isekaiexpansion.spell`。数据模型、评级、防护、站位、存储、施法与编辑位于 `internal.spellformula`，不属于 API。`SpellFormulaAPI` 是公开门面，用来读取术式、校验术式，以及把术式写到新卷轴上。
+
+法术通过覆写 `IIsekaiSpell.formula()` 加入术式系统，默认值是 `FormulaSchema.SEALED`。其他模组的法术一律解析为封印结构，不能调整、串联或注入。术式不会改动法术已注册的定义、目标选择或动作，只改变各个钩子读到的数值、施法时融合进来的内容、它在阵列中的位置，以及主导投放之后发生的事。
+
+## 运行时模型
+
+### 存储
+
+卷轴是 `isekaiexpansion:spell_scroll` 物品，其容器中的第一个法术 ID 就是主导。法器为每个已铭刻的法术各保存一个术式。如果术式的串联只有主导，没有档位、注入法术和名称，就不会写入；写入这样的术式等于删除该键。
+
+```text
+{IsekaiFormula:{Name:"Ember Hymn",Chain:[{Spell:"isekaiexpansion:fireball",Notches:{style:1b,potency:3b},Infused:["isekaiexpansion:flame_arrow"]},{Spell:"isekaiexpansion:fireball_rain",Delay:10b}]}}
+{IsekaiFormulas:{"isekaiexpansion:arcane_volley":{Chain:[{Spell:"isekaiexpansion:arcane_volley",Infused:["isekaiexpansion:shooting_star_volley"]}]}}}
+```
+
+| NBT key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `IsekaiFormula` | `compound` | absent | 卷轴上的术式。不存在时主导按原样施放。 |
+| `IsekaiFormulas.<spell id>` | `compound` | absent | 法器为某个已铭刻法术保存的术式，由铭刻与重新铭刻写入，解除铭刻时删除。 |
+| `Name` | `string` | absent | 玩家起的名字，读取时截到 32 个字符。空白名称视为不存在。 |
+| `Chain[]` | `list<compound>` | required | 先是主导，后面是后续法术。列表为空或超过 16 项时，视为没有术式。 |
+| `Chain[].Spell` | `string` | required | 法术 ID。无法解析的 ID 视为没有术式；未知 ID 无法通过防护。 |
+| `Chain[].Notches.<knob id>` | `byte` | absent | 所选档位序号；只保存与基础档不同的档位。 |
+| `Chain[].Delay` | `byte` | `0` | 上一个链节发动后等待的刻数。负值读作 `0`；主导上的值被忽略。 |
+| `Chain[].Infused[]` | `list<string>` | empty | 融合进该链节的法术 ID，按术式顺序排列。无法解析的 ID 视为没有术式。 |
+
+这些是存档数据，由术式编织台、铭刻台和 `SpellFormulaAPI.manuscript` 写入，不是编写接口。主导与卷轴法术不一致的术式会被忽略，卷轴按原样施放自己的法术。
+
+### 形态、融合与阵列
+
+`FormulaSchema`保存有序的`SpellShape`定义，原始式样为索引0；存在多个式样时提供`style`参数。每个式样定义形态、可用参数、阵列参数，以及权重、负荷、施法、冷却与星能倍率；原始式样的倍率必须全部为1。`shape(link::notch)`选出当前式样，`fusible(shape)`结合该形态与结构的禁用设置判断能否融合。通过`FormulaEditing`切换式样时会移除新式样不支持的参数，融合法术通过`shapeOf(form)`借出第一个兼容式样。
+
+| `SpellForm` | 可融合 | 融合份额 | 阵列 | 内容接口 |
+| --- | --- | --- | --- | --- |
+| `DIRECT` | 否 | 0 | `NONE` | — |
+| `SUMMON` | 是 | 0.75 | `FRONT` | `ICircleSummonSpell.circle()` |
+| `VOLLEY` | 是 | 0.4 | `NONE` | `IVolleySpell.volleyShot()` |
+| `RAIN` | 是 | 0.4 | `TARGET` | `IRainSpell.rain()` |
+| `SWEEP` | 否 | 0 | `BACK` | — |
+| `CHANNEL` | 是 | 0.45 | `NONE` | `IChannelBeamSpell.beamProfile()` |
+| `RAY`、`PREPARED`、`AREA` | 否 | 0 | `NONE` | — |
+
+融合施法通过 `SpellFusion.contents(this, tuning, Interface.class)` 取得内容：先是宿主，再是注册表中仍然存在、且属于该内容类型的每个注入法术。伙伴法术借出自己已注册的投放，从不为某个伙伴单独注册变体。
+
+| 形态 | 运行方式 |
+| --- | --- |
+| 召唤 | `MagicProjectileAPI.summon` 每个位开一个法阵。`ChargedProjectileCasting` 在同一个法阵上依次蓄能并发射每份内容的投射物；每隔一个法阵按相反顺序运行内容。 |
+| 连射 | 第 *i* 发通过宿主的 `ProjectilePatternAPI.Volley` 发射 `contents.get(i % n).volleyShot()`。 |
+| 降雨 | `RainCast` 列出每份内容的投射物；第 *i* 发使用 `ammunition.get(i % n)`，法阵圆盘带上伙伴的图案。 |
+| 引导 | `ChannelBeamAPI.pulse(caster, profile, modulation, cores)` 保留宿主的光束与碰撞，把第一个核心同步给客户端，第 *k* 次造成伤害的脉冲交给第 *k* mod *n* 份内容。 |
+
+`FormulaStaging.stages` 为每个链节给出 `SpellStage(first, total, group)`。同一刻发动的链节按阵列种类共用一排；每个链节按自己的阵列参数占用连续的位，`side(k) = first + k − (total − 1) / 2` 是某个位相对整排中心的偏移。`FormulaCasting.Active` 缓存这些站位，`tuning(link, seed, group)` 把本次施法的种子写作分组。`SpellStage.SOLO` 表示单独施法；`spanning(count)` 为未经站位的施法放宽站位。
+
+`SpellFormation` 把位换算成位置：`FRONT` 把法阵立在半径至少 1.9 格的弧上，相邻间隔 min(80°, 150° ÷ (total − 1))，并放大半径直到相邻法阵的外缘彼此让开；`BACK` 在肩后排成一行，间距是外缘的两倍再加 0.5 格；`TARGET` 把降雨圆盘沿施法者视线的横向错开，间距是半径的两倍再加 1.5 格；`sweepDirection` 让施法者左侧的位保持原本从左到右的扫射，右侧的位反向。单独一个位保持法术原本的摆放。
+
+### 评级与防护
+
+`FormulaRater.rate`仅用`FormulaCatalog.Entry`内的数值计算：阶位、施法、冷却、投递次数与原始星能来自世界法术注册表，并结合缓存的结构。融合法术借出第一个兼容式样；权重与星能使用该式样的倍率和宿主档位比率，负荷取式样基础负荷，冷却使用式样倍率与宿主档位比率的平方根。每项贡献再乘以形态的融合比例。`FormulaGuard.validate`依次检查结构、内容与评级，并返回全部问题和评级。
+
+`SpellTiers`定义1–13阶，权重为`2^((tier - 1) / 2)`，反算为`1 + floor(2 × log₂(weight))`；`FormulaRules`委托它完成阶位计算。超过13阶的结果保留越界值，由守卫拒绝过载。每个后续法术独立允许0–60刻延迟，没有额外的总延迟上限。
+
+| `FormulaRules`常量 | 数值 |
+| --- | --- |
+| `MAX_SPELLS` | 6 |
+| `MAX_FOLLOWERS` | 4 |
+| `MAX_CONTENTS` | 2 |
+| `MAX_DIRECT` | 1 |
+| `MAX_TIER` | 13 (`SpellTiers.MAX`) |
+| `MAX_DELAY_TICKS` | 60 |
+| `STRAIN_LIMIT` | 100 |
+| `NAME_LENGTH` | 32 |
+| `TOGETHER` / `DELAYED` | 1.15 / 1 |
+| `WEAVE_STRAIN` | 1.1 |
+| `HARMONY` | 0.9 |
+| `MAJOR_REACTION` / `MINOR_REACTION` / `RESONANCE_LIMIT` | 1.12 / 1.06 / 1.3 |
+| `ENERGY_STRAIN` | 0.1 |
+| `CAST_TOGETHER` / `CAST_DELAYED` / `CAST_LIMIT` | 0.35 / 0.25 / 2.5 |
+| `COOLDOWN_SHARE` | 0.35 |
+
+| 问题代码 | 触发条件 |
+| --- | --- |
+| `UNKNOWN_SPELL` | 链节或注入法术的 ID 不在法术注册表中。 |
+| `SEALED` | 封印法术作为后续法术或被注入，或封印的主导带有任何内容。 |
+| `TOO_MANY_SPELLS` / `TOO_MANY_FOLLOWERS` | 法术多于 6 个，或后续法术多于 4 个。 |
+| `NOT_CHAINABLE` | 术式带有后续法术，且其中某个链节不可串联。 |
+| `INSTANT_LEAD` | 瞬发主导带有后续法术。 |
+| `DELAY` | 后续法术延迟超出0–60刻（0–3秒）；范围内任意整数刻均有效。 |
+| `UNKNOWN_KNOB` / `NOTCH` | 当前式样不提供保存的参数，或档位越界、等于基础档。 |
+| `NOT_FUSIBLE` | 不能注入的链节带有注入法术。 |
+| `FUSION_FULL` / `FUSION_SAME` | 一个链节的内容超过 2 份，或重复了同一个法术。 |
+| `FORM` | 注入法术没有可与宿主当前形态融合的式样。 |
+| `DIRECT_PAIR` | 术式中出现第二个直射法术。 |
+| `STRAIN` / `OVERLOADED` | 负荷总和超过 100，或阶位超过13。 |
+| `NAME` | 名称超过 32 个字符。 |
+
+问题提示用法术的译名指称法术。之后 `FormulaAffinity.check` 会把每个部分的阶位和术式整体阶位与施法者的学派等级比较。它接受等级函数的重载让编织台可以对快照执行同一检查。
+
+### 解析一次施法
+
+`FormulaCasting.active(player, spell)` 通过 Spell Engine 的 `SpellContainerSource.getFirstSourceOfSpell` 找到提供该法术的物品，读取其术式复合标签并返回鉴定结果。鉴定按复合标签的对象身份缓存在一个最多 512 项的弱键缓存里，同时记录世界的法术注册表和一个代次计数。编织台与铭刻台每次写入都会存入新的复合标签，旧条目随之失效；重载 `spell_energy` 会推进代次。
+
+| 钩子 | 位置 | 术式改变了什么 |
+| --- | --- | --- |
+| 准入 | `SpellCastingRules`，Spell Engine `CASTING_ATTEMPT.PRE` | 编织过的法术必须通过防护与 `FormulaAffinity`；普通法术沿用天赋检查。客户端在动作栏显示拒绝原因。 |
+| 星能 | `SpellCastingRules.energyCost` | 鉴定结果的星能取代原始条目，之后再乘天赋、起源与滞空倍率。准入、消耗与提示共用这一结果。 |
+| 施法时间 | `SpellParametersMixin` 包装 `getCastTimeDetails` 与 `getCastDuration` | `SpellCastTiming.castMultiplier`：学派天赋 × 急速能力 × 鉴定的施法倍率。施法过程的长度乘以该倍率，动作速度除以该倍率。持续引导保持原时长。 |
+| 冷却 | `SpellParametersMixin` 包装 `getCooldownDuration` | 在 Spell Engine 自身减免之后 × 鉴定的冷却倍率。 |
+| 投放 | `IsekaiSpellHandlerAdapter` | 主导收到第 0 个链节带站位的 `SpellTuning`；非引导法术投放成功后，由 `FormulaChain` 展开后续法术。 |
+| 提示文本 | `SpellTooltipMixin`、`FormulaTooltips`、`FormulaTooltipComponent` | 法术条目按其式样命名与描述；描述标记使用悬停物品上的术式，否则使用已装备的术式，详情中追加星能消耗。携带编织术式的物品（书卷或已铭刻的载体）把每个术式绘制为卡片：融合徽记、名称与阶位，串联中每个法术的图标（以光线连向前一个法术）、带沙漏显示在名称旁的等待时间、以图标标签呈现的调整参数与注入法术，然后是使用 `textures/gui/screen/spell/widgets/spell_bars.png` 第一条纹理的稳定度条与消耗。同一组术式持续悬停时，卡片布局最多保留1秒。书卷另有一行写明编织台按键。 |
+| 施法法阵 | `CircleRequests` | 编织过的法术施法时，法阵会合成注入法术的图案。 |
+| 法术栏、施法条 | `SpellRailSnapshotFactory`、`SpellCastHudOverlay` | 注入法术的图标与主导图标切分拼合后绘制。 |
+
+后续法术在服务器上经 `IEntitySpell.cast(caster, target, tuning)` 运行。与主导同一刻的后续法术在适配器返回前就会发动；其余的由一个按世界时间判定的重复任务等待，施法者死亡、换世界或陷入失衡时停止。每次施法的种子来自 `FormulaCasting.seed`，持续引导使用施法过程的起始刻，因此整个引导期间种子不变；第 *n* 个后续法术再加上 *n* × `0x9E3779B97F4A7C15`，所有链节都以主导的种子作为阵列分组。
+
+### 投放塑形
+
+调整以普通数值的形式进入共享投放 API，客户端特效约定会自动跟随，不需要为每个法术单独写规则。
+
+| 接口 | 术式数值 |
+| --- | --- |
+| `MagicProjectileAPI.Flight` | 新增 `scale`，范围 0.25–3。`Flight.tuned` 套用速度、威能与规模；`compose` 把它们叠加到弹道模式自身的飞行参数上。 |
+| `MagicProjectileAPI.Fan` | 围绕准星发射 1–8 个副本，间隔 0–45°。 |
+| `MagicProjectileAPI.summon` | 内容、法阵数量、站位与飞行参数；每个法阵都立在 `FRONT` 的位上。 |
+| `ChargedSpellProjectile` | 同步数据 `SCALE` 放大碰撞箱与原生大小输入。威能经 `IAttachable.getSpellPotency` 持久保存。 |
+| `SpellProjectileImpact` | 溅射半径 × 规模，上限 8；命中特效通过大小输入放大，没有大小输入时改用原始缩放。 |
+| `ChannelBeamAPI.Modulation` | 光束半径 × 规模，作为同步数据下发；每次脉冲伤害经 `Damage` 接口 × 威能。核心的光束与接触特效以宿主宽度的 0.55 与 0.7 运行在宿主之内。 |
+| `CircleBeamAPI.Pattern` | 一个配置、1–4 个法阵、每个法阵的扫射弧度、作用于扫射速度的 0.25–4 节奏、站位与调制参数。同一施法分组的法阵一起通过同族锁。 |
+| `ProjectilePatternAPI.RainCast` | 轮流使用的弹药、伙伴图案、发射数量、最大 8 的半径与本次调整，其站位决定圆盘偏移。降雨法阵按命中行为 ID 持久保存弹药。 |
+| `MagicCircleRenderData` | `fused` 最多列出 2 个伙伴图案。`CircleMaterials` 合成一份材质：宿主的外环、第一个伙伴的内纹、第二个伙伴的笔画，以及混合后的特效颜色。 |
+
+## 约定
+
+- **结构只承诺代码做得到的事**。 `IsekaiSpellRegistry.registerSpell` 会缓存结构，并在启动时检查：可串联的法术不是 `IEntitySpell`，或可融合的法术没有实现其形态的内容接口，都会直接抛出异常。
+- **基础档就是原始法术**。 每个参数的基础档权重与负荷都是 1，`SpellTuning.BASE` 对所有参数都返回基础值，不注入任何法术，也单独站位。NPC 与脚本施法传入 `BASE`，表现与引入术式之前完全一致。
+- **伙伴借出已注册的投放**。 召唤法阵按逻辑 ID 注册，存档中的融合法阵保存各份内容的逻辑 ID；每个降雨的投射物都注册为弹药。恢复法阵时，如果保存的逻辑状态引用了未知内容或本身无效，法阵会记录警告并被移除，不会让该刻出错。
+- **主导永不改变**。 编辑无法替换第 0 个链节。一个法器的每个法术 ID 只保存一个术式，主导的冷却、法术栏位置与铭刻状态也就是术式的。
+- **编辑以服务器为准**。 `FormulaEditing.apply` 在服务器的物品上重新执行预览与检查。增加类的编辑必须让术式保持有效；拆解与抽出始终允许。编入只接受单链节卷轴，注入只接受普通卷轴，返还的卷轴交给 `PlayerInventory.offerOrDrop`。
+- **后续法术已预付**。 它们不消耗星能、不设冷却，只在服务器上运行。
+- **通过写入方法修改**。 `FormulaStorage.writeManuscript` 与 `inscribe` 每次都存入新的复合标签；原地修改已保存的复合标签会让缓存中的鉴定过期。
+
+## 扩展
+
+法术把结构声明在自身逻辑旁边，所有可调整的数值都从施法时收到的 `SpellTuning` 读取。下面这个内部示例调整一次单体打击：
+
+```java
+public FormulaSchema formula() {
+    return FormulaSchema.builder(SpellForm.AREA, 2).chainable().mark(IsekaiMagicEffects.ELECTRIFIED)
+            .knobs(FormulaKnobs.POTENCY, FormulaKnobs.MAGNITUDE, FormulaKnobs.INCANTATION).build();
+}
+
+public boolean cast(LivingEntity caster, @Nullable Entity target, SpellTuning tuning) {
+    if (!(target instanceof LivingEntity living)) return false;
+    // Potency multiplies the whole hit; magnitude grows the strike effect
+    SpellDamageUtil.dealDamage(school(), caster, living, 4, 1, tuning.potency(), true, id(), null);
+    FxSyncUtil.spawnStaticEffekFx(caster.getWorld(), FX, living.getPos(), tuning.magnitude(), true);
+    return true;
+}
+```
+
+法术自己的数量与角度用 `FormulaKnobs.multiplicity`、`count` 和 `angle` 定义，再用 `tuning.count(knob)` 或 `tuning.get(knob)` 读取。可融合形态的法术实现该形态的内容接口，并用 `SpellFusion.contents` 取得内容。会打开多个法阵的法术声明 `staged(knob)`，再根据 `tuning.stage()` 经 `SpellFormation` 或接受站位的投放 API 摆放法阵。
+
+| `SpellFormulaAPI` 方法 | 端 | 作用 |
+| --- | --- | --- |
+| `schema(Identifier)` | 双端 | 法术的结构；不属于本模组的法术返回封印结构。 |
+| `manuscript(ItemStack)` | 双端 | 卷轴的术式；未编织时返回只有主导的术式；其他物品返回 null。 |
+| `inscribed(ItemStack, Identifier)` | 双端 | 物品为某个法术保存的术式；按原样施放时返回 null。 |
+| `active(PlayerEntity, Identifier)` | 双端 | 玩家装备实际用来施放该法术的术式。 |
+| `validate(SpellFormula, World)` | 双端 | 防护的结论与评级。 |
+| `affinity(PlayerEntity, FormulaRating)` | 双端 | 玩家撑不住该术式的原因；撑得住时返回 null。 |
+| `manuscript(RegistryEntry<Spell>, SpellFormula)` | 服务器 | 生成一份带有该术式的主导卷轴；条目不是主导时抛出异常。 |
+
+`SpellDeliveryAPI.cast` 与 `launchFrom` 也提供接受 `SpellTuning` 的版本，供需要像后续法术那样施法的控制器使用。
+
+### 界面
+
+`FormulaWeaverController` 在本模组的按键分类中注册 `key.isekaiexpansion.formula_weaver`，默认N。未打开界面时按下，会为任一只手中的书卷打开编织台，主手优先；手中没有书卷时在动作栏提示。
+
+术式编织台与铭刻台共用 `client.screen.arcana` 中的秘仪组件，绘制在 `ArcanaBackdrop` 着色器星空之上：每栏带标题铭牌的切角水晶框、只为主要操作点亮的尖角铭牌按钮、标签轨、以学派颜色为环、编织过的法术另带一道金色弧光的法术徽章、水晶槽与星珠组成的参数滑条、阶位纹章、稳定度量表、数据格、状态铭牌、分区标题与分段容量量表。52 dp 及以上的徽章另带阶位数字封印。文字旁不绘制任何装饰。ModernUI 只能按矩形裁剪，因此所有光晕、扫光与渐变都由 `ArcanaLight` 铺在形状的细分网格上，不会越过切角或尖端。参数滑条以触摸阈值区分点击与拖动：点击让星珠滑向最近的可选档位；拖动时星珠跟随指针，松开后弹落到预览档位；滚轮只调整已获得焦点的滑条。`ArcanaIcons` 每次资源重载时为 `textures/spell` 与 `textures/gui/screen/spell/icons` 建一次索引，组件只加载确实存在的图标。`FusedIconPainter` 用图像着色器绘制弦形，画出单个图标，或把融合法术的图标沿对角线切分拼合；法术栏与施法条也使用它。提示文本只在能补充信息的地方出现：某个档位的效果、某个操作的预计结果或拒绝原因、某个判定的理由。
+
+## 验证
+
+运行 `./gradlew.bat test --tests net.kzeroko.isekaiexpansion.internal.spellformula.FormulaRatingTest`。它在固定的目录上检查十三阶体系、亲和与书卷分段、式样切换、任意整数刻延迟、原始阶位、档位造成的阶位变化、权重空间求和、和鸣与反应、串联的施法与冷却分摊、负荷上限、结构性拒绝、直射数量上限、同形态注入、阵列站位、镜像排布、NBT 往返与编辑规则。
+
+在游戏中检查：装备在法术书栏的编织卷轴与重新铭刻过的法器；被拒绝的编辑不会改变界面；拆解与抽出会返还卷轴；失衡会驱散后续法术；融合连射交替发射两种投射物；融合召唤的每个法阵都依次发射两种投射物；同时施放的两个降雨并排展开；两个星界终曲从两侧相向扫射；融合引导显示核心；以及规模确实缩放了投射物、命中、法阵与光束特效。这些是检查步骤，不是测试记录。
+
+## 相关
+
+玩家规则见[术式](/zh-cn/wiki/spell-formulas/)。注册与施法门槛见[法术集成](/zh-cn/dev/spell-integration/)；术式所塑形的投放 API 见[附着弹体与发射模式](/zh-cn/dev/projectile-attachments/)。

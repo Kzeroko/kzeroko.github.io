@@ -3,7 +3,7 @@ title: "Quest Objectives"
 description: "All objective payloads, predicates, delivery rules, content triggers and spawn-action fields."
 category: data
 order: 91
-updated: 2026-09-24
+updated: 2026-10-10
 ---
 
 An objective turns a qualifying server event into numeric progress or a completion flag. Its own type checks run before its event-filter tree; all objectives in the quest must finish before rewards run. Bounty quests additionally require a confirmed receptionist report; see [Bounty data](/en/wiki/bounty-data/).
@@ -49,6 +49,7 @@ Numeric progress adds a non-negative type-specific increment and saturates at 21
 | `isekaiexpansion:npc_delivery` | Full delivery batch, +1 |
 | `isekaiexpansion:bounty_delivery` | Confirmed guild receptionist report; consumes up to the remaining item requirement. No paper item is required. Numeric bounty objectives only. |
 | `isekaiexpansion:recipe_crafted` | Matching craft event, adds its non-negative crafted_amount |
+| `isekaiexpansion:trade_purchase` | Completed authoritative purchase; adds the number of items received |
 | `isekaiexpansion:advancement` | Matching advancement event, +1 |
 | `isekaiexpansion:visit_location` | Player tick, adds progress_per_tick |
 | `isekaiexpansion:photograph` | Credited Exposure frame, adds progress_per_photo |
@@ -72,10 +73,11 @@ These fields are inside the objective's `data`. Fields belonging to another type
 | `sneaking` | `boolean` | Absent | Interaction objectives: expected sneaking state. |
 | `npc` | `object` | Required | npc_talk and npc_delivery: NPC identity/location selector below. |
 | `dialogue` | `identifier` | Required | npc_talk: exact dialogue ID. Progress fires when the bound quest dialogue starts, not when its final line closes. |
-| `item` | `object` | Required | npc_delivery: item predicate plus count for one delivery batch. bounty_delivery: item predicate only; the enclosing required field is the total item count. |
+| `item` | `object` | Required | npc_delivery: item predicate plus count for one delivery batch. bounty_delivery: item predicate only; the enclosing required field is the total item count.  trade_purchase: predicate for the received goods. |
 | `delivery` | `object` | Required | npc_delivery: carrier, source and completion rules below. |
+| `profession` | `identifier` | Absent: any owned catalogue | trade_purchase: optional exact catalogue profession ID; blank or malformed IDs reject the definition. Unknown IDs never match. |
 | `recipe_id` | `identifier` | Required | recipe_crafted: nonblank recipe ID; exact payload match, not output-item identity. |
-| `recipe_type` / `recipe_serializer` / `source` | `identifier` | Absent | recipe_crafted: optional additional exact filters; present blank strings reject. Sources include `minecraft:recipe_crafted`, `isekaiexpansion:alchemy` and `isekaiexpansion:forgery`. |
+| `recipe_type` / `recipe_serializer` / `source` | `identifier` | Absent | recipe_crafted: optional additional exact filters; present blank strings reject. Sources include `minecraft:recipe_crafted`, `isekaiexpansion:alchemy`, `isekaiexpansion:forgery` and `isekaiexpansion:tanning`. |
 | `advancement_id` | `identifier` | Required | advancement: nonblank advancement ID. |
 | `criterion` | `string` | Absent | advancement: one criterion name; trimmed, blank rejects. |
 | `criteria` | `array<string>` | [] | advancement: alternatives merged with criterion; trimmed blanks reject; duplicates collapse. |
@@ -88,6 +90,8 @@ These fields are inside the objective's `data`. Fields belonging to another type
 Kill credit resolves direct players, player-owned projectiles and following NPCs, including their projectiles, to a responsible player. `party` accepts that credited actor for the shared profile; it does not award every nearby team. `player` excludes companion credit, while `picker` compares the responsible player with the saved picker. Weapon predicates inspect that player's hands at event time, not a saved weapon on a projectile or companion.
 
 Interaction callbacks report use attempts and return control to normal interaction handling; the objective does not wait for the block/entity interaction to succeed. Hand/credit option names are trimmed and case-insensitive; unknown names reject the definition. Recipe and advancement objectives react to events after activation, not a scan of historical crafts or already-held advancements.
+
+`trade_purchase` observes only successful currency purchases through an authoritative villager or NPC catalogue while the quest is active. Failed payment, cancelled quotes, sales to a merchant, guild recycling, barter, ordinary pickups and historical purchases do not count. Numeric progress counts the delivered stack; boolean progress completes on the first match. The existing event index selects the buyer’s current quest-party profile without inventory polling. Use `data.item.item` for one item ID, or the shared item/tag/NBT predicate fields below. The chapter 0 anvil, carpentry table, woodworking supplies and fish-bait purchase objectives use this type; their inventory-advancement shims are removed.
 
 ### Entity, item and block predicates
 

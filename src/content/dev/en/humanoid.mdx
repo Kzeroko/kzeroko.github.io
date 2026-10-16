@@ -3,7 +3,7 @@ title: "Humanoid architecture and extension points"
 description: "Profile ownership, authoritative mutation, shared presentation and safe extension of the humanoid system."
 category: systems
 order: 100
-updated: 2026-09-26
+updated: 2026-10-14
 ---
 
 Players and NPCs share the humanoid appearance model and rendering pipeline. This reference identifies the internal owners of that state and the entry points for changing it.
@@ -12,7 +12,7 @@ Players and NPCs share the humanoid appearance model and rendering pipeline. Thi
 
 The humanoid system gives players and NPCs the same appearance model: identity, body build, face shape, palette, selected parts and an optional origin ID. `HumanoidProfile` is a versioned value object; the current version is 1. JSON authoring belongs in [preset data](/en/wiki/humanoid-presets/) and [part authoring](/en/dev/humanoid-parts/).
 
-The Java types described here live in `internal.humanoid` or client implementation packages. They are internal integration points, not a `HumanoidAPI` facade.
+Most Java types described here live in `internal.humanoid` or client implementation packages and are internal integration points. The one public facade is the client-side `HumanoidRenderAPI`, for another mod that draws a racial feature of its own on a humanoid body; it is covered under *Extending it*.
 
 ## Runtime model
 
@@ -20,9 +20,9 @@ The Java types described here live in `internal.humanoid` or client implementati
 | --- | --- |
 | `HumanoidAppearanceComponent` | Player profile, creation stage, saved profiles and revision; component ID `isekaiexpansion:humanoid_appearance`. Registered with `ALWAYS_COPY` for respawn. |
 | `HumanoidSubject` | Nonplayer contract: get/set profile and expose a revision. |
-| `BaseNpcEntity` | Base character is stored separately from its outfit-composed presentation. |
+| `BaseNpcEntity` | Base character is stored separately from its outfit-composed presentation; both pass catalogue sanitisation. |
 | `HumanoidAppearanceAccess` | Uniform player/subject reads and internal direct assignment. |
-| `HumanoidAppearanceService` | Server player sanitisation, origin resolution, unlock/paint validation and creation-stage commits. |
+| `HumanoidAppearanceService` | Server player sanitisation under the session's access, origin resolution, audience/unlock/paint validation and creation-stage commits. |
 | `HumanoidPartCatalogRegistry` | Server-authored part definitions, compatibility sanitisation and catalogue revision. |
 | `HumanoidPartAssetRegistry` | Client resource discovery; distinct from server catalogue membership. |
 | `HumanoidRenderResolver` | Resolves body, visible layers, styles, tint/paint textures and armour/trait hiding into a snapshot. |
@@ -30,9 +30,13 @@ The Java types described here live in `internal.humanoid` or client implementati
 
 A player's live profile, revision and creation stage synchronise to recipients; personal saved slots are included only for the owner. Component setters skip equal replacements, recalculate dimensions when needed and bump revision on accepted changes. Revision is a cache invalidation counter, not an authorisation token.
 
-NPC presets resolve an authored or generated base profile; the selected outfit overlays it for display. Read `getBaseHumanoidProfile()` when editing/exporting the character and `getHumanoidProfile()` when rendering. Citizen generation and NPC preset hooks are covered in [NPC assets](/en/dev/npc-assets/).
+An NPC's preset is declared in its class and resolves an authored or generated base profile; the selected outfit overlays it for display. Read `getBaseHumanoidProfile()` when editing/exporting the character and `getHumanoidProfile()` when rendering. Citizen generation, preset declaration and export are covered in [NPC assets](/en/dev/npc-assets/).
+
+An NPC has no Origins component. Its race is the origin ID in its own profile, and the catalogue grants that race's traits exactly as it grants a player's: a dragon recruit wears the same horns, ears and tail as a dragon player. A slime NPC is also drawn translucent and tinted by its skin colour, matching a slime player; see *Race tint on NPCs* below.
 
 Client creation editing keeps a detached working profile and up to 48 undo entries. It does not edit the live player component directly. Submission crosses a server scope merge followed by sanitisation; screen visibility alone is not the authority boundary.
+
+A chapter offers a colour control only for those of its channels that some worn part binds, read from the catalogue across every worn slot rather than the chapter's own: lips and blush sit on the body mask but are edited with the face. A chapter whose channels no worn part binds shows no colour section, so an elf, whose only trait is ears bound to `skin`, gets none in the trait chapter. Changing a worn part rebuilds the chapter and re-evaluates the list.
 
 ## Contracts
 
@@ -46,17 +50,29 @@ Client creation editing keeps a detached working profile and up to 48 undo entri
 
 ### Validate on the server
 
-`sanitizeForPlayer` resolves the actual Origins origin, sanitises catalogue compatibility, removes locked parts, removes unknown paint references, then fills declared starting parts while character creation is incomplete. An empty catalogue is treated as unavailable data and preserves existing parts.
+`sanitizeForPlayer` resolves the actual Origins origin, sanitises catalogue compatibility, removes parts the player's `HumanoidAccess` does not allow, removes unknown paint references, then fills declared starting parts while character creation is incomplete. An empty catalogue is treated as unavailable data and preserves existing parts.
+
+The access comes from `HumanoidSession.access(player)`. `PLAYER` drops parts whose audience is `npc` and parts whose unlock rule fails; `DESIGNER`, granted only by `/ise humanoid design`, keeps both. The access is held until logout or until a player-access screen is granted, which revalidates the character under player rules. Gender locks, origin filters, chains and requirements apply under either access.
 
 Catalogue sanitisation checks slot, gender and origin compatibility, repairs styles, fills mandatory body/origin traits, then removes unmet companion requirements until stable. These checks do not prove client models or textures exist. Unlock checks and resource resolution remain separate stages.
+
+NPCs run catalogue sanitisation only, through `HumanoidPartCatalogRegistry.sanitizeNpc`. `BaseNpcEntity.setHumanoidProfile` sanitises every base profile against the origin it declares: generated, authored, loaded from NBT, after a gender change, and when a data-pack reload re-validates a generated character. `NpcOutfitManager.resolveAppearance` sanitises the outfit-composed result too. An outfit therefore cannot remove a racial trait: a cleared trait slot is refilled from the race, and parts the NPC's gender or race may not wear are dropped. Audience, unlock gates and paint validation are player rules and are not applied to NPCs.
+
+`sanitizeNpc` differs from the player rule in one way: it does not fill an empty or unusable body. An NPC without a body is drawn as the bare rig, a white mannequin. The allegiance broker's preset declares only its shop and the guild receptionist declares no preset, so this mannequin is their placeholder look. A player's empty body is filled with the catalogue default.
+
+### Race tint on NPCs
+
+A player's slime body comes from the `isekaiorigins:trait_slime` power. An NPC has no powers, so `GeoHumanNpcRenderer` reads its race instead: a profile whose origin is `isekaiorigins:slime` draws its body with an entity translucent layer, tinted by the `skin` channel at alpha `0.9`. `HumanoidPartGeoLayer` passes the same tint to every worn layer, so hair, clothes and traits are tinted too. Every other race draws as authored. `HumanoidProfileGenerator` gives slime NPCs one of 6 pale slime skin tones instead of the 8 human tones, because a human tone seen through the tint reads as an ordinary person.
 
 Creation-stage changes normally advance monotonically; explicit reset is separate. `HumanoidCreationFlow.owedScope` decides the owed step, and `OpenHumanoidCreationPacket.send` grants a scoped session before asking the client to display it. The exact scope matrix and current request-handler limitations belong in the runtime reference.
 
 ### Give body size one owner
 
-`HumanoidBodyScale.of(player)` uses `height / 1.8` only when a player component has a body reference and no active morph entity. Otherwise it returns 1. Player dimensions, eye height and the outer player render scale use that policy.
+`HumanoidBodyScale.of(profile)` uses `height / 1.8` only when the profile has a body reference; otherwise it returns 1. `HumanoidBodyScale.of(player)` applies it to the player's own profile while no morph entity is active. Player dimensions, eye height and the outer player render scale use that policy.
 
 The player feature marks `HumanoidRigRenderState.setBodyScaleApplied(true)`; the rig renderer then skips applying body scale again. Detached/NPC rendering has its own presentation context. Do not multiply both the outer player transform and the rig by the player's height ratio.
+
+A clone is a copy of a player and is sized the same way from the profile it carries: its dimensions and eye height scale by `HumanoidBodyScale.of(profile)`, recomputed whenever the tracked profile changes, and its renderer multiplies the vanilla `0.9375` pass scale by the same value. `HumanoidGhostRenderer.live()` therefore marks the scale applied, so armour, held items and the rig share one size. `HumanoidGhostRenderer.still()`, used by afterimages, scales the rig itself because nothing else is drawn in its space.
 
 Client body rendering additionally requires the shared rig resource and yields to an active morph presentation. Server size policy does not depend on client resource availability. A missing resource can therefore affect rendering without removing the server's body reference.
 
@@ -70,7 +86,7 @@ Client body rendering additionally requires the shared rig resource and yields t
 | Part slot | Add ID, kind, render order and armour defaults to `HumanoidSlot`; expose its chapter, update `showsOnArm` and trait mapping where relevant, and update the plugin's explicit slot list. |
 | Screen chapter | Define slots, palette channels and camera focus in `CreationChapter`; include it in allowed scopes and add custom controls where the generic slot builder is insufficient. |
 | Nonplayer subject | Implement `HumanoidSubject`, own persistence/synchronisation, and bump the reported revision when presentation changes. |
-| NPC-specific generation | Override `resolveInitialHumanoidProfile`; use `getNpcPresetId` to share a preset across entity types. |
+| NPC look | Override `getNpcPreset` to return a constant built with `NpcPreset.builder()`; override `resolveInitialHumanoidProfile` for generation; override `getNpcPresetId` only to share wardrobe names and rewards across entity types. |
 
 Palette NBT stores an array by channel ordinal. The wire format uses ordinal bits for palette channels and ordinals for slots. Preserve existing enum order and audit compatibility when extending it; render ordering is the slot's explicit numeric order, not its ordinal. The palette wire encoding uses an integer mask, so adding channels also requires reviewing mask capacity.
 
@@ -90,15 +106,40 @@ The body supplies shared bone poses; part-specific animation is evaluated before
 
 The render snapshot cache includes profile/revision, catalogue and asset revisions, paint revision, armour/trait masks and composed-texture generation. A new visual input needs a corresponding invalidation input. Do not keep a parallel cache that survives catalogue or resource reload without versioning it.
 
+### Draw a racial feature from another mod
+
+`net.kzeroko.isekaiexpansion.api.client.HumanoidRenderAPI` is a client-only facade for a mod whose own feature layer replaces part of the humanoid body. It has two methods.
+
+| Method | Side | What it does |
+| --- | --- | --- |
+| `registerLegReplacement(Predicate<? super LivingEntity> rule)` | client | Adds a rule. On each frame a rule returns `true` for the humanoid being drawn, `HumanoidBoneShaper` hides the `left_leg` and `right_leg` bones and their children. Worn parts copy bone visibility by name, so trouser legs, socks and shoes go with them. A `null` rule throws `NullPointerException`. Rules cannot be removed. |
+| `traitColor(LivingEntity entity)` | client | Returns the `trait_primary` palette colour as `0xRRGGBB`, or empty for an entity without a humanoid profile. |
+
+Only the live passes ask the rules: `HumanoidPlayerFeature` for players and NPC pose completion for NPCs. First-person arms, screen previews and afterimages copy the rig without the other mod's layer, so they keep their legs. Rules run on the render thread for every humanoid drawn; register them during client initialisation and keep them cheap and free of side effects.
+
+The pack's Mermod integration in IsekaiTweaks uses this API. Mermod, a third-party mod checked at version 3.0.2, draws its tail from the vanilla body pose and hides only the vanilla legs, which the rig has already replaced. The integration's rule mirrors the one Mermod uses for the vanilla legs:
+
+```java
+HumanoidRenderAPI.registerLegReplacement(
+        subject -> subject instanceof PlayerEntity player && MermodClient.shouldRenderTail(player));
+```
+
+Its tail-colour hook takes `traitColor` so the tail matches the horns, ears and tails drawn here. Chest concealment for a Mermod bra is not part of the API.
+
 ## Verifying
 
 - Compare the same profile on its player owner, another client, an NPC and a detached preview.
 - Submit fields outside each granted scope and compare the stored profile, not only the screen preview.
 - Confirm respawn retains profile/stage/saved slots and only the owner receives saved profiles.
 - Change height, body presence and morph state; check hitbox, eye height, held items and rendered scale.
+- Cast a clone from a short and a tall character wearing full armour and a weapon; confirm the head sits in the helmet, the armour stays on the limbs and the weapon in the hand.
+- Open `/ise humanoid design`, wear an `npc` part, reload data packs and confirm it stays; then open `/ise humanoid edit` or relog and confirm it is removed.
 - Reload catalogue and client assets independently; check saved profiles and render-cache invalidation.
 - For a new slot/channel, round-trip NBT and network state, check enum compatibility, then export it through the plugin.
 - Test an interrupted first-join sequence and a held screen without replacing an active screen.
+- Spawn allegiance recruits of several races, including dragon, kitsune and slime. Compare their traits with a player of the same race, confirm the slime is translucent, then reload data packs and check the traits remain.
+- Give an NPC an outfit that clears a trait slot and the body; confirm the trait returns and the body shows the mannequin. Confirm the allegiance broker and guild receptionist stand as white mannequins.
+- Swim as a humanoid player with a Mermod tail. Confirm the legs and leg layers hide exactly while the tail draws, on land too if the tail style is permanent, and that afterimages keep their legs.
 
 Names and culture selection are documented in [Naming API](/en/dev/naming/).
 

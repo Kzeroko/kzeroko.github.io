@@ -3,7 +3,7 @@ title: "Skill-tree Data"
 description: "Add unlock conditions to Puffish skill nodes and grant local learnable powers as rewards."
 category: data
 order: 84
-updated: 2026-09-19
+updated: 2026-10-15
 ---
 
 Skill requirements add a condition to an existing skill-tree node. A separate reward bridge grants an Origins power when Puffish Skills updates that definition's unlock count; neither format creates the graph itself.
@@ -54,7 +54,7 @@ As an override of `data/isekaiexpansion/skill_requirement/main.json`, this repla
 | `destiny` | Integer destiny value | Unused | Current destiny is at least the threshold. |
 | `adventurer_rank` | Integer rank value | Unused | IsekaiCore's rank check accepts the threshold. |
 | `attribute` | Numeric attribute threshold | Required attribute ID | Current attribute value is at least the threshold; an absent entity attribute fails. |
-| `talent` | Integer talent rank level | Required talent ID | Current talent rank level is at least the threshold. |
+| `talent` | Integer talent rank level, E 0 to S 5 and S+ 6 | Required talent ID | Current effective talent rank level is at least the threshold. |
 
 A condition does not spend experience, destiny or attributes. It gates a new unlock, not continued possession of the node. Each entry contains a single condition; adding duplicate entries is not a supported way to express an AND or OR.
 

@@ -99,6 +99,8 @@ Enable `hasDialogueOverrides` and populate `registerNpcDialogueOverrides` for pe
 
 Unique NPCs can override `customizeRootParentMenu`, `customizeCommandsParentMenu` and `customizeGiftParentMenu`. Context includes `ROOT`/`COMMANDS`/`GIFT`, optional relationship tier, NPC type and gender. Labels and denial text are evaluated during `build`; requirements and actions receive the actual player/NPC at interaction time.
 
+Three hooks answer a conversation as it happens, each from inside the session it belongs to. `onNpcParentMenuOpened` runs after a parent menu opens: `ROOT` only when an interaction opens it, not when Back returns to it, and `COMMANDS` and `GIFT` whenever they open. `onNpcDialogueStarted` receives the `NpcDialogueContext` of a dialogue the handler chose once Blabber has started its session; a selection made by an override carries no menu route. `onNpcTradeCompleted` runs after a purchase or sale through the dialogue trade panel has exchanged the goods and recorded the trade. A `playDialogueEmote` call from any of them belongs to that session and ends with its screen.
+
 | Builder operation | Behaviour |
 | --- | --- |
 | `setPrompt`, `setUnskippable`, `clearChoices` | Replace prompt/policy or empty the menu. |
@@ -147,4 +149,4 @@ Verify translated unique/common menus, disabled-choice explanations, emotes, emo
 - [NPC foundations](/en/dev/npc/)
 - [NPC followers](/en/dev/npc-followers/)
 - [NPC emotions](/en/dev/npc-emotion/)
-- [Humanoid presets and NPC outfits](/en/wiki/humanoid-presets/)
+- [NPC models and outfits](/en/dev/npc-assets/)

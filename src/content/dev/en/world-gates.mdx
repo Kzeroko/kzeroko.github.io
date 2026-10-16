@@ -1,0 +1,78 @@
+---
+title: "World Gates"
+description: "Authored portal anchors, persistent pairs and bounded destination discovery."
+category: systems
+order: 96
+updated: 2026-10-16
+---
+
+`WorldGateAPI` is the server facade for permanent travel gates. Each invisible anchor owns its appearance and reconstructs one portal entity; the world's saved state owns reciprocal links. The shared portal renderer keeps its existing material layers while using a fixed world plane.
+
+## What it does
+
+`isekaiexpansion:world_gate` replaces the retired pedestal. It has no survival drop, recipe, collision or piston movement. A creative operator can obtain its item with `/give @s isekaiexpansion:world_gate`, place it and open the shared developer editor. The normal developer guide visibility preferences apply.
+
+World Portal Ruins use the existing surface structure, terrain-aware placement and reservation services. The start pool selects equally among six native templates. Their Conquest masonry, broken arches, monoliths and rings surround a clear approach on both sides. The placement settings live in `worldgen/structure_set/world_portal_ruins.json`; the pool lives in `worldgen/template_pool/world_portal_ruins/start.json` under `data/isekaiexpansion/`. The biome tag limits natural placement to suitable Overworld land biomes.
+
+The six forms have separate architectural compositions: a weathered gatehouse, split monoliths, an overgrown temple dial, a Gothic wall fragment, a sanctuary court and a fractured ring with swept supports. The Atelier authoring source selects native Conquest columns, capitals, cornices and partial masonry shapes. `tools/worldgate/ruins-manifest.json` records revision 2, native template hashes, bounds and anchor settings; keep it with the exported templates when rebuilding the art. Portal material rendering is independent of these structure assets.
+
+The standalone ruins use jigsaw `size: 1`; the surface codec accepts `1–30` and rejects `0`, which would produce an empty start in Minecraft 1.20.1. Placement uses `spacing: 144` and `separation: 127` chunks: nominally 2304 blocks, with at least 2048 blocks between start centres and over 2000 blocks between the current rotated anchors. All 16 retries stay inside the same bounded region. Empty regions caused by terrain or exclusions increase the gap.
+
+ReTerraForged terrain cells provide natural height and terrain classification. KTM2 reserves a 24-block level core with a 16–64-block blending apron, at least 2 blocks above water, and rejects core relief over 24 blocks. The shared reservation path keeps the site clear of sculpted landforms and other structures. Elevated and underground districts suppress earthworks only inside their footprint; ordinary ground outside it can carry a gate or Guild foundation. Generation, vanilla locate and the mod search reuse the same relocated start.
+
+## Runtime model
+
+The block entity registers its position on the server and reconciles its unsaved entity every 20 ticks (1 second). Its UUID derives from dimension and block position, so copied templates cannot copy a runtime identity. Loaded gates own no permanent chunk tickets. Removing an anchor removes both ends of its saved link; changing its channel also releases the pair.
+
+| Bound | Value | Effect |
+| --- | --- | --- |
+| Contact charge | 40 ticks (2 seconds) | Continuous contact with the oriented aperture starts a journey. |
+| Natural pairing distance | 1024–8192 blocks | Horizontal distance between anchors; applies to an empty channel. |
+| Concurrent journeys | 2 per world | Additional players wait while maintaining contact. |
+| Chunk requests | 2 per journey per tick | Completion is polled without joining futures. |
+| Region decisions | 1 per journey per tick | Reuses the terrain-aware structure placement calculator. |
+| Journey timeout | 1200 ticks (60 seconds) | Failure releases temporary tickets. |
+| Retry delay | 200 ticks (10 seconds) | Applies after a journey ends while contact continues. |
+
+The first use prefers an existing partner, then a registered unpaired gate, then searches natural ruins. Pair creation is one-to-one and persists in the world's `isekaiexpansion_world_gates` state. Search runs only for empty-channel gates in the Overworld. A named channel pairs registered gates in the same dimension without the natural distance limit; use a distinct channel for each intended pair and load both anchors before testing it. More than two anchors on a channel form separate pairs as they are used.
+
+Leaving the aperture, disconnecting, dying or changing dimension cancels destination work. Travel checks both approaches for supported, dry, unobstructed standing room. Blocked arrivals fail without changing terrain. Riding players cannot charge; the portal cooldown prevents immediate return travel. Contact also updates the player's World Gate attunement used by global portal magic.
+
+## Contracts
+
+Call the facade on the server thread. Registration is idempotent for an unchanged position and channel. Authored values belong to `WorldGateSettings`; pair state is runtime data and must never be copied into a template. Width, height, colour and ambient audio use tracked entity data; facing uses entity yaw. Collision uses the same oriented aperture, including its elliptical edge.
+
+The editor sends validated settings to the server. It requires a nearby creative operator, a loaded anchor and a horizontal facing. Invalid packets do not mutate the block. Malformed stored settings leave the gate inactive and retain the rejected data until an explicit editor repair. Omitted settings use the defaults below; numeric values must be finite. Unknown NBT keys are ignored by the settings reader.
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `facing` | `enum(north, east, south, west)` | `south` | Block state defining the portal normal. Placement faces the placing player; native structure rotation and mirroring transform it. |
+| `Width` | `number` | `10` | Aperture width, 1–32 blocks. Stored as float NBT. |
+| `Height` | `number` | `10` | Aperture height, 2–32 blocks. Stored as float NBT. |
+| `Color` | `integer` | `0xFF18DFFF` | Packed ARGB int; alpha is forced opaque. The editor accepts `#RRGGBB`. White remains white. |
+| `YawOffset` | `number` | `0` | Local angle added to facing, −180–180 degrees. Stored as float NBT. |
+| `FloorOffset` | `number` | `0` | Raises the portal bottom above the anchor, 0–16 blocks. Stored as float NBT. |
+| `Ambient` | `boolean` | `true` | Plays the existing portal ambient sound. NBT byte must be 0 or 1. |
+| `Channel` | `string` | `""` | Empty selects natural pairing. Otherwise accepts up to 64 lowercase characters matching `[a-z0-9_./:-]`. |
+
+## Extending it
+
+Place the same anchor inside a future landmark and configure its appearance in the developer editor. Keep enough floor space on both sides. For native Jigsaw placement, include the `isekaiexpansion:atelier_editor_nbt` processor: the block state carries cardinal rotation and the processor negates the local yaw offset when mirrored. Atelier bundle placement uses that adapter too. There are no pedestal aliases or palette-version compatibility readers.
+
+Natural ruins use the guild's shared terrain blending and reservation path, with explicit exclusions for villages, guilds, the respawn landmark, strongholds and camps. Add future structure relationships to the shared placement data rather than introducing an independent overlap detector. IsekaiTweaks registers `world_portal_ruins` as a major Atlas interest in the ruins category.
+
+Atlas integration requires two resources in IsekaiTweaks: the server registration at `data/isekaitweaks/atlas/interest_types/world_portal_ruins.json` and a client style for `isekaiexpansion:world_portal_ruins` in `assets/isekaitweaks/atlas/styles/isekaitweaks.json`, using the `ruins` icon. The category does not supply a style automatically. A missing client style suppresses both the map pin and discovery toast, even when the server has recorded the structure.
+
+## Verifying
+
+For Atlas, install the rebuilt IsekaiTweaks jar on the client and server, then approach a naturally generated ruin in survival or creative mode and check its discovery toast and map pin. Spectators do not trigger discovery. Verify that the jar contains both resources above; updating IsekaiExpansion alone does not update Atlas registration or styling.
+
+Run `./gradlew.bat -I tools/worldgate/verify.gradle checkWorldGates checkWorldGateGeneration`. The offline harness covers settings rejection, pair persistence and release, orientation, aperture contact, mirror transforms and the six shipped NBT anchors. The generation check assembles every shipped template through Minecraft’s real jigsaw code, covers four rotations, confirms nonempty starts and verifies minimum anchor spacing. In the Atelier checkout, run `python -m unittest discover -s tests -p test_world_gates.py` for typed editor payloads and exported ruin geometry.
+
+Run `./gradlew.bat -I tools/terrain/verify.gradle -I tools/worldgate/terrain.gradle checkWorldGateTerrain` for shared placement decisions against real ReTerraForged columns, with and without KTM2 landforms. The fixture checks three seeds, Guild/village/vanilla hostile exclusions, relocated locate candidates, dry foundations and KTM2 earthwork levels. It supplies offline world bindings; optional third-party structure sets and full server mixin startup still require an in-game check.
+
+In a new disposable world, run `/locate structure isekaiexpansion:world_portal_ruins` and the mod locate command, then discover ruins through ordinary generation, inspect terrain transitions and nearby structure exclusions, and traverse a pair in both directions. Restart with each end unloaded, repeat travel with two players, obstruct every landing, leave during destination loading and inspect chunk-ticket release. Rotate and mirror a captured anchor, test both faces, then compare its material against sky, terrain and water in the intended Sodium/Iris setup. Offline checks do not establish game rendering or terrain acceptance.
+
+## Related
+
+See [World Gates for players](/en/wiki/world-gates/), [structure placement](/en/wiki/structure-placement/), [Atelier structures](/en/dev/atelier-structures/), [shaders and materials](/en/dev/shaders-and-materials/) and [editor preferences](/en/dev/editor-preferences/).

@@ -3,7 +3,7 @@ title: "Camera Scene API"
 description: "Play client camera animations, choose anchors and playback options, and understand transition ownership."
 category: client
 order: 72
-updated: 2026-09-24
+updated: 2026-10-04
 ---
 
 `CameraSceneAPI` is the client-only facade for camera animations already loaded into the animation registry. It controls one local camera playback; server-authored timelines with actors, world events and subtitles use the separate [cinematic scene format](/en/wiki/cinematic-scene-data/).
@@ -117,7 +117,7 @@ Starting playback saves perspective/HUD and selects third-person back. Cinematic
 
 Stopping a pending entry clears the fade and restores state immediately. Stopping an active cinematic with positive exit duration starts an exit fade and retains the active instance until its callback; ordinary stopping restores immediately. Transition sampling freezes partial-tick interpolation and uses the captured anchor.
 
-Full cinematic playback takes precedence when it supplies a camera pose. Its blend weight also takes precedence while its client playback is active. Both systems share camera, HUD, perspective and input state without a general ownership token, so coordinate camera-only requests with full timelines and dialogue sessions.
+Full cinematic playback takes precedence when it supplies a camera pose. Its blend weight also takes precedence while its client playback is active. Above both, the camera director ranks camera-API poses at its `SCENE` authority: shot reels and the scene editor's camera preview outrank them, and the free editor viewport ranks below. The animation's roll rotates the rendered view. Both systems share camera, HUD, perspective and input state without a general ownership token, so coordinate camera-only requests with full timelines and dialogue sessions.
 
 The camera-only initializer registers resource loading, ticking, networking and a disconnect reset for block fading. It does not itself clear every camera-only playback on disconnect. Integrations must exercise their own teardown path; do not infer the full cinematic manager's disconnect cleanup applies to this separate controller.
 

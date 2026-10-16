@@ -3,7 +3,7 @@ title: "Attributes and effects"
 description: "What each attribute changes, how energy and shields recover, and where combat percentages apply."
 category: combat
 order: 10
-updated: 2026-09-24
+updated: 2026-10-10
 ---
 
 Attributes describe your current capabilities; status effects temporarily change them or enable special behaviour. This guide separates damage, recovery, control and social stats, with the complete [status-effect catalogue](/en/wiki/status-effects/) on its own page.
@@ -49,7 +49,7 @@ These IDs identify the Expansion attributes. PlayerEx and Spell Power own the do
 | Aggro Generation · `isekaiexpansion:aggro_generation` | Changes supported target-selection and on-hit aggro behaviour. |
 | Burst Damage · `isekaiexpansion:burst_damage` | Bonus for Ultimate Burst damage specifically. |
 | Energy Leech · `isekaiexpansion:energy_leech` | Restores a share of maximum energy on eligible player spell or basic hits. |
-| Shield Break · `isekaiexpansion:shield_break` | Extra damage against a player actively using a shield that can still guard. |
+| Shield Break · `isekaiexpansion:shield_break` | Extra damage against a player or summoned clone actively using a shield that can still guard. |
 | Evasion Counter · `isekaiexpansion:evasion_counter` | Counter damage on the supported dodge-effect path, within 8 blocks of the attacker. A player attacker cannot use items, attack, move or jump for 12 ticks (0.6 seconds). |
 | Debuff Accuracy · `isekaiexpansion:debuff_accuracy` | Offsets tenacity's effect resistance; 100% forces the accuracy check to pass. |
 | Guts Chance · `isekaiexpansion:guts_chance` | Chance to survive a qualifying fatal hit at 1 health, with pre-hit health above 25%. |
@@ -61,7 +61,7 @@ These IDs identify the Expansion attributes. PlayerEx and Spell Power own the do
 | Tamed Companion Limit · `isekaiexpansion:tamed_limit` | Maximum occupied companion slots, rounded down. The default is 3 and the attribute range is 0–1024. |
 | Tenju Affinity · `isekaiexpansion:tenju_affinity` | Adds to Heavenly Mantra's applied amplifier. |
 | Bonus Damage Level · `isekaiexpansion:bonus_damage_level` | Raises each additional hit produced while Bonus Damage is active. |
-| Magic Sword Sense · `isekaiexpansion:magic_sword_sense` | Extends the supported magic-weapon targeting ray beyond its base 15 blocks. |
+| Magic Sword Sense · `isekaiexpansion:magic_sword_sense` | Extends attachment swing targeting from a 15-block base, or its configured range when larger, up to 64 blocks. |
 | Constitution · `isekaiexpansion:constitution` | Forwards to the PlayerEx Constitution stat at ×1. |
 | Strength · `isekaiexpansion:strength` | Forwards to the PlayerEx Strength stat at ×1. |
 | Dexterity · `isekaiexpansion:dexterity` | Forwards to the PlayerEx Dexterity stat at ×1. |
@@ -109,9 +109,13 @@ Passive hostile detection combines the strongest active stealth restriction with
 
 Guts requires health above 25% before the fatal hit. Death Defiance bypasses that health threshold and forces the chance to 100%; neither protects against the void, sickness or potion sickness. A successful intervention sets health to 1.
 
+Elves and Slimes are immune to fall damage through their existing Elven Harmony and Amorphous Predator powers, matching Feline’s existing fall immunity. This belongs to the race origin layer and requires no additional selected power.
+
 ## Related
 
 - [Status effects](/en/wiki/status-effects/)
 - [Combat runtime](/en/dev/combat-runtime/)
 - [Elements](/en/wiki/elements/)
 - [Equipment growth](/en/wiki/leveling/)
+
+Attachment swings aim at the cursor using the larger of the configured range and 15 blocks plus Magic Sword Sense, capped at 64 blocks. Any main-hand item or an empty hand can trigger release. Relation and visibility checks determine eligible cursor targets; a miss still releases toward the aimed point. See [Projectile attachments and patterns](/en/dev/projectile-attachments/).

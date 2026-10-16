@@ -1,0 +1,152 @@
+---
+title: "Protected zones"
+description: "One protection layer for landmarks, listed structures and the homes inside them: player rules, griefing guards and client prediction."
+category: systems
+order: 96
+updated: 2026-10-10
+tags: []
+---
+
+Every protected place shares one layer in `internal.protection`: the Atelier landmark, and each structure named by the `protectedStructures` option, such as the adventurer's guild. One decision table answers player edits on the server and on the client. Inside a zone, mobs, explosions, fire, fluids, pistons and dispensers cannot change a block, whatever the `doMobGriefing` gamerule says.
+
+## What it does
+
+The layer owns three things. Zone sources say where protection applies. The player authority decides each player action from zones and homes. Damage scopes name the cause of block writes so that write guards can refuse environmental damage.
+
+It deliberately stops at these boundaries:
+
+- **Homes stay in structure spaces.** Membership, rent, grants and guests belong to [structure spaces](/en/dev/structure-spaces/); this layer only reads the grant mask.
+- **Spawning is separate.** Natural spawn suppression inside a landmark belongs to the Atelier spawn policy, not to zones.
+- **Ordinary entities are not frozen.** Mobs walk, fight and take damage inside a zone. Fixture entities and protected guild receptionists are shielded.
+- **Dungeon worlds use their own policy.** `DungeonWorldPolicy` keeps its placement rule; zones do not cover it.
+
+## Runtime model
+
+### Zone sources
+
+`ProtectionZones` holds the registered sources in an array and unions them. A client world never contains a zone.
+
+| Source | Registered by | Geometry | Lifetime |
+| --- | --- | --- | --- |
+| `LandmarkZoneSource` | `AtelierSystem.init` | Landmark footprint plus clearance, every height | Fixed once the world binds its landmarks |
+| `StructureZoneSource` | `ProtectionSystem.init` | Bounds of each start of a listed structure, grown by `protectedStructureMargin` horizontally and below, raised to the build limit | Known from the first scan of a referencing chunk until the world unloads |
+
+The structure source scans each loaded chunk once for references to listed structures. Chunk loads are queued and drained at the end of the world tick, where a referenced start may be read with a vanilla chunk load. A query between those points scans only its own chunk and never loads one. Changing either option rebuilds every zone and rescans the loaded chunks. A listed id that is not a registered structure logs a warning and is skipped.
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `protectedStructures` | list of identifiers | `isekaiexpansion:respawn_temple`, `isekaiexpansion:adventurers_guild` | Structures whose every start becomes a zone. |
+| `protectedStructureMargin` | integer | `4` | Blocks added around each start horizontally and below it, `0–16`. Values outside the range are clamped. |
+
+### Decision table
+
+A creative player with permission level `2` bypasses every rule. Everyone else goes through `ProtectionRules.allows`, which checks in this order: the unbreakable tag, then the grants of a home claiming the position, then the zone.
+
+| Action | Home permission | In a zone, outside homes | Restriction tag |
+| --- | --- | --- | --- |
+| `BREAK` | `BREAK` | Refused | `isekaiexpansion:protection/unbreakable` refuses everywhere, including an owned home |
+| `BUILD` | `BUILD` | Refused | None |
+| `USE` | `USE` | Allowed unless restricted | `isekaiexpansion:protection/restricted_use` |
+| `SLEEP` | `SLEEP` | Allowed | None |
+| `ENTITY` | `ENTITIES` | Allowed unless restricted | `isekaiexpansion:protection/fixtures` |
+
+A home inside a zone replaces the zone's player rules with its own grants, including use of restricted blocks. Outside every zone, a home still applies its grants and open ground allows everything.
+
+### Player hooks
+
+| Player input | Hook | Action checked |
+| --- | --- | --- |
+| Mining | `ServerPlayerInteractionManager` on arrival and before removal; client attack, progress and removal | `BREAK` |
+| Placing a block | `BlockItem.canPlace` on both sides; a bed also checks its head cell, a two-high block its other half | `BUILD` |
+| Tools in `isekaiexpansion:protection/restricted_items` | `ItemStack.useOnBlock` on both sides, for the clicked block and the cell in front of its face | `BUILD` |
+| Bucket placement, bucket pickup | `BucketItem.placeFluid`, `BucketItem.use` before draining | `BUILD`, `BREAK` |
+| Using a block | `UseBlockCallback`, in the `isekaiexpansion:protection` phase before default listeners | `USE`, or `SLEEP` for a bed |
+| Attacking or using an entity | `AttackEntityCallback`, `UseEntityCallback`, same phase | `ENTITY` |
+| Editing, dyeing, glowing or waxing a sign | `AbstractSignBlock` | `BUILD` |
+| Landing on farmland | `FarmlandBlock.onLandedUpon` | `BUILD` |
+
+Sneaking with an item in either hand skips the block-use check, because vanilla skips the block's own use. Command signs stay clickable. Every item a player uses on the server also runs in a player scope, so block changes a modded item makes on its own are judged too.
+
+### Damage scopes
+
+`ProtectionScope` records a cause per thread. While one is active, `World.setBlockState` and `WorldChunk.setBlockState` refuse a write the cause may not make in a zone. Scopes nest and restore their parent, including when the wrapped call throws.
+
+| Cause | Started by | Refused in a zone |
+| --- | --- | --- |
+| `MOB` | Each mob, projectile and lightning tick | Every change except a same-block change that leaves `age` alone, such as a door; crops always count |
+| `EXPLOSION` | `Explosion.affectWorld` | Every change; protected cells are removed from the affected list first |
+| `FIRE` | `FireBlock.scheduledTick` | Every change except to an existing fire block, so fire ages and burns out |
+| `MECHANISM` | `DispenserBlock.dispense` | Every change |
+| `PLAYER` | Item use, anvil output | Same-block toggles pass; other changes need `BREAK` when the result is air, else `BUILD` |
+
+The scopes have helpers that act before any write:
+
+- **Mob griefing reads false** for a ticking mob whose bounds, grown by `2` blocks, touch a zone. Door breaking, Enderman pickup and crop trampling never start. The gamerule itself is unchanged.
+- **Actors without a player** are refused by `World.breakBlock` and `canModifyAt` inside a zone. A projectile owned by a player answers with that player's `BREAK` rights.
+- **Fixtures** in a zone ignore damage from anything except a permitted player and world-removal damage.
+- **Fire spread** into a zone cell is rejected before the cell burns, so zone TNT is never primed.
+- **Pistons** fail when a push would move, break or fill a zone cell.
+- **Fluids** never enter a zone from outside or from another home, and never wash away a zone block. Existing fluid and waterlogging stay available.
+
+### Client prediction
+
+The client predicts with a snapshot, so a refused block is never placed or mined locally. On join, a client whose server advertises `isekaiexpansion:protection_request` sends it with an empty body and waits for a snapshot; the request grants no authority. The server answers on `isekaiexpansion:protection`.
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `protocol` | VarInt | required | Must be `1`; other values are rejected. |
+| `dimension` | identifier | required | Dimension this snapshot replaces. |
+| `editor` | boolean | required | Server-computed creative-operator bypass. |
+| `zoneCount` | VarInt | required | `0–256` zones. |
+| `zones` | `zoneCount × 6` signed integers | required | Inclusive `minX`, `minY`, `minZ`, `maxX`, `maxY`, `maxZ`. |
+| `claimCount` | VarInt | required | `0–1024` home regions inside the sent zones. |
+| `claims` | `claimCount × 7` signed integers | required | A region's six bounds, then the home permission bits it grants this player, `0–31`. |
+
+The server sends zones within `256` blocks of the snapshot centre, nearest first when more qualify. It rebuilds the snapshot when the dimension, operator state, zone revision or home revision changes, when the player moves `64` blocks from the centre, and every `100` ticks staggered per player. A rebuilt snapshot is sent only when its content differs.
+
+Until the current dimension's snapshot arrives, the client refuses `BREAK` and `BUILD` and allows `USE`, `SLEEP` and `ENTITY`. Bypass requires both the server's flag and the local creative-operator state. A refused action shows `message.isekaiexpansion.protection.denied` on the action bar, or `message.isekaiexpansion.protection.syncing` while waiting, at most once per second.
+
+## Contracts
+
+- **Server thread only for structure zones.** `StructureZoneSource` answers on the server thread; other threads see no structure zones. Landmark zones are immutable and safe anywhere.
+- **Sources must stay cheap.** The layer queries zone sources inside block-update paths. A source must answer from memory and never wait on chunk loading.
+- **Unscoped writes keep their own rules.** Commands, Atelier jobs, packets and ordinary block ticks have no damage scope.
+- **Homes only replace player rules.** Environmental guards apply to a whole zone, homes included. A home outside every zone gets player rules only.
+- **Refusals repair the client.** Refused mining resends the target, its `6` neighbours and their block entities before acknowledging the action. A refused placement, tool or bucket resyncs the open screen's inventory.
+- **The packet reader is strict.** Reversed bounds, out-of-range grants, excess index coverage and trailing bytes are rejected.
+
+## Extending it
+
+Register a zone source during mod initialization. The interface lives in `api.protection`:
+
+```java
+ProtectionAPI.registerZoneSource(new ProtectionZoneSource() {
+    @Override public boolean contains(ServerWorld world, BlockPos pos) { return ARENA.contains(pos); }
+    @Override public boolean intersects(ServerWorld world, BlockBox box) { return ARENA.intersects(box); }
+    @Override public void collect(ServerWorld world, BlockBox area, Consumer<BlockBox> sink) {
+        if (ARENA.intersects(area)) sink.accept(ARENA);
+    }
+    @Override public long revision(ServerWorld world) { return 0; }
+});
+```
+
+A tool that edits blocks through its own code path asks before acting. `ProtectionAPI.allows`, `canBreak`, `canBuild` and `canInteract` predict on the client and decide on the server. `canEntityModify` covers changes an entity makes on its own. Client mining or placement input queries `api.client.protection.ProtectionClientAPI` instead.
+
+`GuildReceptionistEntity` queries `ProtectionAPI.isProtected` at its current position on the server and tracks the result for client attack checks. While protected it rejects attacks, all damage, harmful status effects, pushing, knockback and explosions. Its base service brain omits civilian threat sensors and fleeing tasks. Entity targeting stays enabled for right-click conversation; marker removal still dismisses the NPC. This service policy is separate from the fixture tag, which also restricts use.
+
+## Verifying
+
+Run the offline checks, then the production hook check against the remapped jar:
+
+```bash
+./gradlew.bat -I tools/atelier/verify.gradle checkAtelier --offline --console=plain
+./gradlew.bat -I tools/atelier/verify.gradle checkProtectionRemap -PatelierMinecraftIntermediary=<minecraft-merged-intermediary.jar> --offline
+```
+
+`ProtectionCheck` compares client prediction with the decision table across landmark, structure and home cells. It also covers packet rejection, authority transitions, scope causes and nesting, and two-cell placement. The remap check proves every hook targets exactly one vanilla method or call.
+
+Then test in a world that has a guild and the landmark. As a survival player, try mining, placing a bed, a sapling and a door, using bone meal, a hoe and a bucket, editing a sign, punching an item frame and trampling farmland. With `doMobGriefing` on, let a zombie reach a door, a creeper explode at the border and an Enderman walk through. Repeat inside an owned home, after reconnecting, after a dimension change and after leaving creative.
+
+## Related
+
+See [Atelier structures](/en/dev/atelier-structures/) for landmark geometry and [structure spaces](/en/dev/structure-spaces/) for home grants. Players read about homes in [My Home](/en/wiki/my-home/).

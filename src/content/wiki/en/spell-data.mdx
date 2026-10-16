@@ -3,10 +3,10 @@ title: "Spell data"
 description: "Current spell stages, projectiles, visuals, binding pools, item assignments and astral-energy maps."
 category: data
 order: 40
-updated: 2026-09-24
+updated: 2026-10-15
 ---
 
-Spell Engine owns spell definitions, binding pools and item assignments; IsekaiExpansion adds a separate astral-energy map. This page is checked against Spell Engine 1.10.7+1.20.1 and covers the active-spell, projectile, visual and item formats used by this integration.
+Spell Engine owns spell definitions, binding pools and item assignments; IsekaiExpansion adds a separate astral-energy map. This page is checked against Spell Engine 1.10.10+1.20.1 and covers the active-spell, projectile, visual and item formats used by this integration.
 
 ## Where the files live
 
@@ -129,7 +129,7 @@ Defaults below apply when a field is omitted, not when an explicit null is suppl
 | `cost.item.amount` | `integer` | `1` | Required item amount. |
 | `cost.item.consume` | `boolean` | `true` | False checks availability without consuming. |
 
-Other action kinds are STATUS_EFFECT, FIRE, SPAWN, SUMMON, TELEPORT, COOLDOWN, AGGRO, DISRUPT, IMMUNITY, VELOCITY and CUSTOM. Each requires its own branch-specific payload. Passive triggers, modifiers, charge bonuses and those payloads are owned by the [versioned Spell Engine schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java); they are not extra IsekaiExpansion fields.
+Other action kinds are STATUS_EFFECT, FIRE, SPAWN, SUMMON, TELEPORT, COOLDOWN, AGGRO, DISRUPT, IMMUNITY, VELOCITY and CUSTOM. Each requires its own branch-specific payload. Passive triggers, modifiers, charge bonuses and those payloads are owned by the [versioned Spell Engine schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java); they are not extra IsekaiExpansion fields.
 
 ### Projectile and meteor layout
 
@@ -171,7 +171,7 @@ Projectile and meteor launch settings are separate from the projectile's flight 
 | `area_impact.visuals` | `object` | `{}` | Particle/model bundle at area centre. |
 | `area_impact.sound` | `object` | `null` | Area-impact sound. |
 
-Flight motion, collision perks, entity placement, cloud/melee delivery and model animation transforms extend this shape in the [same versioned schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java). Do not transplant fields from the older flat projectile format.
+Flight motion, collision perks, entity placement, cloud/melee delivery and model animation transforms extend this shape in the [same versioned schema](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/Spell.java). Do not transplant fields from the older flat projectile format.
 
 ### Shared animation, sound and particle objects
 
@@ -204,7 +204,7 @@ Paths here are relative shapes: `animation` and `sound` can occur at cast/releas
 | `particles[].batch.min_speed` | `number` | `0` | Lower initial-speed bound. |
 | `particles[].batch.max_speed` | `number` | `0` | Upper initial-speed bound. |
 
-The [particle format](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java) also defines lifetime, opacity, scaling, attachment and batch geometry controls. [Model effects](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.7%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java) define transforms and timed animations. These are dependency formats; use the linked release when extending beyond the fields above.
+The [particle format](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ParticleGroup.java) also defines lifetime, opacity, scaling, attachment and batch geometry controls. [Model effects](https://github.com/ZsoltMolnarrr/SpellEngine/blob/1.10.10%2B1.20.1-fabric/common/src/main/java/net/spell_engine/api/spell/fx/ModelEffect.java) define transforms and timed animations. These are dependency formats; use the linked release when extending beyond the fields above.
 
 ### Item assignments and pools
 
@@ -259,15 +259,15 @@ The bundled healing entry is:
 
 ```json
 {
-  "isekaiexpansion:healing": 12
+  "isekaiexpansion:healing": 8
 }
 ```
 
 | Field | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `isekaiexpansion:healing` | `integer` | `0` when absent from the resolved map | Example dynamic spell-ID key. Here it sets base cost to 12; every nonempty key is accepted without checking spell existence, and values must be positive to be inserted. |
+| `isekaiexpansion:healing` | `integer` | tier budget when absent | Example dynamic spell-ID key. Here it sets base cost to 8; every nonempty key is accepted without checking spell existence, and values must be positive to be inserted. |
 
-There is no wrapper or metadata field. Other keys are other spell-ID strings. Final costs also use scroll, talent, origin and airborne modifiers; channels pay per successful delivery.
+There is no wrapper or metadata field. Other keys are other spell-ID strings. Final costs also use talent, origin and airborne modifiers; channels pay per successful delivery. Unmapped spells use fallback budgets 5, 10, 18, 28, 40 and 60 for tiers 1–6; tiers above 6 also use 60. These budgets do not limit the supported tier. Costs are divided across channel deliveries with a rounded-up minimum of 1. Local binding replaces experience requirements with school talent; manuscripts and all default spell budgets are listed in the [spell catalog](/en/wiki/spell-catalog/).
 
 ## Full example
 

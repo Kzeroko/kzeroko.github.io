@@ -3,7 +3,7 @@ title: "Progression runtime"
 description: "Level storage, reward routing, player callbacks and exact equipment growth formulas."
 category: systems
 order: 34
-updated: 2026-09-27
+updated: 2026-10-07
 ---
 
 IsekaiCore owns level curves and storage; Expansion's internal item-level helpers and event handlers connect those values to gameplay. This page describes those internal contracts and their dependency boundary, rather than introducing a new public facade.
@@ -67,6 +67,8 @@ Expansion's server callbacks add the level delta as automatic main-tree points o
 Budget ratios interpolate with `clamp((L - 1) / 60, 0, 1)`: combat 0.95 to 0.80 and loot 0.25 to 0.20. Each budget is the rounded current level requirement times its ratio. Level changes do not recompute stored budgets. The wake hook resets players captured as sleeping before night skip; the spawn-item grant path and a nonpositive loaded cap also reset them.
 
 Fate Balance modifies loot experience and the loot cap only. Home-rest effects manage the combat cap separately. Each affected cap is recalculated from the current level every second, and its last modifier removal restores that cap once without clearing consumed experience. Fate experience effects use Core's loot/quest grant routes; combat and direct quest/potion grants bypass them.
+
+Adventurer's Ascent (`isekaiexpansion:adventurers_ascent`) adds 20% to both daily combat and loot EXP caps while active. The bonus rounds down: a base allowance of 101 becomes 121. It preserves EXP already earned and does not multiply individual rewards or raise the maximum player level. Reconnecting does not replenish the allowance. The event returns on days 6 and 7 of each in-game week; open Event journal from the Escape menu for its notice. With IsekaiCore `0.4.0-build64`, `getDailyCombatBaseCap()` / `getDailyLootBaseCap()` read stored budgets, while `getDailyCombatCap()` / `getDailyLootCap()` include event bonuses. Setters write base budgets. See [Game events](/en/dev/game-events/) for the registration and lifecycle contract.
 
 The combat streak belongs to a horizontal 64 × 64 cell at the player's position. The first 18 kills are unpenalised; subsequent rewards multiply by `0.84 ^ (kills - 18)`, with an explicit zero from kill 78. A gap greater than 240 ticks (12 seconds) subtracts 2 from the old streak before incrementing; a changed cell or gap greater than 900 ticks (45 seconds) resets it. This streak is transient rather than part of the NBT above.
 

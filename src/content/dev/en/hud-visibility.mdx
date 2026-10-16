@@ -3,7 +3,7 @@ title: "HUD visibility and layout"
 description: "Fade participating overlays and fit quest cards around followers and visible chat."
 category: client
 order: 180
-updated: 2026-09-26
+updated: 2026-10-06
 ---
 
 `HudAPI` gives participating HUD overlays a shared fade and independent, expiring holds. A bounty preview renews its hold while you point at a readable notice. The preview itself stays visible.
@@ -86,6 +86,20 @@ The optional Chat Plus bridge is checked against **Chat Plus 2.8.1 for Fabric 1.
 Run `./gradlew.bat compileJava` before checking the layout in game.
 
 In a client, check follower arrival and dismissal, long names, several quest cards, chat fade, multiple moved chat windows, transparent chat backgrounds, GUI scaling and window resizing. Check both message directions in Chat Plus and its vanilla-when-unfocused mode. Verify the final on-screen appearance in game.
+
+## Modal screen closure
+
+ModernUI calls `ScreenCallback.shouldClose()` on the Minecraft main thread. The triggerable-skill screen publishes its active reorder and confirmation overlays through volatile references, then posts dismissal to `MuiModApi.postToUiThread`. Each queued request checks the captured overlay identity before touching views. Escape closes the active overlay first; the dossier can close once that overlay has left.
+
+`SkillOrderOverlay` owns one entrance or exit animator at a time. A close cancels entrance motion, ends any drag and captures the arrangement once. The exit animator removes the view on completion. Screen teardown closes immediately; unexpected detach cancels motion, commits once and releases ownership. The outside-click opening guard uses a monotonic clock. These are screen lifecycle rules, separate from `HudAPI`.
+
+Regression checks should cover Escape during a drag or entrance, repeated Escape, Confirm Order, outside clicks, an empty list, teardown during exit and the skill-confirmation overlay. Verify that a completed close permits another Escape to leave the dossier and that one arrangement produces at most one commit.
+
+## Fishing coexistence
+
+IsekaiCuisine owns its fishing overlay. The steering wheel stays above the original textured progress frame, with its fish, hook, bobber and blue fill artwork. The overlay sits at the top centre with an inset and scales inside the upper part of the viewport, leaving Expansion's lower player HUD and the aiming area clear. ModernUI animates entry, exit and phase emphasis, while interpolated server values and eased reel feedback smooth the existing wheel. The mouse reticle remains immediate.
+
+Cuisine stops its repeating animation when hidden, detached or showing a completed result. Opening a screen, hiding the HUD, showing debug information or disconnecting suppresses the overlay. These behaviours were checked in the Cuisine source; they are not services provided by `HudAPI`. Verify both mods together at several GUI scales, including a narrow window and a completed catch.
 
 ## Related
 

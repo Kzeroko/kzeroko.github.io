@@ -3,7 +3,7 @@ title: "Levels and experience"
 description: "Player levels, equipment growth, adventurer promotion and NPC favour, with verified experience thresholds."
 category: core
 order: 30
-updated: 2026-09-27
+updated: 2026-10-07
 ---
 
 Player level, equipment level, adventurer rank and NPC favour are separate progression tracks. IsekaiCore owns their storage and curves; IsekaiExpansion connects them to the skill tree, equipment bonuses, quests and NPC interactions.
@@ -35,6 +35,8 @@ Active class level-bonus powers scale their configured attributes by levels abov
 Core's combat and loot limits are budgets established when they reset. Combat's budget is 95% of the current level requirement at level 1, declining to 80% by level 61; loot is 25%, declining to 20% over the same interval. Both stay at those latter ratios thereafter. Limits are rounded to integers and do not automatically increase whenever a level changes.
 
 Fate Balance modifies loot experience and the loot cap only. Home-rest effects manage the combat cap separately. Each affected cap is recalculated from the current level every second, and its last modifier removal restores that cap once without clearing consumed experience. Fate experience effects use Core's loot/quest grant routes; combat and direct quest/potion grants bypass them.
+
+Adventurer's Ascent (`isekaiexpansion:adventurers_ascent`) adds 20% to both daily combat and loot EXP caps while active. The bonus rounds down: a base allowance of 101 becomes 121. It preserves EXP already earned and does not multiply individual rewards or raise the maximum player level. Reconnecting does not replenish the allowance. The event returns on days 6 and 7 of each in-game week; open Event journal from the Escape menu for its notice.
 
 The wake reset is for players who were sleeping when their world skips the night. It is not a real-world midnight reset, and an awake player in that world is not included by that wake hook. Core also resets these budgets when its spawn-item grant path runs and when loading a saved component with a nonpositive cap.
 

@@ -3,7 +3,7 @@ title: "任务目标"
 description: "目标参数、谓词、交付规则、内容触发器与生成动作的完整字段。"
 category: data
 order: 91
-updated: 2026-09-24
+updated: 2026-10-10
 ---
 
 任务目标将符合条件的服务端事件转为数值进度或完成标志。类型自身的检查先于事件过滤树执行；任务中的全部目标完成后才会发放奖励。悬赏任务还需向接待员确认汇报后结算，见[悬赏数据](/zh-cn/wiki/bounty-data/)。
@@ -49,6 +49,7 @@ updated: 2026-09-24
 | `isekaiexpansion:npc_delivery` | 交付完整批次，+1 |
 | `isekaiexpansion:bounty_delivery` | 向公会接待员确认汇报，消耗不超过剩余需求的物品，无需携带文书；仅限悬赏的数值型目标。 |
 | `isekaiexpansion:recipe_crafted` | 匹配的制作事件，增加非负 crafted_amount |
+| `isekaiexpansion:trade_purchase` | 权威交易成功付款并交付后，增加实际购入的物品数量 |
 | `isekaiexpansion:advancement` | 匹配的进度事件，+1 |
 | `isekaiexpansion:visit_location` | 玩家刻，增加 progress_per_tick |
 | `isekaiexpansion:photograph` | 有归属的 Exposure 照片，增加 progress_per_photo |
@@ -72,10 +73,11 @@ updated: 2026-09-24
 | `sneaking` | `boolean` | 不过滤 | 交互目标：期望的潜行状态。 |
 | `npc` | `object` | 必填 | npc_talk、npc_delivery：下文的 NPC 身份及位置选择器。 |
 | `dialogue` | `identifier` | 必填 | npc_talk：精确对话 ID；绑定的任务对话开始时推进，不等待最后一句关闭。 |
-| `item` | `object` | 必填 | npc_delivery：物品谓词加 count，描述一次交付批次。bounty_delivery 仅使用物品谓词，外层 required 是物品总数。 |
+| `item` | `object` | 必填 | npc_delivery：物品谓词加 count，描述一次交付批次。bounty_delivery 仅使用物品谓词，外层 required 是物品总数。  trade_purchase：匹配实际购入物品的谓词。 |
 | `delivery` | `object` | 必填 | npc_delivery：下文的携带者、来源和交付方式。 |
+| `profession` | `identifier` | 不限制目录 | trade_purchase：可选的目录职业精确 ID；空白或格式错误拒绝定义，未知 ID 不会匹配。 |
 | `recipe_id` | `identifier` | 必填 | recipe_crafted：非空白配方 ID，精确匹配事件参数，不是产物 ID。 |
-| `recipe_type` / `recipe_serializer` / `source` | `identifier` | 不过滤 | recipe_crafted：额外精确过滤，空白字符串被拒绝。来源包括 `minecraft:recipe_crafted`、`isekaiexpansion:alchemy`、`isekaiexpansion:forgery`。 |
+| `recipe_type` / `recipe_serializer` / `source` | `identifier` | 不过滤 | recipe_crafted：额外精确过滤，空白字符串被拒绝。来源包括 `minecraft:recipe_crafted`、`isekaiexpansion:alchemy`、`isekaiexpansion:forgery`、`isekaiexpansion:tanning`。 |
 | `advancement_id` | `identifier` | 必填 | advancement：非空白进度 ID。 |
 | `criterion` | `string` | 不过滤 | advancement：单个准则名称，去除首尾空白，空值被拒绝。 |
 | `criteria` | `array<string>` | [] | advancement：与 criterion 合并为或关系；去除首尾空白后空值被拒绝，重复项合并。 |
@@ -88,6 +90,8 @@ updated: 2026-09-24
 击杀归属会将直接玩家、玩家投射物、跟随 NPC 及其投射物解析到责任玩家。`party` 接受该归属玩家对共享档案的贡献，不会给周围所有队伍发放进度。`player` 排除伙伴归属；`picker` 将责任玩家与保存的领取者比较。武器谓词检查事件发生时该玩家的双手，不检查投射物或伙伴上保存的武器。
 
 交互回调报告使用尝试，随后交还常规交互处理；目标不等待方块或实体交互成功。手部及归属选项去除首尾空白并忽略大小写，未知名称拒绝定义。配方和进度目标响应激活后的事件，不扫描历史制作或已经取得的进度。
+
+`trade_purchase` 只记录任务激活后，通过村民或 NPC 权威目录成功付款并收到货品的购买。付款失败、取消报价、向商人卖货、公会回收、以物易物、拾取物品和历史购买都不计入。数值目标累计交付的物品数量，布尔目标在首次匹配时完成。事件索引只处理买家当前任务队伍的档案，不轮询背包。单个物品 ID 写在 `data.item.item`，也可使用下文共用的物品、标签及 NBT 谓词。chapter 0 的铁砧、木工台、木工用品和鱼饵购买目标已改用此类型，原有背包进度中转文件已移除。
 
 ### 实体、物品与方块谓词
 

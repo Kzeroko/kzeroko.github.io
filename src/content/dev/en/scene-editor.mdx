@@ -3,10 +3,10 @@ title: "Scene recorder and visual editor"
 description: "Capture a trigger-relative scene, edit its timeline and export a reviewed data-pack definition."
 category: assets
 order: 74
-updated: 2026-09-19
+updated: 2026-10-04
 ---
 
-The scene recorder captures camera poses and actor waypoints relative to a bound trigger block. The visual editor adds a local timeline with 5 kinds of keys, then exports a scene definition to the server's config directory; exporting does not install or reload a data pack.
+The scene recorder captures camera poses and actor waypoints relative to a bound trigger block. The visual editor adds a local timeline with 5 kinds of keys over a free viewport, keys the camera straight from the view, previews the camera track through the scene camera, then exports a scene definition to the server's config directory; exporting does not install or reload a data pack.
 
 ## What you are making
 
@@ -18,16 +18,16 @@ Two documents exist during authoring: server recorder samples keyed by player UU
 
 Use creative mode and permission level 2 for the trigger editor, recorder action packets and visible authoring guides. The `/ise dev scene` command branch requires permission level 2 and a player source, but its direct recorder methods do not all recheck creative mode. These internal methods are not an independently permission-protected API.
 
-Bind a real `isekaiexpansion:scene_trigger` within 8 blocks of its centre. The bind command raycasts up to 32 blocks, but binding still enforces the shorter distance. The trigger's centre and horizontal facing define the captured transform. Merely setting a pivot with `pivot here` or `pivot block` clears the binding and does not satisfy the capture/export requirement.
+Bind a real `isekaiexpansion:scene_trigger` within 8 blocks of its centre. The bind command raycasts up to 32 blocks and the editor's **Bind** tool picks the trigger in the viewport, but binding still measures the 8 blocks from the player, not from the camera. The trigger's centre and horizontal facing define the captured transform. Merely setting a pivot with `pivot here` or `pivot block` clears the binding and does not satisfy the capture/export requirement.
 
 Rebinding changes the transform but leaves existing samples in place. Clear the recorder before capturing a different origin or facing unless moving the old local coordinates to the new trigger is intentional. The session stores a block position without a dimension key; do not carry a bound session between dimensions and assume it still identifies the original trigger.
 
 ## Steps
 
 1. Place a scene trigger in creative mode, face it and run `/ise dev scene bind`.
-2. Move the camera to the opening view and run `/ise dev scene camera add 0`. Move to another view and capture a later tick. The reply samples the actual client camera, with roll fixed to zero and FOV read from the options setting, not the final dynamically modified FOV.
+2. Capture camera keys. In the editor, fly the viewport to a view, set the playhead and press `K`; the key is converted into trigger space on the client. From chat, `/ise dev scene camera add <time>` samples the rendered camera instead: the pose, roll and FOV of whichever system directs the camera, or the vanilla camera with roll 0 and the FOV option when nothing does.
 3. Capture actor positions with `actor point` or `actor pointEntity`. Times are ticks at 20 ticks per second. Each actor's first point becomes a grounded pose; multiple points also produce a single walk path.
-4. Open `/ise dev scene editor`. Select timeline keys, adjust the relevant inspector and add effects, world events or subtitles as needed. Complete captures before refining captured keys because later syncs can replace their values.
+4. Open `/ise dev scene editor`. Select timeline keys, adjust the relevant inspector and add effects, world events or subtitles as needed. Press `C` to look through the scene camera at the playhead and `Space` to play the camera track. Complete server captures before refining captured keys because later syncs can replace their values.
 5. Set a valid scene ID, review playback flags and choose whether export should assign that ID to the bound trigger. Export the visual draft before closing the screen.
 6. Inspect the exported JSON on the server, copy the intentional result to `data/<namespace>/cinematic_scenes/<path>.json` in the chosen data pack and reload server data.
 7. Test the trigger with an eligible survival player. Creative players can edit triggers but cannot trigger or view the resulting server scene. Replay history can prevent another attempt; use a repeatable test trigger and its cooldown.
@@ -52,27 +52,55 @@ A captured camera sample replaces the prior sample at the same tick. Actor repla
 
 ### Workspace and timeline
 
-The editor has a transparent world viewport, section rail, inspector and timeline. It neither pauses the game nor requests background blur. The sections cover scene settings, actor definitions, camera, actor cues, camera effects, world events and subtitles. Their underlying fields, defaults and runtime limitations are in the [data reference](/en/wiki/cinematic-scene-data/).
+The editor is a [developer editor workspace](/en/dev/editor-preferences/): the world between the panels is a free viewport camera with the shared navigation, picking and shortcuts. It neither pauses the game nor requests background blur. The sections cover scene settings, actor definitions, camera, actor cues, camera effects, world events and subtitles. Their underlying fields, defaults and runtime limitations are in the [data reference](/en/wiki/cinematic-scene-data/).
 
 | Control | Behaviour |
 | --- | --- |
 | Lane `+` | Adds a key at the playhead for camera, actor, effect, event or subtitle |
 | Key drag | Selects and retimes a key to the nearest whole tick, clamped to the document length |
-| Empty timeline drag | Scrubs the editing playhead; does not run camera playback or world events |
+| Empty timeline drag | Scrubs the editing playhead; with the camera view on, the viewport follows |
 | Mouse wheel | Pans the time viewport; horizontal input wins when present |
+| `Ctrl` + wheel | Zooms the timeline around its centre |
 | `-10` / `+10` | Moves the playhead by 10 ticks (0.5 seconds) |
 | Zoom / frame all | Changes timeline scale, bounded to 0.35–8 pixels per tick |
-| Hide / show UI | Hides editor panels while retaining the open document |
-| Sync | Fetches recorder samples and merges them into this local document |
-| Clear | Clears server captures; the resulting merge leaves manually added keys and scene settings in the open document |
-| Export | Sends the complete visual draft; unlike command export, includes manual keys and settings |
-| Theme | Changes the shared [editor preference](/en/dev/editor-preferences/) |
+| **Bind** | Picks a scene trigger in the viewport and binds it |
+| **Sync** | Fetches recorder samples and merges them into this local document |
+| **Clear** | Clears server captures; the resulting merge leaves manually added keys and scene settings in the open document |
+| **Export** | Sends the complete visual draft; unlike command export, includes manual keys and settings |
+| **Key View** / `K` | Keys the camera from the current view at the playhead |
+| Camera view / `C` | Looks through the scene camera at the playhead |
+| Play / `Space` | Plays the camera track in real time from the playhead |
+
+Other keys: `Delete` or `Backspace` deletes the selected manual key, `←` and `→` move the playhead 1 tick (10 with `Shift`), `Home` and `End` jump to the ends, and `1`–`7` switch sections. `Esc` stops a preview before it closes the editor.
 
 Captured keys have a ring marker and no delete button in the inspector, but can still be retimed or edited. Sync merges camera captures by sorted-list index, preserving the old edited time, look target and easing while replacing position, rotation and FOV. Actor capture sync preserves edited cue start time but regenerates pose/path content, duration, mode and facing. Inserting an earlier capture can therefore associate an existing edited key with a different sample. Clear/rebuild captures before making final manual adjustments.
 
 The default visual document starts at 160 ticks (8 seconds); applying a recorder view can increase that length but does not shrink it. The capture-only draft length is the latest sample tick plus 40 ticks (2 seconds), with a minimum of 60 ticks (3 seconds). Actor path duration is last sample time minus first sample time, with a minimum of 1 tick (0.05 seconds). Intermediate sample timestamps determine point order, not separate per-segment durations.
 
 Renaming an actor updates cue ownership keys, but not every look/face target reference. Removing an actor preserves captured cues and can cause the draft builder to recreate a default actor for remaining references. Review references after renaming or removing a cast member.
+
+### Keying from the viewport
+
+**Key View** converts the rendered camera into trigger space: position through the trigger transform, yaw relative to the trigger facing, pitch, roll and FOV as rendered. The key replaces any key at the same tick, keeping that key's easing, or is added with `ease_in_out_quad`. A key from the view has no look target, so its own rotation applies. Keying needs the bound trigger to be loaded in the client world.
+
+A left click within 16 pixels of a camera key's position in the viewport selects it, opens the camera section and moves the playhead to it. The world guide draws the selected key in gold.
+
+**Capture Player at Playhead** asks the server to record your own position for the `player` actor. **Capture Entity at Playhead** picks an entity in the viewport and records it for the actor selected in the actor section; the server accepts it only if it is a living entity within 96 blocks of you. In the actor section, **Bind to Entity From Viewport** sets the selected actor's definition from a picked entity: yourself becomes `triggering_player`, anything else `nearest_type` with that entity's type and UUID.
+
+### Previewing the camera track
+
+The camera view and playback evaluate only the camera track of the open document, on the client. Actors, world events, subtitles and camera effects need the server playback. Playback runs at 20 ticks per second of real time and stops at the document length.
+
+Look targets resolve as follows during a preview:
+
+| Target | Resolves to |
+| --- | --- |
+| `pos` | The point through the trigger transform, plus the offset |
+| `actor` with a `triggering_player` selector | Your position, plus the offset |
+| Any other `actor` | That actor's first cue with a position, through the trigger transform |
+| `walk_target` | Not resolved; the key's own rotation applies |
+
+The preview takes the camera at a higher priority than the viewport. Any viewport drag hands the camera back at the previewed pose.
 
 ### New-key defaults
 
@@ -90,11 +118,11 @@ New non-player actors default to `nearest` with radius 16; `player` uses `trigge
 
 ### Field entry and guides
 
-Enter vectors as exactly three numbers separated by commas or whitespace. Enter a path as semicolon-separated vectors, for example `0, 0, 0; 0, 0, -4`. Invalid vector rows are skipped; if no valid rows remain, the existing path is kept. Invalid scalar input generally retains the prior value, while integer fields apply their own lower bound. Float/double text parsing does not reject non-finite values, so use finite values when authoring.
+Vectors are three axis fields; drag an axis label to change the value. Fields with a `⌖` button pick a world point in the viewport and convert it into trigger space, rounded to 0.01 blocks. Rotations are edited as pitch, yaw and roll in the same three fields. Enter a path as semicolon-separated vectors, for example `0, 0, 0; 0, 0, -4`, or append the picked point with **Append Point From Viewport**. Invalid vector rows are skipped; if no valid rows remain, the existing path is kept. Number fields ignore text that is not a finite number and clamp to their own range.
 
 A blank optional ID or UUID clears it; an invalid nonblank value retains the previous one. Blank nullable text clears it. Subtitle colours accept hexadecimal text with an optional `#`; values of at most 6 digits gain opaque alpha, invalid input keeps the previous colour and colour 0 inherits the theme. Some controls display a convenience value: a camera node with no FOV displays 60, and editing that field makes it explicit.
 
-World guides render only for creative operators with the debug overlay closed and a bound trigger still present in the current world. They show camera key positions, straight connecting lines, actor paths and event points. Camera frusta are illustrative, not a sampled FOV-accurate preview; moving the playhead does not evaluate a scene. Changing the trigger's facing after capture also changes guide orientation, while the recorder retains its captured transform until rebound.
+World guides render only for creative operators with the debug overlay closed and a bound trigger still present in the current world. They show camera key positions, straight connecting lines, actor paths and event points. Camera frusta are illustrative; for the real framing, use the camera view. Changing the trigger's facing after capture also changes guide orientation, while the recorder retains its captured transform until rebound.
 
 ## Declaring it
 
@@ -108,7 +136,9 @@ The export response sends a recorder snapshot, not the exported visual document.
 
 ### Developer transport and ownership
 
-The ModernUI document publishes immutable draft snapshots through `SceneRecorderEditorController`. Packet sending is scheduled onto the client thread; editor actions run on the server thread. Server views are posted back to the UI thread. The controller clears its weak fragment reference and preview when the view is destroyed.
+The ModernUI document publishes immutable draft snapshots and the selected camera key's tick through `SceneRecorderEditorController`. Packet sending is scheduled onto the client thread; editor actions run on the server thread. Server views are posted back to the UI thread. The controller clears its weak fragment reference, the draft and any running preview when the view is destroyed.
+
+Editor actions are `SYNC`, `OPEN_BOUND_TRIGGER`, `CLEAR`, `BIND_TRIGGER`, `ADD_ACTOR_SELF`, `ADD_ACTOR_ENTITY` and `EXPORT_DRAFT`. Every action requires creative mode and permission level 2 on the server. `BIND_TRIGGER` carries the picked position, and `ADD_ACTOR_ENTITY` the picked entity's network id.
 
 Recorder-view transport truncates to 256 camera samples, 64 actor tracks and 256 points per actor. Actor keys are bounded to 64 characters, scene IDs to 256 and displayed export paths to 512. Server capture lists are not limited by these view caps, so capture-only export and a visual document reconstructed from the view can diverge above them. Compressed visual drafts use the 262144-byte read limit from the shared scene transport.
 
@@ -116,7 +146,8 @@ Camera replies are accepted whenever a bound session exists; they are not matche
 
 ## Checklist
 
-- Bind first, capture a start and end camera pose, then record the same actor key at two times. Confirm recapturing the same tick replaces the sample.
+- Bind first, key a start and end camera pose with `K`, then record the same actor key at two times. Confirm keying the same tick replaces the key.
+- Scrub with the camera view on and play the track with `Space`; compare it with the server playback.
 - Check local coordinates after rotation or rebinding and verify actor selectors in the exported file.
 - Retest capture sync after editing a captured key; confirm which values are regenerated and that manual keys remain.
 - Export before closing. Compare command export with visual export so the chosen path includes the intended edits.
@@ -127,4 +158,5 @@ Camera replies are accepted whenever a bound session exists; they are not matche
 
 - [Cinematic scene data](/en/wiki/cinematic-scene-data/) — every JSON field, enum and failure case.
 - [Cinematic scene runtime](/en/dev/cinematic-scenes/) — trigger rules, viewer eligibility, persistence and cleanup.
-- [Camera animation assets](/en/dev/camera-animations/) and [editor preferences](/en/dev/editor-preferences/) — reusable tracks and shared UI settings.
+- [Camera animation assets](/en/dev/camera-animations/) and the [developer editor workspace](/en/dev/editor-preferences/) — reusable tracks, viewport navigation and shared UI settings.
+- [Shot planner](/en/dev/shot-planner/) — client-only camera reels for recording clips, separate from server scenes.

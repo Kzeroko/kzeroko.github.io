@@ -99,6 +99,8 @@ NPC 已有其他配偶、已达最高好感或未达可结婚条件时，戒指�
 
 唯一 NPC 可覆盖 `customizeRootParentMenu`、`customizeCommandsParentMenu`、`customizeGiftParentMenu`。上下文包含 `ROOT`／`COMMANDS`／`GIFT`、可选关系层级、NPC 类型和性别。标签及拒绝文字在 `build` 时计算，要求谓词与动作在交互时接收真实玩家／NPC。
 
+另有三个钩子在对话进行中回应玩家，都在所属会话内执行。`onNpcParentMenuOpened` 在父菜单打开后调用：`ROOT` 只在交互打开时触发，从子菜单「返回」不会再次触发；`COMMANDS` 与 `GIFT` 每次打开都会触发。`onNpcDialogueStarted` 在 Blabber 为处理器选中的对话建立会话之后，收到该对话的 `NpcDialogueContext`；由覆盖规则选出的对话不带菜单路由。`onNpcTradeCompleted` 在对话交易面板完成一次买卖、交换物品并记录交易之后调用。从这些钩子调用的 `playDialogueEmote` 属于该会话，界面关闭时随之结束。
+
 | 构建器操作 | 行为 |
 | --- | --- |
 | `setPrompt`、`setUnskippable`、`clearChoices` | 替换提示／策略或清空选项。 |
@@ -147,4 +149,4 @@ NPC 已有其他配偶、已达最高好感或未达可结婚条件时，戒指�
 - [NPC 基础](/zh-cn/dev/npc/)
 - [NPC 跟随者](/zh-cn/dev/npc-followers/)
 - [NPC 情绪](/zh-cn/dev/npc-emotion/)
-- [人形预设与 NPC 服装](/zh-cn/wiki/humanoid-presets/)
+- [NPC 模型与服装](/zh-cn/dev/npc-assets/)

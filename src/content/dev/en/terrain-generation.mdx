@@ -3,7 +3,7 @@ title: "Terrain generation"
 description: "Registry ownership, deterministic landforms, world-tree persistence, chunk-local decoration and shader overlays."
 category: systems
 order: 178
-updated: 2026-09-30
+updated: 2026-10-16
 ---
 
 The terrain subsystem augments ReTerraForged with deterministic districts, prepared landmarks and volumetric geometry. It owns the default preset's registry bootstrap and a per-generator environment; these are internal implementation contracts. `TerrainAPI` is the one public surface: read-only queries about which landmark or district owns a position.
@@ -28,11 +28,33 @@ For bound registries, `remainingResources` removes resource entries whose IDs we
 
 The server-world constructor binds only an Overworld using `TerrainBiomeSource`. It requires the RTF context and engine, binds the source, then attaches the world-tree state before normal generation. Cyanide's replacement registry loader has a separate populate/filter bridge.
 
+### ReTerraForged corrections
+
+`RtfTerrainProviderMixin` preserves each component’s `baseScale` and `heightScale` when blending mixed terrain. `RtfCellSamplerCacheMixin` keys the cached cell by world lookup, horizontal position and climate completeness; nested calls cannot overwrite the outer sample. `RtfTileMixin` checks both coordinates before flattening a tile index, preventing an out-of-range neighbour from wrapping into another row. These are integration patches against the resolved ReTerraForged `0.0.6` dependency.
+
+`RtfHeightmapMixin` derives the mountain-chain blend threshold from mountain weight; zero weight disables chains. The packaged preset uses the following values. `IsekaiConfig` still controls custom-family enablement, weights, district admission, spacing and shape validation through the same validated terrain snapshot.
+
+| Preset control | Value |
+| --- | --- |
+| Every regional `baseScale` | `1.2` |
+| Plains / steppe weights | `9` / `8` |
+| Mountain weight / vertical scale | `1.5` / `1.65` |
+| Terrain region size | `1800` |
+| Global horizontal scale | `0.85` |
+| Temperature / moisture bias | `0.05` / `-0.05` |
+| Biome size | `320` |
+
+Guild placement reads its current structure-set resource; the preset no longer contains retired `isekaistructures` overrides for the guild or temple. New terrain uses the current preset without a compatibility generation mode.
+
 ### Admission, density and decoration
 
 District cells use a deterministic weighted permutation of enabled families. A failed family can yield to another family without rerolling the district admission chance. Candidate sites are stratified and surveyed against original biomes, terrain height and reservations. Full-shape acceptance precedes publication; maximum shape height must remain below `maxY - 32`.
 
 Great Plains and the World Tree take precedence. Prepared landmark surfaces blend into the original envelope; ordinary grounded shapes update RTF height/terrain and protect their full-strength interior from erosion. Skyreach, Firmament and Riftborne share the `TerrainFamily.elevated()` classification and bypass that ground-height mutation: their upper volumes enter through final density, leaving native aquifer inputs intact. Firmament conforms its foundation to the original ground except at planned receiving pools and waterfall feet. Riftborne retains its shaped valley and pedestal through final density. `LandformColumn.blendDetached` blends attached rock with the ground while detached masses thin at their own altitude, preserving the intervening gap.
+
+Structure earthworks come last. A district suppresses them only inside its actual footprint, including elevated and underground families; sharing the surrounding planning region does not reserve ordinary ground. `TerrainEngine.bind` collects `StructureEarthworks` from the world's placement calculator after the tree and atelier reservations. `apply` shapes every column no district sculpted toward the strongest `StructureEarthwork` reaching it, on top of landmark ground and before RTF erosion; the level core joins the erosion mask and the apron does not. In final density an earthwork column gets one exact surface on RTF's mapped height, as prepared landmarks do. Earthworks follow structure data, not `terrain.enabled`. The data format and survey are on [Structure placement data](/en/wiki/structure-placement/).
+
+`ExRandomSpread` decides each region on a `NaturalGround` thread. There `StructureEarthworks.strongest` finds nothing and `RtfWorldLookupMixin` routes `WorldLookup.applyCell` straight to `compute`, so neither earthworks nor tiles already holding levelled ground can change a decision. The asking thread only waits, so a decision requested from inside a terrain or biome sample never overwrites that thread's scratch cells, such as RTF's `CellSampler` cache or the `TerrainBiomeSource` scratch cell. The threads are daemons from an unbounded cached pool; a decision already made on such a thread runs nested decisions in place, and every decision is remembered per placement calculator.
 
 `TerrainNoiseConfigMixin` discovers an RTF cell marker even when nested in the temperature function, then wraps final density with `LandformDensity`. The wrapper maps both its original density and height through visitors; it is runtime-only and throws from `getCodecHolder`. `LandformColumn` merges solid intervals, preserves original caves below both grounded surfaces, and adds floating volumes without pulling them down to native ground.
 
@@ -106,6 +128,7 @@ The reader records validation failures in an `invalid` state instead of throwing
 | Persistence | Attach the saved tree before sampling can choose a conflicting reservation. New search options do not migrate saved geometry. |
 | Parallel generation | Keep plans immutable after construction and scratch buffers thread-local/caller-owned. Do not load neighbouring chunks from density or decoration. |
 | Geometry and biome agreement | Admission, density, surface palettes, decoration and locator confirmation must describe the same ownership. |
+| Structure earthworks | Decide placements only through `ExRandomSpread`, which moves to a `NaturalGround` thread. Work there must not wait on RTF tiles or on the thread that asked. Under engine locks, sample only through base sampling, which never asks for an earthwork. |
 | Location | Capture world/generator/border state on the server thread; the returned search callable uses descriptors and checks interruption. Results are horizontal positions, not safe teleports. |
 | Disabled content | Disabled generation still uses the bootstrap/preset. Zero weights do not bypass palette/config validation. |
 | Save compatibility | Preserve family order and palette IDs. Missing configured exotic bindings can reject an older saved biome source on bind. |
@@ -174,11 +197,14 @@ Uniforms update per frame. The helper normalises combined biome weights, adds lo
 
 ## Verifying
 
+Run `./gradlew.bat -I tools/terrain/verify.gradle checkTerrainTravel checkTerrainCoverage checkExoticTerrain`. The travel check samples three seeds, tests scaled blends and world/climate cache isolation, and raycasts through a flower into a solid wall. Its agent applies offline equivalents of the dependency hooks using production helpers; it does not launch Fabric. Coverage checks five seeds and four origins for an exotic within `6400` blocks. Repeat the in-game checks below to validate actual mixin application, generated chunks and visual traversal.
+
 Run `tools/terrain/check-exotic-volumes.ps1 -Export` for geometry, native cave cover and configuration extremes; `tools/terrain/render-exotic-volumes.py` renders sampled roof cutaways. `checkExoticTerrain` verifies RTF placement, Deep Dark exclusion, fertile Firmament caps, pool beds and water beneath bridges. `checkTerrainLocate` measures cold searches across multiple seeds and confirms the same family with a fresh generation engine; `checkTerrainCoverage` checks discovery distance. Run `checkSkyHydrology` for Skyreach and again with `-PhydrologyFamily=GARDEN_OF_THE_FIRMAMENT` and `-PhydrologyFamily=RIFTBORNE_MONOLITH` for their native-height/aquifer checks. The Riftborne check also requires empty space between the pedestal and suspended rock; `check-math.ps1` checks detached-volume blending against rising native terrain. `checkExoticShaders` accepts actual Eclipse/Bliss paths through `shaderRoots`, and `checkExoticGpu` renders surface skies and cavern mist. These offline checks do not replace an in-game Iris/Arona visual pass.
 
 - Create default single-player and dedicated-server worlds; verify owned registry entries, the RTF environment and Overworld source without opening the customisation screen.
 - Exercise invalid config, palette names/material types and combined geometry limits, including disabled families with invalid settings.
 - Compare positive/negative placement cells and different generation orders for identical seeds. Check full arches, blade separation, basin excavation and sky volumes without altered ground hydrology.
+- Generate the Adventurers' Guild and the Respawn Temple on a hillside, a coast and open water, from opposite chunk orders and with `/locate` first. The pad level, apron and building must agree, with no seam at chunk borders and no pad left without its building.
 - Generate adjacent chunks in opposite orders; inspect water sheets, vines, bridges, tree roots and crown seams without neighbouring chunk requests.
 - Restore the tree after config changes; test missing/invalid NBT, incompatible build height, early sampling and new reservation outside existing region files.
 - Test cave biomes, nonvanilla biomes, prepared woodland and sky altitude transitions against the documented branch order.
@@ -192,3 +218,5 @@ Run `tools/terrain/check-exotic-volumes.ps1 -Export` for geometry, native cave c
 - [Terrain configuration](/en/wiki/terrain-configuration/) — every setting and palette field.
 - [Persistent state](/en/dev/persistent-state/) — shared storage conventions and the tree exception.
 - [Wayfinding API](/en/dev/wayfinding-api/) — asynchronous location requests.
+
+The separate `worldHeight.overworldTopY` setting extends empty Overworld build space without stretching terrain noise or lowering the preset’s existing height; see [Remote Sky Garden runtime](/en/dev/remote-sky-garden/).

@@ -1,0 +1,192 @@
+---
+title: "Game events and announcements"
+description: "World-scoped schedules, the ModernUI journal and localised announcement documents."
+category: systems
+order: 56
+updated: 2026-10-07
+---
+
+IsekaiExpansion owns event definitions, descriptions and artwork. IsekaiCore supplies the schedule, synchronised current and upcoming occurrences and daily-cap calculation. Player-facing allowance rules are in [Levels and experience](/en/wiki/leveling/).
+
+## What it does
+
+`IsekaiGameEvents` registers three gameplay events. Current and upcoming events appear; presentation order keeps the beta thank-you first. The weekend event remains visible during the week, with its next opening. The same journal displays developer announcements and changelogs loaded from client resources. It opens from the pause menu, and from the title menu with announcements alone; both entries show how many entries are unread.
+
+| Event | Schedule | Presentation order |
+| --- | --- | --- |
+| `isekaiexpansion:ktm2_beta_test` | Permanent supporter and beta-tester thank-you. | 0 |
+| `isekaiexpansion:gacha_riven_sky` | 7 full in-game days from first availability in each world. | 10 |
+| `isekaiexpansion:adventurers_ascent` | Days 6 and 7 of every in-game week. | 20 |
+
+Adventurer's Ascent raises both daily EXP caps by 20% while active. It changes neither the maximum player level nor the EXP awarded by an individual reward.
+
+Core's public facade is `net.kzeroko.isekaicore.api.GameEventAPI`. `EventDefinition`, `EventSnapshot` and `GameEventHook` are public contract types in Core's `internal.gameevent` package; they are not separate facades. The Core contracts below were checked against local source and the rebuilt `0.4.0-build65` dependency.
+
+## Runtime model
+
+Register definitions and optional hooks during common initialization. Core freezes both registries when a server first evaluates events. Duplicate IDs and late registration throw. A definition can use a hook ID with no registered callback; schedule and cap effects still work.
+
+Each scoreboard component owns an immutable catalogue with current and upcoming occurrences. Active eligibility, hooks and cap totals are derived only from entries whose `active()` flag is true. Core evaluates at server startup, player join and every 20 ticks (1 second). It publishes the complete new state before invoking end/start callbacks, isolates callback failures, and sends changed snapshots to clients. Stopping the server ends active hooks. Active occurrences are derived again on restart; they are not saved as already-started state. There is no startup HTTP fetch. Duration events retain their first-availability tick in the world save, including after expiry; reconnecting and restarting cannot start them again.
+
+The journal reads `GameEventAPI.scheduledEvents(world)`, which returns current or next occurrences in event-ID order and omits completed one-time events. `GameEventAPI.activeEvents(world)` remains an active-only query for gameplay callers. `JournalSnapshots.capture` resolves titles, descriptions, schedule strings and interface copy on the Minecraft client thread, then publishes one immutable snapshot to ModernUI. The title menu, pause menu and journal refresh it once per second while open, and ModernUI consumes it on its own thread. Without a world the snapshot holds announcements alone. Disconnecting replaces the world-scoped event state.
+
+## Contracts
+
+### Schedule and allowances
+
+| Schedule | Contract |
+| --- | --- |
+| `PERMANENT` | Always active. |
+| `REAL_TIME` | UTC epoch milliseconds; start inclusive, end exclusive. |
+| `REAL_WEEKLY` | One configured weekday, bounded by UTC midnight. |
+| `REAL_MONTHLY` | Configured day 1–31; short months clamp to their last day by default, or skip with clamping disabled. |
+| `GAME_TIME` | Elapsed overworld day, starting at 1, plus a positive duration; exclusive end day. |
+| `GAME_DURATION` | Positive duration from first availability, measured in full 24000-tick game days. |
+| `GAME_WEEKLY` | Elapsed world days divisible by 7. |
+| `GAME_WEEKEND` | Days 6 and 7; both share the same exclusive end at the following day 1. |
+| `GAME_MONTHLY` | Day starting at 1 within a configurable 1–31-day month; default length 30. |
+
+Elapsed days use world age, not the daylight clock. Sleeping or setting daylight does not advance these schedules; unloaded worlds do not count down. `EventSnapshot` carries `active()`, `startGameTick()`, `endGameTick()`, `startEpochMillis()` and `endEpochMillis()`. Tick bounds are absolute world age; epoch bounds are UTC milliseconds. Unused clocks use zero bounds. The frontend rounds game-day countdowns up, shows the next opening for upcoming events and the recurring cadence for active weekend events. Real deadlines are displayed in the client's local time zone.
+
+Core stores the duration anchors in its scoreboard component:
+
+| NBT field | Type | Default | Validation and meaning |
+| --- | --- | --- | --- |
+| `firstAvailability` | compound | Empty | Event IDs map to their first start; at most 1024 entries load. |
+| `firstAvailability.<eventId>` | long | Created on first evaluation | Nonnegative world tick; invalid IDs or values are ignored. Removed definitions are pruned at startup. |
+
+Clients and servers must use the same current event packet schema.
+
+`withDailyExpCapBonus(combatPercent, lootPercent)` accepts integers from 0 to 1000 for each category. Active event percentages add. Effective cap is `base + floor(base × totalPercent / 100)`, saturated at the integer maximum. Core's `getDailyCombatBaseCap()` and `getDailyLootBaseCap()` read stored allowances; `getDailyCombatCap()` and `getDailyLootCap()` include active events. Setters still write base allowances. Earned counters, rest resets and grant amounts remain separate. Expansion's home-rest and fate reconciliation compares base allowances, so the event cannot compound itself.
+
+### Presentation and threads
+
+`FrontendAPI.EventPresentation(eventId, title, summary, description, artwork, accent, order)` supplies client metadata. The ID must match the server definition; title, short summary and description are non-null `Text`, artwork is a nullable texture `Identifier`, and accent is an ARGB integer. Cards sort by ascending integer order, then ID; missing presentations use order 100. Register from a client initializer before opening the page. Re-registering replaces that ID's metadata. Missing metadata uses a localised invitation title, a generic description and the theme accent.
+
+Built-in banners live in `assets/isekaiexpansion/textures/gui/events/`: `ktm2_beta_test.png`, `riven_sky.png` and `adventurers_ascent.png`, all 800 × 200. Generation prompts remain in `docs/event-art-manifest.json`. Apart from these banners and the pause menu's adventurer icon atlas, the journal draws its board, crest, chips, badges and dividers as vector shapes.
+
+The journal is a full screen of its own. The selected entry's banner, enlarged and dimmed, washes the background, crossfades on every selection and sits under slow star motes tinted with the entry's accent. A gilt board holds the crest masthead with its unread count, the category tabs, the illustrated entry list, the reader and a footer of control hints.
+
+| Journal element | Size or behaviour |
+| --- | --- |
+| Board | At most 920 × 560 dp, kept 14 dp inside each window edge. |
+| Entry list | 252 dp wide with 84 dp cards. |
+| Reader banner | 30% of the reader width, bounded to 136–188 dp; scrolls with the article. |
+| Compact layout | Below 640 dp of board width, the list and reader share one pane. |
+| Article change | 280 ms rise or slide over the outgoing article; article blocks enter 45 ms apart. |
+| Reduced motion | Fades last at most 90 ms; no travel, loops, banner zoom or count-up. |
+
+A card shows its kind chip, status or publication date and title, then the countdown, author or summary, over its right-aligned banner. Running events carry a pulsing live marker and unread entries a NEW badge. Hover sends one sheen across the card, and selection grows the accent bar and draws a gilt frame; only the light changes, so the card never moves under the cursor. Each tab shows its entry count and an ember dot while it holds unread entries. Tabs other than All hide while empty, and one indicator glides between them.
+
+The article opens with its banner settling from a slight zoom, then assembles in reading order: the event clock, the summary as a pull quote, benefit medallions that count up to their percentages, a divider and the literal document. Announcements and changelogs close with a seal. The banner drifts at under half the scroll speed, and a rail on the reader's edge tracks reading progress when the article is taller than its pane. The All tab keeps scheduled events first. In compact layout, choosing an entry opens the article and Escape returns to the list before leaving the journal. Removed or expired entries lose selection: the first unread entry takes over, or the first entry when none is unread, and a compact layout returns to the list.
+
+The event clock is a framed card set apart below the banner, never fused to its edge. It reports the time to the next boundary. Real-clock schedules count down in days and hours, hours and minutes, or minutes, and give the local deadline. Game-clock schedules count whole in-game days, rounded up, and estimate the play time left at 20 ticks per second. Its dial rings an hourglass; for a running occurrence with both bounds, the ring holds the share still to run and drains to it when the article opens. Permanent events show no clock. Benefits of an upcoming event are dimmed under a heading that says they apply once it opens.
+
+| Control | Action |
+| --- | --- |
+| Up / Down | Select the previous or next entry; in compact layout, move focus instead. |
+| Left / Right | Switch to the previous or next visible tab. |
+| Page Up / Page Down | Scroll the open article. |
+| Enter or click | Open an entry and mark it read. |
+| Escape | Leave a compact article, then the journal. |
+
+`JournalSnapshot` carries the entries, resolved interface copy and the announcement catalogue revision. The Minecraft thread publishes it through a volatile field; ModernUI alone builds, measures and animates views. Each entry separates content from live timing: a refresh that only moves a countdown or progress value rebinds the existing card and article in place, keeping the reading position and running animations. An article rebuilds only when its content or the catalogue revision changes. When the list changes, surviving cards glide to their new positions and new ones rise in. Rapid selections keep at most the incoming and outgoing article. Back-key callbacks read a volatile compact-reader flag and post `MuiModApi.postToUiThread` operations. Detach cancels animators and releases gradients. Each texture is looked up once per journal, a missing one included; the images stay owned by ModernUI's image store.
+
+### Read state
+
+Opening an entry by click or Enter marks it read at once. An entry the journal selected itself, on opening, after a tab change or while browsing with the arrow keys, is marked once it has stayed selected for 1.4 seconds. The journal opens on the first unread entry when there is one, and the masthead's mark-all action clears the rest. The masthead count, the tab dots and the unread badges on the pause tile and title entry all read the same state.
+
+Read keys name one occurrence or revision. An event's key is `event/<id>@<start>`, with its epoch-millisecond or game-tick start; a notice's is `notice/<id>@<date>`, followed by `#<version>` when the manifest has one. A recurring event reads as new each time it is scheduled again, and a notice when its date or version changes. The client keeps the 512 most recent keys in `config/isekaiexpansion-journal.json`, written on Minecraft's IO worker. The file belongs to the client, so every world and server shares it.
+
+### Announcement documents
+
+Announcements belong entirely to IsekaiExpansion's client resources. They do not create Core events, alter gameplay or require a server packet. Place one manifest at `assets/<namespace>/announcements/entries/<id>.json`; its identity is `<namespace>:<id>`. Bodies live at `assets/<namespace>/announcements/documents/<language>/<id>.txt`. Resource-pack priority chooses each manifest and each referenced document independently. Removing a resource removes its notice on the next successful reload.
+
+The bundled `developer_letter.json` contains a personal note from @Kzeroko in English and Simplified Chinese; its `author` is `@Kzeroko`. No sample changelog ships in Expansion; Release Studio exports update notices as client resources using the same `changelog` kind, with the pack version as `version` and `@Kzeroko` as `author`; it refuses pack versions longer than 32 characters. Its optional language variants use the fallback contract below. A minimal manifest is:
+
+```json
+{
+  "kind": "announcement",
+  "date": "2026-10-07",
+  "locales": {
+    "en_us": {
+      "title": "A few words from me",
+      "summary": "From @Kzeroko: beta testing, your feedback, and a thank-you.",
+      "document": "isekaiexpansion:announcements/documents/en_us/developer_letter.txt"
+    }
+  }
+}
+```
+
+A changelog that uses every optional field:
+
+```json
+{
+  "kind": "changelog",
+  "date": "2026-10-20",
+  "order": 10,
+  "author": "@Kzeroko",
+  "version": "v0.4.1",
+  "artwork": "my_pack:textures/gui/notices/update.png",
+  "locales": {
+    "en_us": {
+      "title": "Update notes",
+      "summary": "Fixes and polish for this release.",
+      "document": "my_pack:announcements/documents/en_us/update.txt"
+    }
+  }
+}
+```
+
+| Field | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `kind` | `enum(announcement, changelog)` | required | Chooses the announcement or update category. |
+| `date` | `string` | required | Valid ISO local date, such as `2026-10-07`. Display and sorting metadata; it does not schedule publication or expiry. |
+| `order` | `integer` | `100` | Signed 32-bit priority, ascending. Equal priorities sort by descending date, then ID. |
+| `author` | `string` | `null` | Nonblank single line, at most 64 characters, shown as the byline beside the date. Literal text. |
+| `version` | `string` | `null` | Nonblank single line, at most 32 characters. Shown on a chip and in the card's meta line, and part of the read key. Literal text. |
+| `artwork` | `identifier` | `null` | When supplied, must name `textures/*.png`. A texture no resource provides is dropped at reload with a warning; the entry still loads with the themed banner. |
+| `locales` | `object` | required | At most 16 variants, including `en_us`. Codes match `[a-z0-9_]{2,32}`. See the copy fields below. |
+| `locales.<language>.title` | `string` | required | Nonblank single line, at most 160 characters. Literal text, not a translation key. |
+| `locales.<language>.summary` | `string` | required | Nonblank single line, at most 320 characters. Literal text. |
+| `locales.<language>.document` | `identifier` | required | Existing UTF-8 `.txt` resource beneath `announcements/documents/`. |
+
+Documents preserve leading spaces, repeated spaces, tabs, blank lines and trailing whitespace. Only a leading UTF-8 BOM and line endings are normalised: CRLF and CR become LF. Text wraps to the reader width. Markup, translation-key syntax and links are displayed literally. Empty or whitespace-only documents are invalid. The selected Minecraft language resolves each entry independently, falling back to `en_us`; the lookup is case-insensitive.
+
+| Resource bound | Limit |
+| --- | --- |
+| Manifest | 32768 bytes |
+| Document | 65536 bytes per language |
+| Variants | 16 per entry |
+| Loaded entries | 256, considered in resource-ID order |
+
+Unknown manifest or copy fields, invalid values, missing documents, malformed UTF-8 and oversize resources reject the entire entry with a warning. A bad override does not fall back to a lower-priority manifest. Other entries still load. Preparation reads resources off the UI thread; apply atomically replaces the immutable catalogue and increments its revision. A resource reload or language change refreshes the open journal on its next presentation update.
+
+The mod calls `AnnouncementAPI.initClient()` once during client initialization to register its resource loader. `net.kzeroko.isekaiexpansion.api.client.AnnouncementAPI.snapshot(language)` returns a client-only immutable `Snapshot(revision, entries)`. Each `Announcement` contains ID, kind (`ANNOUNCEMENT` or `CHANGELOG`), date, order, nullable artwork, nullable author, nullable version, title, summary and body. Artwork is null when its texture was dropped at reload. Calls can read the published snapshot from any client-side thread; before the initial reload it is empty. Author content through resources, not runtime registration. The API does not read Minecraft's language manager for you.
+
+## Extending it
+
+Register a common definition through Core and matching presentation through Expansion's client facade. The following calls belong in their respective common and client initializers:
+
+```java
+GameEventAPI.register(EventDefinition.permanent("my_pack:expedition", "my_pack:progression")
+        .withDailyExpCapBonus(20, 20));
+
+FrontendAPI.registerEvent(new FrontendAPI.EventPresentation("my_pack:expedition",
+        Text.translatable("my_pack.event.title"), Text.translatable("my_pack.event.summary"),
+        Text.translatable("my_pack.event.description"),
+        new Identifier("my_pack", "textures/gui/events/expedition.png"), 0xFFE5C785, 30));
+```
+
+Use `GameEventAPI.registerHook(id, hook)` for server callbacks and `GameEventAPI.isActive(world, id)` for eligibility. Callers use the facade rather than editing runtime registries. Presentation metadata never grants eligibility or spends summon currency.
+
+## Verifying
+
+Run Core's `EventScheduleTest` for UTC boundaries, short months, game months starting at 1, invalid schedules and cap rounding/overflow; rebuild Core before compiling Expansion. Check event start/end, reconnect, server restart and a second world. Verify a 7-day run introduced midway through an old world receives 7 full days, survives a save/reload and stays expired. Check days 5/6/7/8 around a weekend and ensure the transition from day 6 to day 7 does not restart its hooks. Run `EventSyncTest` to verify packet round-trips, weekday visibility and active-only combat and loot caps. On weekdays the journal must show the next weekend without granting its bonus. An allowance of 100 becomes 120 while the event is active, and 80 already earned stays 80 through both transitions. Check home-rest/fate changes during the event and verify repeated ticks leave the stored base unchanged.
+
+Run `AnnouncementParserTest` for literal whitespace, locale fallback, invalid metadata, author and version bounds, UTF-8 bounds and the bundled bilingual documents. In game, open the journal from the pause menu and from the title menu; check every tab, keyboard browsing, rapid selections and independent scrolling. Confirm that NEW badges, the masthead count and both menu badges clear on a click, after the 1.4-second dwell and with mark all as read, and stay cleared after a restart. Watch an active event's countdown and dial advance without restarting the article's animations, with the clock card clear of the banner. Resize across 640 dp while reading, then test compact Back/Escape, English and Chinese wrapping, UI scale and reduced motion. Override a document with a resource pack, reload while its article is open and remove an entry or let its event expire. Compilation and parser tests do not replace this visual acceptance pass.
+
+## Related
+
+- [Levels and experience](/en/wiki/leveling/)
+- [Progression runtime](/en/dev/leveling/)
